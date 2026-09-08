@@ -1,9 +1,9 @@
 # Product Requirements Document
 
 **Working title:** _(unnamed — see Open Questions)_
-**Status:** Draft v0.1
+**Status:** Draft v0.2
 **Owner:** Holden
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-08
 
 ---
 
@@ -29,9 +29,10 @@ The result is reactive ownership: capital spending is discovered rather than pla
 | Listings and syndication | Capital asset inventory and lifecycle |
 | Applications and screening | CapEx forecast and reserve planning |
 | Lease documents and e-signature | Tax liability estimation and scenario planning |
-| Rent collection and payment tracking | Recurring and one-off maintenance scheduling |
+| Rent collection and payment processing | Recurring and one-off maintenance scheduling |
 | Tenant messaging | Vendor/contact book by trade |
-| | Property operational facts (codes, utilities, service days) |
+| | Building operational facts (codes, utilities, service days) |
+| | Rent roll and rent-received tracking (manual — no money moves) |
 
 The one-line pitch: *Zillow handles the money coming in. This handles what's going to break, when, what it costs, and what it does to your taxes.*
 
@@ -47,7 +48,7 @@ These are not three products. They are one multi-tenant application with three k
 
 ## 4. Non-goals (v1)
 
-- Rent collection, payment processing, or payment tracking
+- Rent collection or payment processing. **No money moves through this product**, and no payment method is stored. Recording whether the expected rent arrived is in scope (F1); moving it is not.
 - Lease document generation, storage, or e-signature
 - Listing creation or syndication
 - Tenant screening or background checks
@@ -71,27 +72,50 @@ These are not three products. They are one multi-tenant application with three k
 | Concept | Definition |
 |---|---|
 | **Organization** | The tenancy boundary. Owns everything. Has a plan (`free` / `premium`). |
-| **Property** | A physical address. May contain one or more units (e.g. a duplex). |
-| **Unit** | A separately-leased space within a property. |
-| **Capital item** | A depreciating physical asset with a finite service life — furnace, roof, water heater, carpet, appliances. |
+| **Building** | A physical address. Contains one or more units — a duplex is one building and two units. Owns whatever is structurally shared: roof, gutters, siding, foundation, and usually the operational facts. |
+| **Unit** | A separately-leased space within a building. Carries its own rent, lease end, and occupancy. |
+| **Capital item** | A depreciating physical asset with a finite service life — furnace, roof, water heater, carpet, appliances. **Scoped to a building when it is shared** (roof, gutters) **or to a single unit when it is not** (a dishwasher, the flooring in unit B). |
 | **Confidence** | Whether a capital item's install date is `estimated` (inferred from build year or a guess) or `audited` (physically confirmed by the user). Displayed differently and treated differently by the forecast. |
-| **Task** | Something that needs doing. Recurring (air filter, gutters, HVAC service) or one-off. `unscheduled` or `scheduled`. |
+| **Task** | Something that needs doing. Recurring (air filter, gutters, HVAC service) or one-off. `unscheduled` or `scheduled`. Scoped to a building or a single unit, the same way a capital item is. |
+| **Rent period** | One month of expected rent for one unit. Carries the amount expected *when the period opened* and whether it was received. |
 | **Contact** | A vendor, tradesperson, or professional. Has one or more trade tags. |
 | **Replacement event** | A projected future capital expenditure, derived from a capital item's install year plus expected service life. |
 
 ## 7. Feature areas
 
-### F1 — Properties & units _(v1)_
+### F0 — Portfolio dashboard _(v1)_
 
-- Property list as cards: address, unit count, monthly rent roll, 12-month projected capex, tasks due, and a "systems life used" indicator.
-- Property detail page as the primary workspace.
-- **Property facts card:** access codes (master smart-lock, door, lockbox) masked by default with a reveal action; trash/recycling day; lawn care and snow contacts; gas, electric, water/sewer, and internet providers with account reference stubs; average monthly bill per utility with an owner-paid subtotal.
-- Basic unit records: rent amount, lease end date, occupied/vacant. Entered manually, purely for context and forecasting — not a lease system.
+The landing screen, and the surface this product is opened for. Five stat tiles above the
+building cards:
+
+- **Open tasks** — unscheduled work across every building.
+- **Upcoming tasks** — scheduled work falling inside the next 30 days.
+- **End-of-life warnings** — capital items at or past expected service life, with estimated
+  install years flagged as estimates rather than mixed in silently.
+- **Estimated tax liability** — the current-year figure from F4, carrying the same disclaimer
+  it carries on its own page.
+- **Cash flow** — rent received against rent expected, less recorded spend, month to date and
+  year to date.
+
+Every tile links through to the surface that owns the number, and no figure appears here that
+cannot be traced by clicking it. The last two tiles are the constrained ones: the tax tile
+depends on F4, and the cash flow tile depends on the rent periods in F1 plus whatever expense
+entry survives Open Question 5.
+
+### F1 — Buildings & units _(v1)_
+
+- Building list as cards: address, unit count, monthly rent roll, 12-month projected capex, tasks due, and a "systems life used" indicator.
+- Building detail page as the primary workspace.
+- **Building facts card:** access codes (master smart-lock, door, lockbox) masked by default with a reveal action; trash/recycling day; lawn care and snow contacts; gas, electric, water/sewer, and internet providers with account reference stubs; average monthly bill per utility with an owner-paid subtotal.
+- Unit records: rent amount, lease end date, occupied/vacant. Entered manually — this is not a lease system.
+- **Rent roll with a Paid checkoff.** Each occupied unit opens a monthly rent period carrying the amount expected. Marking it paid is one click; a partial or late payment records an actual amount and date. This is a record of what arrived, not a payment rail — and it is what feeds the cash flow tile (F0) and the annual income figure the tax planner needs (F4), for one click per unit per month.
+- **The expected amount is snapshotted when the period opens,** never read live from the unit's current rent. A rent increase must not rewrite last year's history, or the tax page built on it.
 
 ### F2 — Capital items & lifecycle _(v1 — core differentiator)_
 
 - Add-equipment checklist modal grouped by Kitchen / Laundry / HVAC & water / Envelope / Interior & systems. Per-group "select all."
-- Each checklist item carries a default service life and seeds an estimated install year from the property's build year.
+- Each checklist item carries a default scope (building or unit), a default service life, and an estimated install year seeded from the building's build year.
+- **Scope is a per-item choice, not a fixed rule.** Envelope items are building-scoped and Kitchen / Laundry / Interior finishes are unit-scoped, but HVAC & water cannot be settled by catalog group: a duplex may run separate furnaces on a shared water main, or one shared boiler. The checklist proposes; the user confirms.
 - Capital items table: install year with an `ESTIMATED` (dashed) or `AUDITED` (solid) badge, age-vs-expected-life bar, projected replacement year, estimated replacement cost, status.
 - A **Confirm** action flips an item to audited and prompts for the actual install date and cost.
 - Estimated vs audited is not cosmetic: the forecast should widen its confidence range for estimated items and surface "audit these N items to tighten your forecast" as a prompt.
@@ -105,7 +129,8 @@ These are not three products. They are one multi-tenant application with three k
 
 ### F4 — Tax planner _(v1, simplified)_
 
-- Schedule E–shaped statement per property and portfolio-wide, populated by manual income and expense entry.
+- Schedule E–shaped statement per building and portfolio-wide, populated by the rent periods from F1 plus expense entry (see Open Question 5).
+- **Shared capital items are allocated across units by a stated, visible rule.** A roof serves every unit in the building, so its depreciable basis is split — and the split has to be inspectable on the page, like every other figure here.
 - Repair-vs-improvement classification toggle per planned capital item, recomputing estimated taxable income live.
 - Straight-line depreciation on capitalized improvements; the de minimis safe harbor threshold as a configurable setting.
 - Timing levers: move a discretionary project between tax years and see the delta.
@@ -125,7 +150,7 @@ _Deferred to v1.1:_ cost segregation, bonus depreciation on short-life property,
 
 - Vendors with multiple trade tags, filterable.
 - Trade taxonomy: handyman, general contractor, HVAC, plumber, electrician, roofer, painter, landscaper, snow removal, pest control, turnover cleaner, locksmith, chimney, appliance repair, realtor/leasing agent, property manager, CPA, attorney, inspector.
-- Contacts are org-scoped and reusable across properties.
+- Contacts are org-scoped and reusable across buildings.
 
 ### F7 — Quote requests _(premium, v2)_
 
@@ -149,7 +174,7 @@ _Deferred to v1.1:_ cost segregation, bonus depreciation on short-life property,
 
 | Release | Contents | Definition of done |
 |---|---|---|
-| **v0 — Personal** | F1, F2, F3, F5, F6, F9 (auth + orgs, no billing) | Holden's two duplexes fully entered; the forecast is trusted enough to act on |
+| **v0 — Personal** | F0, F1, F2, F3, F5, F6, F9 (auth + orgs, no billing) | Holden's two duplexes and four units fully entered, rent tracked monthly; the forecast is trusted enough to act on |
 | **v0.5 — Demo** | Seeded demo org, public URL, public repo, README with architecture notes | A recruiter can click a link and understand the product in 90 seconds |
 | **v1 — Paid** | F4, Stripe billing, onboarding flow | First non-Holden org completes setup unassisted |
 | **v2 — Premium** | F7, F8 | — |
@@ -167,39 +192,51 @@ organizations (id, name, plan, is_demo)
 users (id, email)
 memberships (user_id, org_id, role)
 
-properties (id, org_id, address, build_year, ...)
-property_facts (property_id, trash_day, providers…, avg_bills…, codes… )
-units (id, org_id, property_id, rent, lease_end, status)
+buildings (id, org_id, address, build_year, ...)
+building_facts (building_id, trash_day, providers…, avg_bills…, codes… )
+units (id, org_id, building_id, rent, lease_end, status)
 
-capital_items (id, org_id, property_id, type, install_year,
+rent_periods (id, org_id, unit_id, period_month, amount_expected,
+              amount_received, received_on)
+
+capital_items (id, org_id, building_id, unit_id?, type, install_year,
                confidence, expected_life_years, replacement_cost)
-capital_item_types (slug, group, default_life_years, default_cost)
+capital_item_types (slug, group, default_scope, default_life_years, default_cost)
 
-tasks (id, org_id, property_id, title, trade_tag, status,
+tasks (id, org_id, building_id, unit_id?, title, trade_tag, status,
        due_date, assignee_contact_id, recurrence, priority, est_cost)
 
 contacts (id, org_id, name, phone, email, notes)
 contact_tags (contact_id, tag)
 
-transactions (id, org_id, property_id, date, amount,
+transactions (id, org_id, building_id, unit_id?, date, amount,
               schedule_e_category, classification)
 ```
 
 Every domain table carries `org_id`, and every index leads with it.
+
+`unit_id?` is nullable, and **null means the row belongs to the whole building** — the roof and
+the gutter cleaning are not unit B's. That one column is what lets a duplex be two rentals sharing
+an envelope rather than two unrelated addresses, and it is why F2 asks for scope at add time and
+F4 has an allocation rule.
+
+`rent_periods.amount_expected` is a snapshot taken when the period opens, not a foreign key to
+`units.rent`. Rent changes; last year's Schedule E does not.
 
 ## 11. Constraints & risks
 
 - **No Zillow integration path.** Manual entry is a real onboarding cost and the most likely reason a trial user churns. Onboarding speed is a first-class design problem, not a polish item.
 - **Tax logic is the highest-risk surface.** Wrong numbers on a tax page are worse than no tax page. Every figure needs to be traceable to its inputs, and the disclaimer needs to be unmissable.
 - **PII custody.** Once other landlords' data is in the system, this is a data-processing relationship. Do not store SSNs, full bank details, or screening reports. Access codes are sensitive and should be encrypted at rest and masked by default.
+- **Shared-cost allocation is part of the tax surface.** A roof serves every unit in a building, so its depreciable basis has to be split by a rule the user can see and check. An implicit or undocumented split is the same class of failure as a wrong number.
 - **Cost estimates go stale.** Replacement costs vary by region and year. Defaults need a visible "last updated" and must be user-overridable.
 - **Single-developer bus factor** on a product other people would depend on for planning.
 
 ## 12. Open questions
 
 1. **Name.** Needed before the demo URL and repo go public.
-2. **Pricing shape.** Per-unit, per-property, or flat per-org? Per-unit aligns price with value but penalizes exactly the small landlord who is the design target.
+2. **Pricing shape.** Per-unit, per-building, or flat per-org? Per-unit aligns price with value but penalizes exactly the small landlord who is the design target.
 3. **Free tier or trial?** A permanent free tier at 1–2 units would help adoption and make the tester phase honest. A trial converts better.
 4. **How opinionated should default service lives be?** Regional variance is real. Ship national defaults and let users override, or ask for climate zone during onboarding?
-5. **Does v1 need income/expense entry at all,** or can the tax planner run on capital items plus a single annual income figure per property? The lighter version ships months earlier.
-6. **Multi-property portfolio rollup** — is portfolio-level forecasting a v1 view or does per-property suffice initially?
+5. **Does v1 need expense entry?** The income half is settled: rent periods (F1) produce both monthly cash flow and the annual figure the tax planner needs, at one click per unit per month, without a transaction ledger. Money-out is still open — the cash flow tile (F0) and a Schedule E statement both want it, and full categorized entry is the largest scope item left in v1.
+6. **How deep does portfolio-level forecasting go?** Settled: the dashboard (F0) is the landing screen, so rollup is in v1. Still open is whether the 10-year forecast and the reserve projection get a portfolio view in v1, or stay per-building until v1.1.
