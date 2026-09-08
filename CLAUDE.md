@@ -113,7 +113,7 @@ every screen is undefined and has to be specified, not improvised (#12).
 | Land vs building basis | Split on `buildings` from the start (#9). Depreciation applies to the building portion only, so without it the tax planner is wrong in year one, not year two |
 | Auth | Better Auth + its `organization` plugin, orgs and memberships in our own Postgres ([ADR-0004](docs/adr/0004-auth-provider.md)). Google OAuth only in v0 — no passwords, no email provider, no domain. Rejected: Auth.js (v5 still beta, no org primitive) and Clerk (would own the tenancy boundary) |
 | Name | **CapExWise**, `capexwise.com` registered 2026-09-08 (#3). Repository, board and Vercel project take the same name |
-| Trademark | **Do not register yet** (#3). Rights come from use in commerce, and an Intent-to-Use filing keeps priority available later, so registration waits for the first paying customer, public launch, or real branding spend. "CapExWise" is suggestive-to-descriptive in a category already full of CapEx-named tools, so it is a weak mark and early registration buys little. **Clearance is a different thing and is not deferred** — it happens before #32 and before v0.5. Not legal advice; an attorney gives the real opinion |
+| Trademark | **Do not register yet** (#3). Rights come from use in commerce, and an Intent-to-Use filing keeps priority available later, so registration waits for the first paying customer, public launch, or real branding spend. "CapExWise" is suggestive-to-descriptive in a category already full of CapEx-named tools, so it is a weak mark and early registration buys little. **Clearance came back clear on 2026-09-08** and no longer blocks #32 or v0.5 — USPTO turned up nothing on the exact string or on confusingly similar marks, and the sweep for unregistered common-law users found none. Use ™ freely; **® is unlawful before registration**. Not legal advice; an attorney gives the real opinion before any money is spent on branding |
 | Dark mode | **Out of scope through v1** ([tokens](docs/ui/tokens.md) §12). The palette is warm paper: four surfaces within 5% luminance of each other, hierarchy carried by 1px borders rather than shadow, status as dark-on-pale-tint. An inversion is a second design needing its own accessibility pass, not a token swap. Reversal stays cheap because every value is a semantic custom property and no component references a primitive |
 | Typeface | **IBM Plex Sans + IBM Plex Mono**, self-hosted via `next/font`, weights 400/500/600 ([components](docs/ui/components.md) §12). Every number that is a *value* renders in the mono; everything else in the sans. Rejected: the prototype's system stack — Arial and Segoe UI have no Medium, so 45 deliberate 500/600 weights collapse to two on Windows, and their digits are unrelated to the mono's |
 | Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
@@ -124,11 +124,6 @@ every screen is undefined and has to be specified, not improvised (#12).
 - **Whether v1 needs expense entry** (#13, question 5). The income half is settled — rent periods
   give both monthly cash flow and the tax planner's annual figure for one click per unit per month
   (#48). Money-out is what is still open, and it is the largest scope item left in v1.
-- **Finishing trademark clearance** (#3). USPTO turned up nothing for the exact string on
-  2026-09-08, and a web sweep found no product using the name. What is left is the half that
-  actually blocks a registration: confusingly *similar* marks, and unregistered common-law
-  users. Finish before #32 and before v0.5 — renaming is free today and expensive once a demo
-  URL is public.
 
 ## Live state is not duplicated here
 
