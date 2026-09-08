@@ -592,11 +592,11 @@ Contacts are org-scoped and reusable across buildings, per F6. `org_id` on `cont
 redundant through `contacts` and present anyway, because ADR-0003's rule is that a query proves it
 is scoped without a join — including this one.
 
-### Transactions — specified, not yet scheduled
+### Transactions — scheduled for v1
 
-Open question 5 in the PRD has not been answered: whether v1 needs expense entry. The shape is
-settled here so that answering it is a decision about scope rather than about schema, and **the
-migration lands with the feature, not before**.
+PRD open question 5 is answered: **v1 has expense entry**, so this migration ships with the
+feature rather than being held. The shape below was settled before the scope decision, which is
+why answering it cost no schema design.
 
 ```sql
 create table transactions (
@@ -783,8 +783,6 @@ for by #48, because they are the ones a naive test misses:
 
 ## 10. Open questions this document does not close
 
-- **Expense entry in v1** (#13, question 5). §6 fixes the shape of `transactions`; whether the
-  migration ships in v1 is a scope decision, not a schema one.
 - **The encryption scheme for access codes** (#31). §3 fixes where the value lives, that it is
   `bytea`, and that `key_version` is per row. `pgcrypto` versus application-level envelope
   encryption is still open, and so is whether utility `account_ref` joins it.

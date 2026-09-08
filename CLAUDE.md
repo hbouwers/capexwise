@@ -116,14 +116,15 @@ every screen is undefined and has to be specified, not improvised (#12).
 | Trademark | **Do not register yet** (#3). Rights come from use in commerce, and an Intent-to-Use filing keeps priority available later, so registration waits for the first paying customer, public launch, or real branding spend. "CapExWise" is suggestive-to-descriptive in a category already full of CapEx-named tools, so it is a weak mark and early registration buys little. **Clearance came back clear on 2026-09-08** and no longer blocks #32 or v0.5 — USPTO turned up nothing on the exact string or on confusingly similar marks, and the sweep for unregistered common-law users found none. Use ™ freely; **® is unlawful before registration**. Not legal advice; an attorney gives the real opinion before any money is spent on branding |
 | Dark mode | **Out of scope through v1** ([tokens](docs/ui/tokens.md) §12). The palette is warm paper: four surfaces within 5% luminance of each other, hierarchy carried by 1px borders rather than shadow, status as dark-on-pale-tint. An inversion is a second design needing its own accessibility pass, not a token swap. Reversal stays cheap because every value is a semantic custom property and no component references a primitive |
 | Typeface | **IBM Plex Sans + IBM Plex Mono**, self-hosted via `next/font`, weights 400/500/600 ([components](docs/ui/components.md) §12). Every number that is a *value* renders in the mono; everything else in the sans. Rejected: the prototype's system stack — Arial and Segoe UI have no Medium, so 45 deliberate 500/600 weights collapse to two on Windows, and their digits are unrelated to the mono's |
+| Expense entry | **In v1** (PRD §12, question 5). Rent periods gave money-in; without money-out the F0 cash flow tile is half a number and the F4 Schedule E runs on assumptions. `transactions` was already fully specified in [data-model](docs/data-model.md) §6, so this cost no schema design — the migration ships with the feature. Still the largest single scope item in v1, and it adds a screen the prototype never drew (#12) |
 | Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
 
 ## Still open — check before building on them
 
 - **Pricing shape, and free tier vs trial** (#13). Changes the plan gate and the onboarding funnel.
-- **Whether v1 needs expense entry** (#13, question 5). The income half is settled — rent periods
-  give both monthly cash flow and the tax planner's annual figure for one click per unit per month
-  (#48). Money-out is what is still open, and it is the largest scope item left in v1.
+- **How opinionated the default service lives are** (#13, question 4). National defaults with an
+  override, or ask for a climate zone during onboarding. Drives the `capital_item_types` seed, so
+  it wants answering before #34 rather than after.
 
 ## Live state is not duplicated here
 

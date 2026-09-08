@@ -99,8 +99,8 @@ building cards:
 
 Every tile links through to the surface that owns the number, and no figure appears here that
 cannot be traced by clicking it. The last two tiles are the constrained ones: the tax tile
-depends on F4, and the cash flow tile depends on the rent periods in F1 plus whatever expense
-entry survives Open Question 5.
+depends on F4, and the cash flow tile depends on the rent periods in F1 plus the expense entry
+settled in Open Question 5.
 
 ### F1 — Buildings & units _(v1)_
 
@@ -129,7 +129,7 @@ entry survives Open Question 5.
 
 ### F4 — Tax planner _(v1, simplified)_
 
-- Schedule E–shaped statement per building and portfolio-wide, populated by the rent periods from F1 plus expense entry (see Open Question 5).
+- Schedule E–shaped statement per building and portfolio-wide, populated by the rent periods from F1 plus the expense entry settled in Open Question 5.
 - **Shared capital items are allocated across units by a stated, visible rule.** A roof serves every unit in the building, so its depreciable basis is split — and the split has to be inspectable on the page, like every other figure here.
 - Repair-vs-improvement classification toggle per planned capital item, recomputing estimated taxable income live.
 - Straight-line depreciation on capitalized improvements; the de minimis safe harbor threshold as a configurable setting.
@@ -242,5 +242,5 @@ F4 has an allocation rule.
 2. **Pricing shape.** Per-unit, per-building, or flat per-org? Per-unit aligns price with value but penalizes exactly the small landlord who is the design target.
 3. **Free tier or trial?** A permanent free tier at 1–2 units would help adoption and make the tester phase honest. A trial converts better.
 4. **How opinionated should default service lives be?** Regional variance is real. Ship national defaults and let users override, or ask for climate zone during onboarding?
-5. **Does v1 need expense entry?** The income half is settled: rent periods (F1) produce both monthly cash flow and the annual figure the tax planner needs, at one click per unit per month, without a transaction ledger. Money-out is still open — the cash flow tile (F0) and a Schedule E statement both want it, and full categorized entry is the largest scope item left in v1.
+5. **Does v1 need expense entry?** Settled: **yes.** Rent periods (F1) already give money-in; without money-out the cash flow tile (F0) is half a number and the Schedule E statement (F4) runs on assumptions rather than on records. `transactions` is fully specified in [`data-model.md`](data-model.md) §6, so this is a scope decision rather than a design one and the migration ships in v1 with the feature. It remains the largest single scope item in v1, and it adds a screen the prototype never drew (#12).
 6. **How deep does portfolio-level forecasting go?** Settled: the dashboard (F0) is the landing screen, so rollup is in v1. Still open is whether the 10-year forecast and the reserve projection get a portfolio view in v1, or stay per-building until v1.1.
