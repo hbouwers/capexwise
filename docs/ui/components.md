@@ -10,8 +10,10 @@ settles the *names* and the *boundaries*, so the per-screen specs
 ([#12](https://github.com/hbouwers/capexwise/issues/12)) can say "a `DataTable` of `CapitalItemRow`"
 instead of describing markup again on six screens.
 
-Once `components/` exists it is the source of truth for the implementation. This stays the source of
-truth for **what exists, what it is called, which layer it lives in, and which rule it owns.**
+`src/components/ui/` exists as of [#15](https://github.com/hbouwers/capexwise/issues/15) and is the
+source of truth for the implementation. This stays the source of truth for **what exists, what it is
+called, which layer it lives in, and which rule it owns.** The domain and composed layers in §6 and
+§7 are not built yet.
 
 ---
 
@@ -119,23 +121,54 @@ left `--spacing` at Tailwind's 4px so that shadcn's internals stay predictable �
 density lands **here**, as a known list of overrides, rather than as a global rescale nobody can
 audit.
 
-Measured from the prototype against shadcn's current defaults:
+Measured from the prototype against shadcn's defaults, then **re-measured at
+[#15](https://github.com/hbouwers/capexwise/issues/15) against what `shadcn init` actually
+installed** — 4.21.0, base `radix`, preset `nova`. That version is markedly denser than the one this
+table was first written against, which changes the answer in both directions: half the planned
+overrides turned out to be unnecessary, and two corrections nobody had predicted appeared.
 
-| Primitive | shadcn default | Prototype | Override |
+| Primitive | Installed default | Prototype | Applied |
 | --- | --- | --- | --- |
-| `Button` default | `h-9`, `px-4`, 14px | 33px, `10px 18px`, 12.5px/500 | `h-8 px-4 text-sm font-medium` |
-| `Button` sm | `h-8`, `px-3` | 29px, `8px 14px` | `h-7 px-3.5 text-sm` |
-| `Input` | `h-9`, `px-3` | 33px, `10px 12px`, 12.5px | `h-8 px-3 text-sm` |
-| `Select` trigger | `h-9` | 33px page / 26px in-table | `h-8`, plus a `dense` `h-7` for table rows |
-| `Badge` | `px-2.5 py-0.5`, 12px | `3px 8px`, 10px mono/500 | `px-2 py-[3px] font-mono text-micro tracking-label` |
-| `Card` | `py-6`, `gap-6` | 18–22px padding | `p-5`, `gap-4` |
-| `Dialog` | `max-w-lg`, `rounded-lg`, `p-6` | 900/920px, `--radius-xl`, `22px 26px` | Per-modal width; sectioned padding, see §7 |
-| `Table` cell | `p-2` | 9–11px vertical, 12–14px horizontal | `py-2.5 px-3` |
-| `Tabs` list | `bg-muted p-1 rounded-lg` | `4px` track, 9px outer / 6px inner radius | Radius only — the shape already matches |
+| `Button` default | `h-8`, `px-2.5`, `rounded-lg` | 33px, `10px 18px`, 12.5px/500 | `px-4`, `rounded-md`. Height and weight already matched |
+| `Button` sm | `h-7`, `px-2.5`, `text-[0.8rem]` | 29px, `8px 14px` | `px-3.5 text-sm`. `text-[0.8rem]` is 12.8px, off the scale |
+| `Input` | `h-8`, `px-2.5`, `text-base` | 33px, `10px 12px`, 12.5px | `px-3 text-sm`, `rounded-md` |
+| `Select` trigger | `h-8`, and a built-in `size="sm"` at `h-7` | 33px page / 26px in-table | `rounded-md`, `pl-3`. **The dense variant already exists** — no `dense` prop needed |
+| `Badge` | `h-5`, `px-2 py-0.5`, 12px sans, `rounded-4xl` | `3px 8px`, 10px mono/500 | `px-2 py-[3px] font-mono text-micro tracking-label rounded-sm`, and the fixed height dropped so padding sets it |
+| `Card` | `py-4`/`gap-4`, `rounded-xl`, **`ring-1`** | 18–22px padding | `p-5 gap-4`, `rounded-lg`, and the ring replaced by a 1px border |
+| `Dialog` | `sm:max-w-sm`, `rounded-xl`, `p-4`, `ring-1` | 900/920px, `--radius-xl`, `22px 26px` | Border plus `--shadow-modal`; per-modal width and sectioned padding still owed, see §7 |
+| `Table` cell | `p-2` | 9–11px vertical, 12–14px horizontal | `px-3 py-2.5` |
+| `Tabs` list | `bg-muted p-[3px] rounded-lg`, trigger `rounded-md` | `4px` track, 9px outer / 6px inner radius | **Nothing.** The shape and both radii already match |
+
+Two of those are worth stating as findings rather than table rows, because they are the design
+principle rather than the density:
+
+**The installed `Card` and every popover surface separate themselves with a `ring`, and the
+dropdowns add a `shadow-md`.** [tokens §8](tokens.md) says every separation in this design except a
+modal is a 1px border. Clearing Tailwind's shadow scale in `globals.css` means `shadow-md` no longer
+generates, so this correction cannot silently come back with the next component that is added.
+
+**Radius drifted one whole step.** The installed `Card` is `rounded-xl`, which in our scale is 12px
+— the *modal* radius. The signature card radius is 9px, and the two being adjacent is exactly why
+this was worth measuring rather than eyeballing.
 
 Primitives used as-is beyond those: `Label`, `Textarea`, `Checkbox`, `Separator`, `DropdownMenu`,
-`Tooltip`, `Skeleton`, `Popover`, `Sonner` (toasts — nothing in the prototype, but the rent checkoff
-and the Confirm action both need an undo affordance).
+`Tooltip`, `Skeleton`, `Popover`, `Progress`, `RadioGroup`, `Sonner` (toasts — nothing in the
+prototype, but the rent checkoff and the Confirm action both need an undo affordance). That list
+plus the table above **is** the installed set; nothing else is added until a screen needs it.
+
+Three things that apply across all of them:
+
+- **Focus is one rule, not nineteen.** The installed primitives each carry
+  `outline-none focus-visible:ring-3 focus-visible:ring-ring/50` — a 3px ring at 50% alpha, which is
+  weaker than [tokens §9](tokens.md) specifies and has to be repeated on every new component. Both
+  are stripped, and `globals.css` applies the §9 tokens once via a bare `:focus-visible` rule, so a
+  component written next year is covered without anyone remembering to cover it. The
+  `focus-visible:border-*` change stays as the secondary cue.
+- **They import `cn` from `@/lib/cn`, not from `cn`.** See [tokens §13](tokens.md) — the default
+  merge table silently eats our custom font sizes. `shadcn add` writes the bare import, so this is a
+  step to repeat when a component is added.
+- **The `dark:` classes are left in place.** Nothing sets `.dark` ([tokens §12](tokens.md)), so they
+  are inert; removing them is a large diff that the next `shadcn add` would undo.
 
 `Table` is the one worth a sentence. shadcn's renders a plain `<table>`, which is what we want; the
 prototype's tables are CSS grid on divs, which is not. Translating the grid templates into `<col>`
@@ -400,9 +433,12 @@ one line in `@theme`, which is why this is decided now rather than deferred agai
   Which components each screen uses, in what order, with what strings, and what happens to each on
   a narrow viewport. Nothing here is responsive yet; the prototype is desktop-only at a hard
   `min-width: 1240px`, and that constraint is #12's to replace.
-- **The shadcn variable spelling and the installed component list** —
-  [#15](https://github.com/hbouwers/capexwise/issues/15). The overrides in §5 are measured against
-  current defaults and need re-measuring against what `shadcn init` actually writes.
+- **Input font size on a narrow viewport** —
+  [#12](https://github.com/hbouwers/capexwise/issues/12). §5 puts the input at `text-sm`, which is
+  13px, and iOS Safari zooms the page when a focused input is under 16px. The design is 12.5px, so
+  the desktop value is not in question; what a form field does below 768px is a mobile decision the
+  screen specs have to make, along with everything else the prototype's `min-width: 1240px` left
+  undefined.
 - **`can(org, feature)` and the org switcher** —
   [#29](https://github.com/hbouwers/capexwise/issues/29). `PlanGate` and `OrgSwitcher` are named
   here and specified there.
