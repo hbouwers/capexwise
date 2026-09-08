@@ -120,9 +120,13 @@ npm install
 npm run dev
 ```
 
-That serves a placeholder page on `http://localhost:3000`. There is nothing to configure yet:
-no environment variables are read and no database is required, because neither exists. The
-database, the environment template and the container are tracked in
+That serves a placeholder page on `http://localhost:3000`, and the design system on
+`http://localhost:3000/styleguide` — every design token and every state of every installed
+primitive on one page, so that a value drifting away from
+[`docs/ui/tokens.md`](docs/ui/tokens.md) is visible rather than discovered on a screen later.
+
+There is nothing to configure yet: no environment variables are read and no database is required,
+because neither exists. The database, the environment template and the container are tracked in
 [the v0 milestone](https://github.com/hbouwers/capexwise/milestone/1), and this section grows as
 each lands.
 

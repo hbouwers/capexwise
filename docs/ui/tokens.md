@@ -10,9 +10,10 @@ First document in the UI handoff order — **tokens, then the component inventor
 sample colours out of the prototype by eye, and do not paste prototype markup into a prompt: the
 prototype is 456KB and every value worth having is below.
 
-Once `app/globals.css` exists it is the source of truth for the values and this document is the
-source of truth for *why* and for which name means what. If they disagree, that is a bug in one of
-them.
+`src/app/globals.css` exists as of [#15](https://github.com/hbouwers/capexwise/issues/15) and is the
+source of truth for the values; this document is the source of truth for *why* and for which name
+means what. If they disagree, that is a bug in one of them. `/styleguide` renders both so that a
+disagreement is visible rather than latent.
 
 ---
 
@@ -561,17 +562,17 @@ rather than being auto-inverted by the browser into a palette nobody chose.
 ### Tailwind v4
 
 Tailwind is on 4.x, which takes theme values from CSS rather than a JS config. The semantic layer
-goes in `@theme` in `app/globals.css` under Tailwind's own namespaces, so the utilities generate:
+goes in `@theme` in `src/app/globals.css` under Tailwind's own namespaces, so the utilities generate:
 
 ```css
 @theme {
-  --color-surface-page: #faf9f7;
-  --color-text-muted:   #78726a;
-  --color-status-warning: #8a6417;
+  --color-surface-page: var(--warm-050);
+  --color-text-muted:   var(--warm-600);
+  --color-status-warning: var(--amber-700);
   /* … */
 
-  --font-sans: "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --font-sans: var(--font-plex-sans), "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "Cascadia Mono", Menlo, monospace;
 
   --text-micro: 10px;
   --text-2xs:   11px;
@@ -586,7 +587,32 @@ naming the token `--color-muted` to get `text-muted` is worse, because it loses 
 belongs to the moment there is also a muted surface. Live with the stutter.
 
 The primitives in §3 stay outside `@theme` as plain custom properties on `:root`, so they do not
-generate a hundred unused utilities.
+generate a hundred unused utilities. The semantic layer references them by `var()` rather than
+restating the hex, so §3 stays the single place a value is written down.
+
+**Three of Tailwind's own namespaces are cleared** at #15 with `--color-*: initial`,
+`--text-*: initial` and `--shadow-*: initial`, then repopulated with only the values above. Each
+turns a rule in this document into something the build enforces: `bg-blue-500` and `text-gray-400`
+stop generating, so "no blue and no pure grey" is not a convention anyone has to remember; a size
+outside the nine steps stops generating; and `shadow-md` on a dropdown stops generating, so §8's
+one-shadow rule cannot quietly acquire a second. `transparent`, `current` and `inherit` are added
+back because clearing the colour namespace takes them too.
+
+**A merge helper has to be told about the names that are ours.** `cn` resolves conflicting classes
+by class group, using Tailwind's default table — which does not contain `text-micro`, `text-2xs` or
+`text-md`, so it read them as *colours*, collided them with `text-primary-foreground`, and dropped
+them. A badge rendered at 13px instead of 10px, with no error anywhere. `src/lib/cn.ts` registers
+them. **A token added here that is not also a Tailwind default has to be registered there**, or it
+fails exactly that silently — which is the argument for the styleguide route, since that is where it
+was caught.
+
+The same trap catches custom *utilities* by their name alone. The compound utility for §10's dashed
+confidence border is `estimated-border`, **not** `border-estimated`, because anything spelled
+`border-*` is grouped with the border colours and is discarded the moment a border colour lands on
+the same element — which is every `ConfidenceBadge` that takes a `className`. `numeric`,
+`field-label` and `grid-two-column` are safe for the mirror-image reason: they match no Tailwind
+group at all. **Name a compound utility so that it does not read as a member of a scale it is not
+in.**
 
 ### shadcn/ui
 
@@ -615,12 +641,23 @@ component renders in shadcn's default palette:
 
 Note `--accent` means two different things: shadcn's is a *subtle hover fill*, ours is the **brand
 colour**. Mapping ours onto theirs would tint every hover state deep green. This row is the one most
-likely to be got wrong and it is why the mapping is written down.
+likely to be got wrong and it is why the mapping is written down. In `globals.css` shadcn's lands on
+the utility name `accent-subtle` so the two cannot be confused at a call site.
 
-The exact variable list should be confirmed against the version actually installed at
-[#15](https://github.com/hbouwers/capexwise/issues/15) — shadcn has changed it before (the move to
-oklch, the addition of `--chart-*` and `--sidebar-*`). The mapping above is the contract; the
-spelling is verified at init.
+**Verified at [#15](https://github.com/hbouwers/capexwise/issues/15)** against shadcn 4.21.0, base
+`radix`, preset `nova`. Every name in the table above exists and is spelled as written. Three things
+the installed version added or changed:
+
+- `--chart-1`…`--chart-5` and eight `--sidebar-*` variables ship as well, as this section
+  anticipated. The charts map onto the heat scale in §11; the sidebar reads from the same surfaces
+  the app shell uses, so neither becomes a second palette to keep in step.
+- **shadcn now derives its radii by multiplication, not by calc offset** — `sm` is
+  `calc(var(--radius) * 0.6)` and `md` `* 0.8`. At `--radius: 9px` that gives 5.4px and 7.2px where
+  §6 wants 4px and 6px, so the claim above that shadcn "lands correctly without per-component
+  overrides" no longer holds. `globals.css` sets every step outright instead, which is both simpler
+  and exact.
+- `--destructive-foreground` is gone; the destructive variants are a tinted fill with the
+  destructive colour as text, which is already how §3 pairs a status with its tint.
 
 ---
 
