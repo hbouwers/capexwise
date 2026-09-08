@@ -39,12 +39,14 @@ What this makes easy, what it makes hard, and what it costs to reverse. Name the
 explicitly — it is the number that matters when the decision is revisited.
 ```
 
-## Planned
+## Written and planned
+
+A linked number is written; the rest are placeholders holding their slot in the numbering.
 
 | ADR | Subject | Issue |
 | --- | --- | --- |
 | 0001 | Stack — Next.js App Router, TypeScript, Postgres, Drizzle | [#4](https://github.com/hbouwers/propex/issues/4) |
 | 0002 | Hosting — Vercel now, Cloud Run as the escape hatch | [#5](https://github.com/hbouwers/propex/issues/5) |
 | 0003 | Multi-tenancy — org_id everywhere, server-resolved context, RLS as layer two | [#6](https://github.com/hbouwers/propex/issues/6) |
-| 0004 | Auth provider — Auth.js vs Clerk | [#7](https://github.com/hbouwers/propex/issues/7) |
+| [0004](0004-auth-provider.md) | Auth provider — Better Auth, orgs in our own Postgres | [#7](https://github.com/hbouwers/propex/issues/7) |
 | 0005 | Identifiers, money, and dates | [#8](https://github.com/hbouwers/propex/issues/8) |
