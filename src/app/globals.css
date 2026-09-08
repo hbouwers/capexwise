@@ -199,7 +199,7 @@
 
   /* Motion — components.md §11 */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --default-transition-duration: 120ms;
+  --default-transition-duration: var(--duration-fast);
   --default-transition-timing-function: var(--ease-standard);
 }
 
@@ -383,8 +383,14 @@
 }
 
 /* tokens.md §10 — the estimated side of the confidence swap. The dashed border
-   is reinforcement; the word ESTIMATED is the primary signal. */
-@utility border-estimated {
+   is reinforcement; the word ESTIMATED is the primary signal.
+
+   Not named `border-estimated`: `cn` groups any `border-*` name with the border
+   colours, so it discarded the whole utility whenever a border colour was also
+   on the element — the dashed border vanishing with no error. Registering it in
+   src/lib/cn.ts would work too, but a name that reads as a colour utility while
+   setting style and width is a trap for a human reader as well. */
+@utility estimated-border {
   border-style: var(--border-estimated-style);
   border-width: var(--border-estimated-width);
   border-color: var(--color-border-estimated);

@@ -606,6 +606,14 @@ them. **A token added here that is not also a Tailwind default has to be registe
 fails exactly that silently — which is the argument for the styleguide route, since that is where it
 was caught.
 
+The same trap catches custom *utilities* by their name alone. The compound utility for §10's dashed
+confidence border is `estimated-border`, **not** `border-estimated`, because anything spelled
+`border-*` is grouped with the border colours and is discarded the moment a border colour lands on
+the same element — which is every `ConfidenceBadge` that takes a `className`. `numeric`,
+`field-label` and `grid-two-column` are safe for the mirror-image reason: they match no Tailwind
+group at all. **Name a compound utility so that it does not read as a member of a scale it is not
+in.**
+
 ### shadcn/ui
 
 shadcn components read a fixed set of variable names. They have to be assigned or every dropped-in

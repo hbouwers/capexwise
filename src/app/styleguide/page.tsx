@@ -272,7 +272,7 @@ export default function Styleguide() {
                 <div className="numeric text-2xs text-text-muted">{hex}</div>
               </div>
             ))}
-            <div className="border-estimated rounded-md bg-surface-card p-3">
+            <div className="estimated-border rounded-md bg-surface-card p-3">
               <div className="text-xs font-medium text-text-secondary">
                 --border-estimated
               </div>
@@ -563,7 +563,7 @@ export default function Styleguide() {
                 Audited
               </span>
             </div>
-            <div className="border-estimated rounded-lg bg-surface-card p-4">
+            <div className="estimated-border rounded-lg bg-surface-card p-4">
               <FieldLabel>Replace</FieldLabel>
               <div className="numeric mt-2 text-2xl text-text-muted">2031</div>
               <span className="mt-3 inline-block rounded-sm border border-border-estimated bg-surface-card px-2 py-[3px] font-mono text-micro font-medium tracking-label text-text-muted uppercase">

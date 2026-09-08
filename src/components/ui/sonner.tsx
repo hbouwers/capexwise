@@ -1,15 +1,17 @@
 "use client"
 
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
-
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      // Pinned rather than read from next-themes. With no ThemeProvider mounted
+      // that hook resolves to "system", which renders a dark toast on a
+      // dark-mode OS — invisible on the machine this is built on, and wrong in
+      // an app that declares `color-scheme: light` and has dark mode out of
+      // scope through v1 (tokens.md §12).
+      theme="light"
       className="toaster group"
       icons={{
         success: (
