@@ -1,9 +1,9 @@
-# PropEx — working notes
+# CapExWise — working notes
 
 Capital planning for small residential landlords. Solo project, owned by Holden (`hbouwers`).
 Companion to Zillow Rental Manager, not a replacement: Zillow keeps rent collection, leases,
 listings, tenants and messaging; this owns the capital asset lifecycle, CapEx forecasting, tax
-planning, maintenance scheduling, vendor contacts and property operational facts.
+planning, maintenance scheduling, vendor contacts and building operational facts.
 
 **Status: pre-implementation.** There is no application code yet. Rules below that describe
 runtime behaviour describe what the code *will* do — they are the contract to build against, not
@@ -13,8 +13,10 @@ Read `docs/PRD.md` first. It is the product brain and it is current.
 
 ## Where things live
 
-The git repository is `propex/`. Its parent, `propex-working-directory/`, is deliberately
+The git repository is the checkout folder; its parent working directory is deliberately
 **outside git** — scratch files, helper scripts, secrets, and anything not meant to be published.
+On this machine those are still `propex/` inside `propex-working-directory/`, from before the
+rename. Renaming them locally is cosmetic and changes nothing about the remote.
 The repository is private today and flips public at v0.5, so assume anything committed will
 eventually be world-readable.
 
@@ -98,19 +100,20 @@ every screen is undefined and has to be specified, not improvised (#12).
 | Zillow integration | **Not possible.** Their public APIs cover listing feeds, leads, Zestimates and public records only, never a landlord's own Rental Manager data. Manual entry in v1, which makes onboarding speed a first-class design problem (#39) |
 | Licence | All rights reserved. Public as a portfolio artifact, not open source. Reversible toward permissive; the other direction is not |
 | Demo city | **Indianapolis**, matching the PRD and the real portfolio. The prototype's Somerville, MA data is presentation only |
-| Land vs building basis | Split on `properties` from the start (#9). Depreciation applies to the building portion only, so without it the tax planner is wrong in year one, not year two |
+| Land vs building basis | Split on `buildings` from the start (#9). Depreciation applies to the building portion only, so without it the tax planner is wrong in year one, not year two |
 | Auth | Better Auth + its `organization` plugin, orgs and memberships in our own Postgres ([ADR-0004](docs/adr/0004-auth-provider.md)). Google OAuth only in v0 — no passwords, no email provider, no domain. Rejected: Auth.js (v5 still beta, no org primitive) and Clerk (would own the tenancy boundary) |
+| Name | **CapExWise**, `capexwise.com` registered 2026-09-08 (#3). Repository and Vercel project take the same name. The trademark search is still outstanding — clear it before #32 creates the Vercel project and before the repo goes public at v0.5 |
+| Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
 
 ## Still open — check before building on them
 
 - **Pricing shape, and free tier vs trial** (#13). Changes the plan gate and the onboarding funnel.
-- **Whether v1 needs income and expense entry at all** (#13, question 5). The biggest scope fork in
-  v1 — the light version runs the tax planner on one annual income figure per property and ships
-  months earlier.
-- **Product name** (#3). "PropEx" is kept provisionally and the domain is deliberately unbought —
-  the demo runs on the Vercel alias, and ADR-0004 keeps v0 off email entirely, so nothing is
-  blocked. Buy at the first of: magic links landing, Stripe activation, or the repo going public.
-  The open task is the trademark check, not the DNS.
+- **Whether v1 needs expense entry** (#13, question 5). The income half is settled — rent periods
+  give both monthly cash flow and the tax planner's annual figure for one click per unit per month
+  (#48). Money-out is what is still open, and it is the largest scope item left in v1.
+- **Trademark clearance on "CapExWise"** (#3). The name and the domain are settled; the search
+  against existing marks in property-management software is not done. Clear it before #32 and
+  before v0.5 — renaming is free today and expensive once a demo URL is public.
 
 ## Live state is not duplicated here
 
@@ -118,7 +121,7 @@ It rots. For what is merged, open, or in flight, ask the source:
 
 ```bash
 git log --oneline main
-gh issue list --repo hbouwers/propex
+gh issue list --repo hbouwers/capexwise
 gh project item-list 3 --owner hbouwers
 ```
 

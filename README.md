@@ -1,12 +1,10 @@
-# PropEx
+# CapExWise
 
 Capital planning for small residential landlords.
 
 > **Status: pre-implementation.** The product requirements, the design reference, and the
 > work breakdown exist; the application does not yet. See
 > [the project board](https://github.com/users/hbouwers/projects/3) for what is in flight.
->
-> The name is provisional — see [#3](https://github.com/hbouwers/propex/issues/3).
 
 ---
 
@@ -26,21 +24,22 @@ landlord has.
 The result is reactive ownership: capital spending gets discovered rather than planned, and tax
 planning happens in March for a year that already ended.
 
-**PropEx owns the capital asset lifecycle.** What is going to break, when, what it will cost,
+**CapExWise owns the capital asset lifecycle.** What is going to break, when, what it will cost,
 whether the cash will be there, and what it does to the tax bill.
 
 ## Positioning: a companion, not a replacement
 
 This assumes you already run rent collection, leases and tenant communication somewhere else.
 
-| Owned by Zillow / equivalent | Owned by PropEx |
+| Owned by Zillow / equivalent | Owned by CapExWise |
 | --- | --- |
 | Listings and syndication | Capital asset inventory and lifecycle |
 | Applications and screening | CapEx forecast and reserve planning |
 | Lease documents and e-signature | Tax liability estimation and scenario planning |
-| Rent collection and payment tracking | Recurring and one-off maintenance scheduling |
+| Rent collection and payment processing | Recurring and one-off maintenance scheduling |
 | Tenant messaging | Vendor and contact book, by trade |
-| | Property operational facts (codes, utilities, service days) |
+| | Building operational facts (codes, utilities, service days) |
+| | Rent roll and rent-received tracking (manual — no money moves) |
 
 *Zillow handles the money coming in. This handles what is going to break, when, what it costs,
 and what it does to your taxes.*
@@ -57,7 +56,7 @@ speed a first-class design problem.
 | Framework | Next.js (App Router), TypeScript |
 | Database | Postgres, Drizzle ORM and migrations |
 | UI | Tailwind CSS, shadcn/ui |
-| Auth | Undecided — [ADR-0004](https://github.com/hbouwers/propex/issues/7) |
+| Auth | Better Auth, with organizations and memberships in our own Postgres — [ADR-0004](docs/adr/0004-auth-provider.md) |
 | Billing | Stripe (v1) |
 | Hosting | Vercel, with a maintained Dockerfile for a Cloud Run move |
 
@@ -81,7 +80,7 @@ deployment.
 
 **Money is stored as integer cents.** Dates, identifiers and the estimated-versus-audited
 confidence model follow the conventions in
-[ADR-0005](https://github.com/hbouwers/propex/issues/8).
+[ADR-0005](https://github.com/hbouwers/capexwise/issues/8).
 
 **The tax surface is the highest-risk code in the product.** Wrong numbers on a tax page are
 worse than no tax page, so every figure has to be traceable to its inputs, and the disclaimer —
@@ -106,7 +105,7 @@ The repository is the source of truth.
 
 | | Contents | Done when |
 | --- | --- | --- |
-| **v0** | Properties, capital items, CapEx forecast, maintenance, contacts, auth and orgs | Two real duplexes are fully entered and the forecast is trusted enough to act on |
+| **v0** | Portfolio dashboard, buildings and units, capital items, CapEx forecast, maintenance, contacts, auth and orgs | Two real duplexes and four units are fully entered, rent is tracked monthly, and the forecast is trusted enough to act on |
 | **v0.5** | Seeded demo org, public URL, public repository | A visitor can understand the product in ninety seconds |
 | **v1** | Tax planner, Stripe billing, onboarding | The first outside org completes setup unassisted |
 | **v2** | Quote requests, AI advisor | — |
@@ -114,7 +113,7 @@ The repository is the source of truth.
 ## Local development
 
 Not yet runnable. The setup is tracked in
-[the v0 milestone](https://github.com/hbouwers/propex/milestone/1); this section gets written
+[the v0 milestone](https://github.com/hbouwers/capexwise/milestone/1); this section gets written
 alongside the scaffold and the Docker Compose database, and is verified from a clean checkout.
 
 ## Licence

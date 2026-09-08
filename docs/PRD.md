@@ -1,6 +1,6 @@
 # Product Requirements Document
 
-**Working title:** _(unnamed — see Open Questions)_
+**Name:** CapExWise (`capexwise.com`, registered 2026-09-08)
 **Status:** Draft v0.2
 **Owner:** Holden
 **Last updated:** 2026-09-08
@@ -234,7 +234,7 @@ F4 has an allocation rule.
 
 ## 12. Open questions
 
-1. **Name.** Needed before the demo URL and repo go public.
+1. **Trademark clearance on "CapExWise"** (#3). The name is settled and the domain is registered; what is not done is a search against existing marks in property-management and real-estate software. Clear it before the Vercel project is created (#32) and before the repo goes public at v0.5 — renaming is cheap now and expensive once either has happened.
 2. **Pricing shape.** Per-unit, per-building, or flat per-org? Per-unit aligns price with value but penalizes exactly the small landlord who is the design target.
 3. **Free tier or trial?** A permanent free tier at 1–2 units would help adoption and make the tester phase honest. A trial converts better.
 4. **How opinionated should default service lives be?** Regional variance is real. Ship national defaults and let users override, or ask for climate zone during onboarding?
