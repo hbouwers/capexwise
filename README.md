@@ -2,9 +2,10 @@
 
 Capital planning for small residential landlords.
 
-> **Status: pre-implementation.** The product requirements, the design reference, and the
-> work breakdown exist; the application does not yet. See
-> [the project board](https://github.com/users/hbouwers/projects/3) for what is in flight.
+> **Status: early scaffold.** The product requirements, the design reference and the work
+> breakdown exist, and the application builds — but it does nothing yet: no database, no auth,
+> no features. See [the project board](https://github.com/users/hbouwers/projects/3) for what is
+> in flight.
 
 ---
 
@@ -112,9 +113,26 @@ The repository is the source of truth.
 
 ## Local development
 
-Not yet runnable. The setup is tracked in
-[the v0 milestone](https://github.com/hbouwers/capexwise/milestone/1); this section gets written
-alongside the scaffold and the Docker Compose database, and is verified from a clean checkout.
+Node 24 — the version is pinned in [`.nvmrc`](./.nvmrc), so `nvm use` picks it up.
+
+```bash
+npm install
+npm run dev
+```
+
+That serves a placeholder page on `http://localhost:3000`. There is nothing to configure yet:
+no environment variables are read and no database is required, because neither exists. The
+database, the environment template and the container are tracked in
+[the v0 milestone](https://github.com/hbouwers/capexwise/milestone/1), and this section grows as
+each lands.
+
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Development server |
+| `npm run build` | Production build |
+| `npm start` | Serve a production build |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | Generate route types, then `tsc --noEmit` |
 
 ## Licence
 
