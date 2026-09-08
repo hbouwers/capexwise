@@ -40,6 +40,10 @@ const eslintConfig = defineConfig([
 
   {
     name: "capexwise/no-raw-db-client",
+    // The carve-out is an `ignores` on this block rather than a later block
+    // setting these rules to "off". An "off" block is a hole that the next
+    // restricted-syntax rule added here would fall into unnoticed.
+    ignores: RAW_DB_ALLOWED,
     rules: {
       "no-restricted-imports": [
         "error",
@@ -58,15 +62,6 @@ const eslintConfig = defineConfig([
       ],
     },
   },
-  {
-    name: "capexwise/no-raw-db-client-exemptions",
-    files: RAW_DB_ALLOWED,
-    rules: {
-      "no-restricted-imports": "off",
-      "no-restricted-syntax": "off",
-    },
-  },
-
   // Turns off the stylistic rules Prettier owns. Must stay last.
   prettier,
 
