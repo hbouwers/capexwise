@@ -187,6 +187,10 @@ _Deferred to v1.1:_ cost segregation, bonus depreciation on short-life property,
 
 ## 10. Data model sketch
 
+**This is a sketch. [`docs/data-model.md`](data-model.md) is the real thing** — column types,
+constraints, indexes, deletion behaviour per table, and the RLS policy template. Where the two
+disagree, the data model document wins.
+
 ```
 organizations (id, name, plan, is_demo)
 users (id, email)
