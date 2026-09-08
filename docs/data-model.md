@@ -108,7 +108,7 @@ connection path — and that no domain query has a reason to join to `users` exc
 `organizations` is its own boundary: the policy is `id = current_org_id`, not `org_id = ...`.
 
 ```sql
-create type org_plan as enum ('free', 'premium');
+create type org_plan as enum ('free', 'paid', 'premium');
 
 create table organizations (
   id            uuid primary key default uuidv7(),
@@ -162,6 +162,20 @@ create table invitations (              -- Better Auth `invitation`, #30
 
 `sessions`, `accounts` and `verifications` follow Better Auth's shape with our id type and are not
 reproduced here — they hold no domain data and their columns are the library's to change.
+
+**`org_plan` has three values, not two.** Pricing settled at **$5 per unit per month with the
+first unit free** (PRD §12, questions 2 and 3), which separates *pays us* from *has F7 and F8* —
+so `paid` sits between `free` and `premium` rather than `premium` meaning both. The unit
+allowance belongs to the tier and is not a second column: `free` is one unit, `paid` and
+`premium` are unbounded and billed per unit. `can(org, feature)` reads the tier; the capacity
+check is a count against it.
+
+**The free unit is per account, not per org**, and that is the one part of the pricing that the
+schema cannot express on its own. Nothing stops one person opening five orgs and collecting five
+free units, so the allowance is evaluated against the org's owner — a `memberships` lookup for
+`role = 'owner'`, then a check for another `free` org under the same user. It belongs with the
+billing work rather than in a constraint, because the answer when it trips is a prompt to
+upgrade, not a rejected write. Written down here so it is not discovered in the billing data.
 
 **An org must always have at least one owner.** Not expressible as a constraint without a trigger,
 so it is enforced in the application at the two places that can break it (revoking a membership,

@@ -166,9 +166,10 @@ _Deferred to v1.1:_ cost segregation, bonus depreciation on short-life property,
 
 - Email auth, organizations, memberships, roles (owner / member).
 - Org switcher; org context resolved server-side from session only.
-- `plan` column driving a `can(org, feature)` gate.
-- Seeded `demo` org with fictional data, resetting nightly.
-- Stripe subscription billing — **v2**, but the plan gate ships in v1 so the seam exists.
+- `plan` column driving a `can(org, feature)` gate. Three tiers: **free** (one unit), **paid** ($5 per unit per month), **premium** (paid, plus F7 and F8).
+- **The free unit is per account, not per org.** Opening five orgs to collect five free units is a minute of work, so the allowance is checked against the owner rather than the org.
+- Seeded `demo` org with fictional data, resetting nightly. The demo needs no account, which is what makes a card-free free tier workable — evaluation happens before sign-up rather than during it.
+- The plan gate ships in **v0** so the seam exists; Stripe subscription billing ships in **v1**, per the release plan in section 8.
 
 ## 8. Release plan
 
@@ -239,8 +240,8 @@ F4 has an allocation rule.
 ## 12. Open questions
 
 1. **Trademark clearance on "CapExWise"** (#3). The name is settled and the domain is registered; what is not done is a search against existing marks in property-management and real-estate software. Clear it before the Vercel project is created (#32) and before the repo goes public at v0.5 — renaming is cheap now and expensive once either has happened.
-2. **Pricing shape.** Per-unit, per-building, or flat per-org? Per-unit aligns price with value but penalizes exactly the small landlord who is the design target.
-3. **Free tier or trial?** A permanent free tier at 1–2 units would help adoption and make the tester phase honest. A trial converts better.
+2. **Pricing shape.** Settled: **$5 per unit per month.** Per-unit attaches the price to the customer's own revenue rather than to our cost, which is the axis worth scaling on, and the small-landlord penalty it used to carry is removed by the free unit in question 3. Two shape questions are deliberately left to the billing work rather than fixed here: a per-unit taper above roughly ten units, where a linear price starts colliding with full property-management software that also collects rent; and an annual plan, since the tax planner's payoff is annual and the billing period should be able to match it.
+3. **Free tier or trial?** Settled: **the first unit is free permanently, with no card, and there is no trial.** A trial is the wrong instrument here — the tax planner is a tax-year instrument and the forecast a ten-year one, so any clock short enough to convert expires before either has paid off, and it would run during manual entry, which is the most expensive part of onboarding (F10). The free tier *is* the trial. It meters on the same unit billing meters on, so it needs no feature matrix; it gates by capacity rather than by feature, so the forecast is never hidden behind the paywall it exists to justify; and the conversion event is the customer buying a second rental rather than a timer expiring. The funnel is demo org, then a free single unit, then paid at unit two.
 4. **How opinionated should default service lives be?** Regional variance is real. Ship national defaults and let users override, or ask for climate zone during onboarding?
 5. **Does v1 need expense entry?** Settled: **yes.** Rent periods (F1) already give money-in; without money-out the cash flow tile (F0) is half a number and the Schedule E statement (F4) runs on assumptions rather than on records. `transactions` is fully specified in [`data-model.md`](data-model.md) §6, so this is a scope decision rather than a design one and the migration ships in v1 with the feature. It remains the largest single scope item in v1, and it adds a screen the prototype never drew (#12).
 6. **How deep does portfolio-level forecasting go?** Settled: the dashboard (F0) is the landing screen, so rollup is in v1. Still open is whether the 10-year forecast and the reserve projection get a portfolio view in v1, or stay per-building until v1.1.
