@@ -1,0 +1,23 @@
+# Normalise line endings on the way into the repository.
+# This machine has core.autocrlf=true globally; without this file, any file
+# touched on Windows lands in a commit with CRLF and breaks shell scripts,
+# Dockerfiles and diffs everywhere else. Blobs are LF, checkouts are native.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
+# Generated; collapse in diffs and exclude from language stats.
+package-lock.json linguist-generated=true -diff
+*.snap linguist-generated=true
+
+# The design reference is a bundled artifact, not hand-written source.
+docs/ui/reference/** linguist-vendored=true -diff

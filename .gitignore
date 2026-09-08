@@ -1,0 +1,74 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+!.yarn/versions
+
+# Next.js
+.next/
+out/
+build/
+next-env.d.ts
+
+# Production / container
+dist/
+
+# Environment — everything except the committed template.
+.env
+.env.*
+!.env.example
+
+# Secrets and credentials. Nothing matching these should ever be committed;
+# the repo is intended to become public.
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.local.*
+service-account*.json
+gha-creds-*.json
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+
+# Drizzle — migrations ARE committed; only local metadata is ignored.
+drizzle/meta/_journal.json.bak
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tooling caches
+.turbo/
+.eslintcache
+*.tsbuildinfo
+.vercel/
+
+# Local scratch — anything under this prefix is untracked by convention.
+scratch/
+*.local.*
