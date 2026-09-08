@@ -1,0 +1,61 @@
+# Local development database. Not a production artifact and not a model of one —
+# production Postgres is managed and provisioned in #33; the app container is #19.
+#
+# Postgres is pinned to major 18 because ADR-0005 makes `uuidv7()` the primary
+# key default, which is a Postgres 18 built-in. Local and production have to
+# agree on the major or a migration that works here fails there. The pin is
+# major-only: patch releases within a major are compatible, and a digest pin on
+# a throwaway dev database would need bumping constantly for no safety gain.
+# (The app image in #19 does pin a digest — that one ships.)
+#
+# The Debian image rather than `-alpine` on purpose. Alpine links musl, whose
+# collation differs from the glibc/ICU collation every managed provider runs, so
+# `ORDER BY` on text can disagree between a developer's machine and production.
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: capexwise-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: capexwise
+      POSTGRES_USER: capexwise
+      # Local-only credential for a database that holds no real data, so it is
+      # committed deliberately rather than being a leaked secret. It is safe
+      # only because of the loopback bind below — never reuse this password for
+      # anything reachable from off the machine.
+      POSTGRES_PASSWORD: capexwise_local_dev
+      # scram-sha-256 rather than the trust auth people reach for locally, so a
+      # missing password fails here instead of in preview.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      # Bound to loopback, not 0.0.0.0. The bare `5432:5432` form publishes the
+      # database to every host on the local network, and on a laptop that means
+      # whatever coffee-shop wifi it is joined to.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # Named, so data survives `db:down` and a machine restart. `db:reset`
+      # removes it; that is the documented way to start clean.
+      #
+      # `/var/lib/postgresql`, NOT the `/var/lib/postgresql/data` that every
+      # pre-18 example uses. Postgres 18 made PGDATA version-specific
+      # (`/var/lib/postgresql/18/docker`) and moved the image's VOLUME up one
+      # level, so the old path mounts a directory the server does not write to:
+      # the container comes up healthy, the named volume stays empty, and the
+      # real data goes into an anonymous volume that a `down` throws away.
+      # Nothing errors — it just silently stops persisting.
+      - capexwise-pgdata:/var/lib/postgresql
+    healthcheck:
+      # `docker compose up -d` returns as soon as the container starts, which is
+      # before Postgres accepts connections — the reason a migration run
+      # immediately after "up" fails with a connection error. `db:up` passes
+      # `--wait`, which waits on this.
+      test: ["CMD-SHELL", "pg_isready -U capexwise -d capexwise"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  capexwise-pgdata:
+    name: capexwise-pgdata
