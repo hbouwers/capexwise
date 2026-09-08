@@ -14,46 +14,46 @@
    ========================================================================= */
 :root {
   /* Accent — a deep pine green */
-  --pine-900: #164034;   /* hover / pressed */
-  --pine-700: #1f5c4d;   /* the accent */
-  --pine-200: #cfe0d8;   /* accent border on tinted surfaces */
-  --pine-100: #eaf1ed;   /* success / audited tint */
-  --pine-050: #f6faf8;   /* selected state fill */
-  --pine-025: #f1f5f3;   /* quoted-tag fill */
+  --pine-900: #164034; /* hover / pressed */
+  --pine-700: #1f5c4d; /* the accent */
+  --pine-200: #cfe0d8; /* accent border on tinted surfaces */
+  --pine-100: #eaf1ed; /* success / audited tint */
+  --pine-050: #f6faf8; /* selected state fill */
+  --pine-025: #f1f5f3; /* quoted-tag fill */
 
   /* Warm neutral — the whole surface and text system */
   --warm-950: #1c1a17;
   --warm-800: #4a463f;
   --warm-700: #6b665e;
-  --warm-600: #78726a;   /* added for contrast, tokens.md §2 */
-  --warm-500: #8b857b;   /* non-text only */
-  --warm-400: #a09a90;   /* non-text only */
-  --warm-350: #94908b;   /* added for contrast, control borders */
-  --warm-300: #b3ada2;   /* non-text only */
-  --warm-250: #c9c3b9;   /* hover border */
-  --warm-240: #cfc9be;   /* hover border, cards */
-  --warm-200: #d8d3ca;   /* estimated / dashed */
-  --warm-180: #e0dbd3;   /* control border, decorative use */
-  --warm-160: #e2ded6;   /* modal border */
-  --warm-150: #eae6df;   /* card border */
-  --warm-140: #ece8e0;   /* neutral fill */
-  --warm-130: #f0ece5;   /* divider, track */
-  --warm-120: #f4f2ee;   /* hover fill, track */
-  --warm-110: #f6f4f0;   /* hairline divider */
-  --warm-060: #fcfbf9;   /* subtle row */
-  --warm-050: #faf9f7;   /* page */
-  --white:    #ffffff;   /* card */
+  --warm-600: #78726a; /* added for contrast, tokens.md §2 */
+  --warm-500: #8b857b; /* non-text only */
+  --warm-400: #a09a90; /* non-text only */
+  --warm-350: #94908b; /* added for contrast, control borders */
+  --warm-300: #b3ada2; /* non-text only */
+  --warm-250: #c9c3b9; /* hover border */
+  --warm-240: #cfc9be; /* hover border, cards */
+  --warm-200: #d8d3ca; /* estimated / dashed */
+  --warm-180: #e0dbd3; /* control border, decorative use */
+  --warm-160: #e2ded6; /* modal border */
+  --warm-150: #eae6df; /* card border */
+  --warm-140: #ece8e0; /* neutral fill */
+  --warm-130: #f0ece5; /* divider, track */
+  --warm-120: #f4f2ee; /* hover fill, track */
+  --warm-110: #f6f4f0; /* hairline divider */
+  --warm-060: #fcfbf9; /* subtle row */
+  --warm-050: #faf9f7; /* page */
+  --white: #ffffff; /* card */
 
   /* Status */
-  --green-700: #2f6b4f;  /* success */
-  --amber-700: #8a6417;  /* warning, text */
-  --amber-500: #b07d1a;  /* warning, fills only — tokens.md §2 */
-  --amber-100: #faf3e2;  /* warning tint */
-  --amber-200: #f0d9c8;  /* chart fill, high magnitude */
-  --rust-800:  #8a2c1f;  /* danger, strong */
-  --rust-600:  #a34a20;  /* danger */
-  --rust-100:  #fdf1e8;  /* danger tint */
-  --rust-050:  #fdeae6;  /* overdue tint */
+  --green-700: #2f6b4f; /* success */
+  --amber-700: #8a6417; /* warning, text */
+  --amber-500: #b07d1a; /* warning, fills only — tokens.md §2 */
+  --amber-100: #faf3e2; /* warning tint */
+  --amber-200: #f0d9c8; /* chart fill, high magnitude */
+  --rust-800: #8a2c1f; /* danger, strong */
+  --rust-600: #a34a20; /* danger */
+  --rust-100: #fdf1e8; /* danger tint */
+  --rust-050: #fdeae6; /* overdue tint */
 }
 
 /* ============================================================================
@@ -75,57 +75,65 @@
   --color-inherit: inherit;
 
   /* Surfaces */
-  --color-surface-page:        var(--warm-050);
-  --color-surface-card:        var(--white);
-  --color-surface-subtle:      var(--warm-060);  /* alternating rows, nested panels */
-  --color-surface-fill:        var(--warm-120);  /* chips, progress tracks, hover */
-  --color-surface-fill-strong: var(--warm-140);  /* avatars, empty chart segments */
-  --color-surface-overlay:     rgb(28 26 23 / 0.32); /* modal scrim */
+  --color-surface-page: var(--warm-050);
+  --color-surface-card: var(--white);
+  --color-surface-subtle: var(--warm-060); /* alternating rows, nested panels */
+  --color-surface-fill: var(--warm-120); /* chips, progress tracks, hover */
+  --color-surface-fill-strong: var(
+    --warm-140
+  ); /* avatars, empty chart segments */
+  --color-surface-overlay: rgb(28 26 23 / 0.32); /* modal scrim */
 
   /* Text — the only four values allowed on text */
-  --color-text-primary:   var(--warm-950);
+  --color-text-primary: var(--warm-950);
   --color-text-secondary: var(--warm-800);
-  --color-text-tertiary:  var(--warm-700);
-  --color-text-muted:     var(--warm-600);
-  --color-text-disabled:  var(--warm-500);  /* WCAG-exempt, disabled controls only */
+  --color-text-tertiary: var(--warm-700);
+  --color-text-muted: var(--warm-600);
+  --color-text-disabled: var(
+    --warm-500
+  ); /* WCAG-exempt, disabled controls only */
   --color-text-on-accent: var(--white);
 
   /* Borders */
-  --color-border-card:      var(--warm-150);
-  --color-border-divider:   var(--warm-110);  /* inside a card */
-  --color-border-section:   var(--warm-130);  /* between card sections */
-  --color-border-control:   var(--warm-350);  /* inputs, selects, secondary buttons */
-  --color-border-modal:     var(--warm-160);
-  --color-border-hover:     var(--warm-250);
-  --color-border-estimated: var(--warm-200);  /* the dashed border, tokens.md §10 */
+  --color-border-card: var(--warm-150);
+  --color-border-divider: var(--warm-110); /* inside a card */
+  --color-border-section: var(--warm-130); /* between card sections */
+  --color-border-control: var(
+    --warm-350
+  ); /* inputs, selects, secondary buttons */
+  --color-border-modal: var(--warm-160);
+  --color-border-hover: var(--warm-250);
+  --color-border-estimated: var(
+    --warm-200
+  ); /* the dashed border, tokens.md §10 */
 
   /* Accent */
-  --color-accent:        var(--pine-700);
-  --color-accent-hover:  var(--pine-900);
-  --color-accent-fill:   var(--pine-050);  /* selected chip, active toggle */
+  --color-accent: var(--pine-700);
+  --color-accent-hover: var(--pine-900);
+  --color-accent-fill: var(--pine-050); /* selected chip, active toggle */
   --color-accent-border: var(--pine-200);
-  --color-accent-quoted: var(--pine-025);  /* the Quoted tag fill */
+  --color-accent-quoted: var(--pine-025); /* the Quoted tag fill */
 
   /* Status — a foreground and the tint it sits on, always as a pair.
      Measured: good 5.49, warning 4.85, danger 5.32, overdue 7.35, neutral 5.09.
      Mixing a foreground with another status's tint breaks that guarantee. */
-  --color-status-good:    var(--green-700);
-  --color-tint-good:      var(--pine-100);
+  --color-status-good: var(--green-700);
+  --color-tint-good: var(--pine-100);
   --color-status-warning: var(--amber-700);
-  --color-tint-warning:   var(--amber-100);
-  --color-status-danger:  var(--rust-600);
-  --color-tint-danger:    var(--rust-100);
+  --color-tint-warning: var(--amber-100);
+  --color-status-danger: var(--rust-600);
+  --color-tint-danger: var(--rust-100);
   --color-status-overdue: var(--rust-800);
-  --color-tint-overdue:   var(--rust-050);
+  --color-tint-overdue: var(--rust-050);
   --color-status-neutral: var(--warm-700);
-  --color-tint-neutral:   var(--warm-120);
+  --color-tint-neutral: var(--warm-120);
 
   /* Interaction — tokens.md §9 */
-  --color-hover-fill:        var(--warm-120);  /* nav items, list rows */
-  --color-hover-fill-subtle: var(--warm-060);  /* table rows */
-  --color-hover-border:      var(--warm-250);  /* secondary buttons, controls */
-  --color-hover-border-card: var(--warm-240);  /* clickable cards */
-  --color-focus-ring:        var(--pine-700);
+  --color-hover-fill: var(--warm-120); /* nav items, list rows */
+  --color-hover-fill-subtle: var(--warm-060); /* table rows */
+  --color-hover-border: var(--warm-250); /* secondary buttons, controls */
+  --color-hover-border-card: var(--warm-240); /* clickable cards */
+  --color-focus-ring: var(--pine-700);
 
   /* Charts and meters — tokens.md §11. Bar length is the primary encoding and
      colour is secondary, which is what keeps heat-1 acceptable on its track. */
@@ -137,41 +145,44 @@
   --color-chart-fill-high: var(--amber-200);
 
   --color-meter-track: var(--warm-120);
-  --color-meter-good:  var(--green-700);
-  --color-meter-warn:  var(--amber-500);
-  --color-meter-bad:   var(--rust-600);
+  --color-meter-good: var(--green-700);
+  --color-meter-warn: var(--amber-500);
+  --color-meter-bad: var(--rust-600);
 
   /* ------------------------------------------------------------------
      Typography — tokens.md §4, §5. components.md §12 settled the family:
      IBM Plex Sans, self-hosted through next/font, with the prototype's
      system stack kept as the fallback while the webfont loads.
      ------------------------------------------------------------------ */
-  --font-sans: var(--font-plex-sans), "Helvetica Neue", Helvetica, "Segoe UI", Arial, sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --font-sans:
+    var(--font-plex-sans), "Helvetica Neue", Helvetica, "Segoe UI", Arial,
+    sans-serif;
+  --font-mono:
+    var(--font-plex-mono), ui-monospace, "Cascadia Mono", Menlo, monospace;
   --font-heading: var(--font-sans);
 
   /* Nine steps, every one a whole pixel. Tailwind's scale is cleared so that a
      size outside the nine does not silently generate. Sizes carry no paired
      line-height: leading is always an explicit choice from the scale below. */
   --text-*: initial;
-  --text-micro: 10px;  /* uppercase mono labels above figures; badge text */
-  --text-2xs:   11px;  /* dense table metadata, chart axis labels */
-  --text-xs:    12px;  /* secondary body, card subtitles, helper text */
-  --text-sm:    13px;  /* default body, table cells, nav items */
-  --text-md:    14px;  /* card headings, emphasised rows */
-  --text-lg:    16px;  /* page title in the header bar */
-  --text-xl:    21px;  /* building name on the detail header */
-  --text-2xl:   25px;  /* KPI figures */
-  --text-3xl:   42px;  /* the single hero figure on the tax screen */
+  --text-micro: 10px; /* uppercase mono labels above figures; badge text */
+  --text-2xs: 11px; /* dense table metadata, chart axis labels */
+  --text-xs: 12px; /* secondary body, card subtitles, helper text */
+  --text-sm: 13px; /* default body, table cells, nav items */
+  --text-md: 14px; /* card headings, emphasised rows */
+  --text-lg: 16px; /* page title in the header bar */
+  --text-xl: 21px; /* building name on the detail header */
+  --text-2xl: 25px; /* KPI figures */
+  --text-3xl: 42px; /* the single hero figure on the tax screen */
 
-  --leading-none:    1;     /* numerics, single-line labels, badges */
-  --leading-tight:   1.2;   /* headings, two-line names */
-  --leading-snug:    1.35;  /* dense multi-line metadata */
-  --leading-normal:  1.5;   /* body copy */
-  --leading-relaxed: 1.65;  /* the tax-page explanatory prose */
+  --leading-none: 1; /* numerics, single-line labels, badges */
+  --leading-tight: 1.2; /* headings, two-line names */
+  --leading-snug: 1.35; /* dense multi-line metadata */
+  --leading-normal: 1.5; /* body copy */
+  --leading-relaxed: 1.65; /* the tax-page explanatory prose */
 
-  --tracking-label:  0.12em;   /* uppercase mono micro-labels — always with uppercase */
-  --tracking-tight:  -0.02em;  /* display sizes, --text-xl and up */
+  --tracking-label: 0.12em; /* uppercase mono micro-labels — always with uppercase */
+  --tracking-tight: -0.02em; /* display sizes, --text-xl and up */
   --tracking-normal: 0;
 
   /* ------------------------------------------------------------------
@@ -180,11 +191,11 @@
      the scale wants 4 and 6, so the steps are set outright instead.
      ------------------------------------------------------------------ */
   --radius-*: initial;
-  --radius-xs:   2px;    /* nav dots, tiny indicators */
-  --radius-sm:   4px;    /* badges, tags, inline chips */
-  --radius-md:   6px;    /* buttons, inputs, selects, nav items */
-  --radius-lg:   9px;    /* cards — the signature radius */
-  --radius-xl:   12px;   /* modals */
+  --radius-xs: 2px; /* nav dots, tiny indicators */
+  --radius-sm: 4px; /* badges, tags, inline chips */
+  --radius-md: 6px; /* buttons, inputs, selects, nav items */
+  --radius-lg: 9px; /* cards — the signature radius */
+  --radius-xl: 12px; /* modals */
   --radius-full: 9999px; /* progress bars, avatars, dots */
 
   /* ------------------------------------------------------------------
@@ -217,8 +228,8 @@
 
   /* Focus — tokens.md §9. The prototype's `outline: none` plus a border swap is
      not carried forward; §4 below applies these to every interactive element. */
-  --focus-ring:        var(--pine-700);
-  --focus-ring-width:  2px;
+  --focus-ring: var(--pine-700);
+  --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
 
   --hover-accent-alpha: 0.9; /* primary button opacity */
@@ -238,25 +249,25 @@
      `--accent` is the row most likely to be got wrong: shadcn's is a subtle
      hover fill, ours is the brand colour. Mapping ours onto theirs would tint
      every hover state deep green. */
-  --background:            var(--color-surface-page);
-  --foreground:            var(--color-text-primary);
-  --card:                  var(--color-surface-card);
-  --card-foreground:       var(--color-text-primary);
-  --popover:               var(--color-surface-card);
-  --popover-foreground:    var(--color-text-primary);
-  --primary:               var(--color-accent);
-  --primary-foreground:    var(--color-text-on-accent);
-  --secondary:             var(--color-surface-fill);
-  --secondary-foreground:  var(--color-text-secondary);
-  --muted:                 var(--color-surface-fill);
-  --muted-foreground:      var(--color-text-muted);
-  --accent:                var(--color-accent-fill);
-  --accent-foreground:     var(--color-accent);
-  --destructive:           var(--color-status-danger);
-  --border:                var(--color-border-card);
-  --input:                 var(--color-border-control);
-  --ring:                  var(--color-focus-ring);
-  --radius:                var(--radius-lg);
+  --background: var(--color-surface-page);
+  --foreground: var(--color-text-primary);
+  --card: var(--color-surface-card);
+  --card-foreground: var(--color-text-primary);
+  --popover: var(--color-surface-card);
+  --popover-foreground: var(--color-text-primary);
+  --primary: var(--color-accent);
+  --primary-foreground: var(--color-text-on-accent);
+  --secondary: var(--color-surface-fill);
+  --secondary-foreground: var(--color-text-secondary);
+  --muted: var(--color-surface-fill);
+  --muted-foreground: var(--color-text-muted);
+  --accent: var(--color-accent-fill);
+  --accent-foreground: var(--color-accent);
+  --destructive: var(--color-status-danger);
+  --border: var(--color-border-card);
+  --input: var(--color-border-control);
+  --ring: var(--color-focus-ring);
+  --radius: var(--radius-lg);
 
   /* shadcn also ships --chart-* and --sidebar-*, which tokens.md §13 anticipated.
      The charts map onto the heat scale; the sidebar reads from the same surfaces
@@ -267,14 +278,14 @@
   --chart-4: var(--color-heat-4);
   --chart-5: var(--color-heat-0);
 
-  --sidebar:                    var(--color-surface-page);
-  --sidebar-foreground:         var(--color-text-secondary);
-  --sidebar-primary:            var(--color-accent);
+  --sidebar: var(--color-surface-page);
+  --sidebar-foreground: var(--color-text-secondary);
+  --sidebar-primary: var(--color-accent);
   --sidebar-primary-foreground: var(--color-text-on-accent);
-  --sidebar-accent:             var(--color-hover-fill);
-  --sidebar-accent-foreground:  var(--color-text-primary);
-  --sidebar-border:             var(--color-border-card);
-  --sidebar-ring:               var(--color-focus-ring);
+  --sidebar-accent: var(--color-hover-fill);
+  --sidebar-accent-foreground: var(--color-text-primary);
+  --sidebar-border: var(--color-border-card);
+  --sidebar-ring: var(--color-focus-ring);
 }
 
 /* shadcn's components read the bare names above; these bridge them to utilities
@@ -282,24 +293,24 @@
    shadcn's `--accent` lands on `accent-subtle` here so that it cannot be confused
    with our `--color-accent`, which is the brand pine. */
 @theme inline {
-  --color-background:               var(--background);
-  --color-foreground:               var(--foreground);
-  --color-card:                     var(--card);
-  --color-card-foreground:          var(--card-foreground);
-  --color-popover:                  var(--popover);
-  --color-popover-foreground:       var(--popover-foreground);
-  --color-primary:                  var(--primary);
-  --color-primary-foreground:       var(--primary-foreground);
-  --color-secondary:                var(--secondary);
-  --color-secondary-foreground:     var(--secondary-foreground);
-  --color-muted:                    var(--muted);
-  --color-muted-foreground:         var(--muted-foreground);
-  --color-accent-subtle:            var(--accent);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-subtle: var(--accent);
   --color-accent-subtle-foreground: var(--accent-foreground);
-  --color-destructive:              var(--destructive);
-  --color-border:                   var(--border);
-  --color-input:                    var(--input);
-  --color-ring:                     var(--ring);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -307,14 +318,14 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
 
-  --color-sidebar:                    var(--sidebar);
-  --color-sidebar-foreground:         var(--sidebar-foreground);
-  --color-sidebar-primary:            var(--sidebar-primary);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent:             var(--sidebar-accent);
-  --color-sidebar-accent-foreground:  var(--sidebar-accent-foreground);
-  --color-sidebar-border:             var(--sidebar-border);
-  --color-sidebar-ring:               var(--sidebar-ring);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 /* ============================================================================

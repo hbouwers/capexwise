@@ -365,8 +365,8 @@ export default function Styleguide() {
           <p className="mt-4 max-w-2xl text-xs leading-normal text-text-tertiary">
             Seven labels, five variants. components.md §9 collapses{" "}
             <em>Discretionary</em> onto <em>Planned</em>: they shared a tint and
-            differed only in a text colour that failed AA, so distinguishing them
-            is a wording job rather than a colour one.
+            differed only in a text colour that failed AA, so distinguishing
+            them is a wording job rather than a colour one.
           </p>
         </Section>
 
@@ -409,7 +409,10 @@ export default function Styleguide() {
                   </span>
                 </div>
                 <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-meter-track">
-                  <div className={`h-full ${bg}`} style={{ width: `${pct}%` }} />
+                  <div
+                    className={`h-full ${bg}`}
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
               </div>
             ))}
@@ -431,13 +434,21 @@ export default function Styleguide() {
               [
                 ["text-micro", "10px", "uppercase mono labels; badge text"],
                 ["text-2xs", "11px", "dense table metadata, chart axis labels"],
-                ["text-xs", "12px", "secondary body, card subtitles, helper text"],
+                [
+                  "text-xs",
+                  "12px",
+                  "secondary body, card subtitles, helper text",
+                ],
                 ["text-sm", "13px", "default body, table cells, nav items"],
                 ["text-md", "14px", "card headings, emphasised rows"],
                 ["text-lg", "16px", "page title in the header bar"],
                 ["text-xl", "21px", "building name on the detail header"],
                 ["text-2xl", "25px", "KPI figures"],
-                ["text-3xl", "42px", "the single hero figure on the tax screen"],
+                [
+                  "text-3xl",
+                  "42px",
+                  "the single hero figure on the tax screen",
+                ],
               ] as const
             ).map(([cls, px, use]) => (
               <div
@@ -558,7 +569,9 @@ export default function Styleguide() {
           <div className="flex flex-wrap gap-4">
             <div className="rounded-lg border border-accent-border bg-surface-card p-4">
               <FieldLabel>Replace</FieldLabel>
-              <div className="numeric mt-2 text-2xl text-text-primary">2031</div>
+              <div className="numeric mt-2 text-2xl text-text-primary">
+                2031
+              </div>
               <span className="mt-3 inline-block rounded-sm bg-tint-good px-2 py-[3px] font-mono text-micro font-medium tracking-label text-status-good uppercase">
                 Audited
               </span>
@@ -624,12 +637,12 @@ export default function Styleguide() {
             <div>
               <FieldLabel>Motion</FieldLabel>
               <div className="mt-3 flex flex-col gap-1 text-xs text-text-secondary">
-                <span className="numeric">fast 120ms — colour, border, focus</span>
+                <span className="numeric">
+                  fast 120ms — colour, border, focus
+                </span>
                 <span className="numeric">base 180ms — disclosure, tabs</span>
                 <span className="numeric">slow 240ms — modal enter, scrim</span>
-                <span className="numeric">
-                  ease cubic-bezier(.2, 0, 0, 1)
-                </span>
+                <span className="numeric">ease cubic-bezier(.2, 0, 0, 1)</span>
               </div>
             </div>
           </div>
@@ -875,7 +888,9 @@ export default function Styleguide() {
                 <CardDescription>Banked against needed</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="numeric text-2xl text-text-primary">$44,800</div>
+                <div className="numeric text-2xl text-text-primary">
+                  $44,800
+                </div>
                 <Progress value={38} className="mt-3" />
               </CardContent>
             </Card>
@@ -898,7 +913,9 @@ export default function Styleguide() {
               </CardHeader>
               <CardContent>
                 <div className="flex items-baseline gap-2">
-                  <span className="numeric text-2xl text-status-overdue">4</span>
+                  <span className="numeric text-2xl text-status-overdue">
+                    4
+                  </span>
                   <span className="text-xs text-text-muted">items overdue</span>
                 </div>
               </CardContent>
