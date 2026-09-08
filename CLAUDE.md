@@ -24,7 +24,7 @@ eventually be world-readable.
 | --- | --- |
 | `docs/PRD.md` | Product requirements. Problem, users, features, release plan, risks, open questions |
 | `docs/adr/` | Architecture decision records, plus the template and numbering rules |
-| `docs/data-model.md` | Schema, indexes, deletion behaviour — **not written yet**, see #9 |
+| `docs/data-model.md` | Schema, indexes, deletion behaviour, RLS policy template. The contract for the first migration |
 | `docs/ui/tokens.md` | Design tokens — **not written yet**, see #10 |
 | `docs/ui/components.md` | Component inventory — **not written yet**, see #11 |
 | `docs/ui/screens/` | One markdown spec per screen — **not written yet**, see #12 |
