@@ -26,7 +26,7 @@ eventually be world-readable.
 | `docs/adr/` | Architecture decision records, plus the template and numbering rules |
 | `docs/data-model.md` | Schema, indexes, deletion behaviour, RLS policy template. The contract for the first migration |
 | `docs/ui/tokens.md` | Design tokens — colour, type, radius, states. The contract for the Tailwind theme |
-| `docs/ui/components.md` | Component inventory — **not written yet**, see #11 |
+| `docs/ui/components.md` | Component inventory — names, layers, shadcn mapping. The contract the screen specs reference |
 | `docs/ui/screens/` | One markdown spec per screen — **not written yet**, see #12 |
 | `docs/ui/reference/rental-manager.html` | The design prototype. Visual source of truth |
 
@@ -81,6 +81,11 @@ transcription of it — four of the prototype's seven text greys fail WCAG AA, i
 used, so the ramp there is corrected and two hex values are new. A value taken from the prototype by
 eye reintroduces a failure that was already found and fixed.
 
+**Never copy the prototype's markup.** It is a picture of the design, not an implementation of
+it: zero `<button>` elements, zero `<a>` elements, 43 click handlers on bare `<div>`s, and tables
+built from CSS grid with no row or column semantics. [`docs/ui/components.md`](docs/ui/components.md)
+§9 lists what does not carry forward.
+
 `docs/ui/reference/rental-manager.html` is a Claude Design bundle, not plain HTML — the real markup
 lives inside its `<script type="__bundler/template">` tag as a JSON string. To read it, extract
 that tag and JSON-decode it rather than opening the file directly.
@@ -110,6 +115,7 @@ every screen is undefined and has to be specified, not improvised (#12).
 | Name | **CapExWise**, `capexwise.com` registered 2026-09-08 (#3). Repository, board and Vercel project take the same name |
 | Trademark | **Do not register yet** (#3). Rights come from use in commerce, and an Intent-to-Use filing keeps priority available later, so registration waits for the first paying customer, public launch, or real branding spend. "CapExWise" is suggestive-to-descriptive in a category already full of CapEx-named tools, so it is a weak mark and early registration buys little. **Clearance is a different thing and is not deferred** — it happens before #32 and before v0.5. Not legal advice; an attorney gives the real opinion |
 | Dark mode | **Out of scope through v1** ([tokens](docs/ui/tokens.md) §12). The palette is warm paper: four surfaces within 5% luminance of each other, hierarchy carried by 1px borders rather than shadow, status as dark-on-pale-tint. An inversion is a second design needing its own accessibility pass, not a token swap. Reversal stays cheap because every value is a semantic custom property and no component references a primitive |
+| Typeface | **IBM Plex Sans + IBM Plex Mono**, self-hosted via `next/font`, weights 400/500/600 ([components](docs/ui/components.md) §12). Every number that is a *value* renders in the mono; everything else in the sans. Rejected: the prototype's system stack — Arial and Segoe UI have no Medium, so 45 deliberate 500/600 weights collapse to two on Windows, and their digits are unrelated to the mono's |
 | Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
 
 ## Still open — check before building on them
