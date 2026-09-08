@@ -5,7 +5,8 @@ Companion to Zillow Rental Manager, not a replacement: Zillow keeps rent collect
 listings, tenants and messaging; this owns the capital asset lifecycle, CapEx forecasting, tax
 planning, maintenance scheduling, vendor contacts and building operational facts.
 
-**Status: pre-implementation.** There is no application code yet. Rules below that describe
+**Status: scaffolded, not yet functional.** The Next.js application builds and serves a
+placeholder page; there is no database, no auth, and no feature code. Rules below that describe
 runtime behaviour describe what the code *will* do — they are the contract to build against, not
 a description of something already working. Anything already true is marked as such.
 
@@ -29,6 +30,28 @@ eventually be world-readable.
 | `docs/ui/components.md` | Component inventory — names, layers, shadcn mapping. The contract the screen specs reference |
 | `docs/ui/screens/` | One markdown spec per screen — **not written yet**, see #12 |
 | `docs/ui/reference/rental-manager.html` | The design prototype. Visual source of truth |
+
+### Source layout
+
+`src/` is the application; everything under it is TypeScript. The `@/*` import alias maps to
+`src/*` — use it rather than relative paths that climb out of a directory.
+
+| Path | What it holds |
+| --- | --- |
+| `src/app/` | Routes. App Router segments, layouts, pages. Server Components by default; `"use client"` is opt-in and stays as far down the tree as it can |
+| `src/components/ui/` | shadcn/ui primitives as generated. Restyled to the tokens, not rewritten |
+| `src/components/` | Composed application components, grouped by feature once there is more than one |
+| `src/server/actions/` | `"use server"` mutations, one file per domain area. Every one starts with `getOrgContext()` |
+| `src/server/queries/` | Read paths, org-scoped, one file per domain area. Called from Server Components; never from the client |
+| `src/server/org-context.ts` | `getOrgContext()` and the scoped `db.forOrg(orgId)` (#26). One of the two files allowed to import the raw client |
+| `src/db/schema/` | Drizzle table definitions, one file per domain area, matching `docs/data-model.md` |
+| `src/db/client.ts` | The raw database client. Importing it from anywhere else is an ESLint error (#16) |
+| `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
+| `drizzle/` | Generated migrations, committed (#17) |
+| `e2e/` | Playwright specs (#21). Unit tests are colocated as `*.test.ts` next to what they test |
+
+Directories appear when there is something real to put in them; this table is the convention,
+not a skeleton to pre-create.
 
 ## Hard rules
 
@@ -151,3 +174,9 @@ Milestones map to the PRD release plan: v0 personal, v0.5 demo, v1 paid, v2 prem
   multiple arguments for `gh`, so use bash with a heredoc for anything multi-line.
 - Docker is not installed yet (#18). Local Postgres depends on it, and so does keeping the
   Dockerfile honest.
+- **Node 24.** Pinned in `.nvmrc` and in `engines`, and Vercel runs 24 LTS for both builds and
+  functions. The major is the contract; CI reads `.nvmrc` and the Dockerfile pins a base image
+  digest, so nothing else needs to agree on a patch number.
+- **ESLint stays on 9.** `eslint-config-next` still peers on `<10` through
+  `eslint-plugin-react`, and ESLint 10 crashes on rule load rather than degrading. Re-test on the
+  next `eslint-config-next` major before bumping.
