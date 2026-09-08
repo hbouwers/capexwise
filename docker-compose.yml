@@ -50,7 +50,15 @@ services:
       # before Postgres accepts connections — the reason a migration run
       # immediately after "up" fails with a connection error. `db:up` passes
       # `--wait`, which waits on this.
-      test: ["CMD-SHELL", "pg_isready -U capexwise -d capexwise"]
+      #
+      # `-h 127.0.0.1` matters: it forces the check onto TCP, which is what a
+      # client actually connects over. Bare `pg_isready` probes the unix socket
+      # instead, and on a first run that socket answers too early — the
+      # entrypoint runs initdb and then starts a temporary socket-only server
+      # (`listen_addresses=''`) to execute init scripts. A socket check passes
+      # against that, the container is marked healthy, `--wait` returns, and the
+      # migration on the next line hits a port with nothing listening yet.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U capexwise -d capexwise"]
       interval: 5s
       timeout: 5s
       retries: 10

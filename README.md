@@ -114,9 +114,8 @@ The repository is the source of truth.
 ## Local development
 
 **Prerequisites.** Node 24, pinned in [`.nvmrc`](./.nvmrc), so `nvm use` picks it up. Docker
-Desktop is needed for the database only — on Windows, install it with the WSL2 backend rather
-than the Hyper-V one, because Postgres on the Hyper-V backend pays a filesystem penalty that
-makes it noticeably slower.
+Desktop is needed for the database only — on Windows take the WSL2 backend, which is the current
+default; the Hyper-V one is legacy and is not what this is run against.
 
 ```bash
 npm install
