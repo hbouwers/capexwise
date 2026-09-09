@@ -25,7 +25,15 @@ if (existsSync(".env.local")) {
 
 export default defineConfig({
   dialect: "postgresql",
-  schema: "./src/db/schema",
+  // A glob rather than the bare directory, because the integration tests are
+  // colocated with the tables they cover and drizzle-kit `require`s every `.ts`
+  // file it is pointed at. A test file imports `vitest`, which cannot be
+  // `require`d — the load throws, drizzle-kit prints the error and exits 0
+  // anyway, and the schema it then diffs against is empty. `!(*.test)` excludes
+  // `*.integration.test.ts` and `*.test.ts` alike. Still a glob over the
+  // directory rather than a list of files, so a new table is picked up by
+  // existing rather than by being remembered here.
+  schema: "./src/db/schema/**/!(*.test).ts",
   out: "./drizzle",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },
 });

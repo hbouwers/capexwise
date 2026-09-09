@@ -11,8 +11,12 @@
  *   drizzle-kit check      the journal and the snapshots agree with each other
  *                          (a hand-edited snapshot, a duplicated index, a
  *                          migration added on two branches at once)
- *   drizzle-kit generate   produces nothing new, which is only true when the
- *                          snapshots already describe the TypeScript schema
+ *   drizzle-kit generate   reads the schema, and produces nothing new — which
+ *                          is only true when the snapshots already describe the
+ *                          TypeScript schema. Both halves are checked: a schema
+ *                          file that fails to load makes drizzle-kit print the
+ *                          error and exit 0 having read no tables, and then
+ *                          "produced nothing new" is vacuously true
  *
  * Both are file-based, so this needs no database and CI does not have to
  * provision one for the job (#22).
@@ -122,6 +126,46 @@ for (const path of changed) {
 if (generate.status !== 0) {
   fail(
     "`drizzle-kit generate` failed.",
+    `${generate.stdout}${generate.stderr}`,
+  );
+}
+
+// An exit code is not enough on its own. drizzle-kit `require`s each schema file,
+// and when one of them throws it prints the error and exits 0 anyway — having
+// diffed the migrations against an empty schema. From out here "generated
+// nothing" and "read nothing" look identical, so this check happily reported
+// four tables as in sync while the generator was reading none of them.
+//
+// The table count it prints is the tell: a real run always names it, and a run
+// that loaded no schema cannot. Absent, or zero, means the schema never loaded.
+//
+// That is human-readable output rather than a contract, so the two cases are
+// reported differently. Zero tables is unambiguous — drizzle-kit counted, and
+// counted none. A missing line is not: it means either the same failure or a
+// drizzle-kit release that reworded its output, and `drizzle-kit` is a caret
+// range that Dependabot bumps weekly. Naming both beats asserting the wrong one
+// on the morning a dependency PR turns CI red.
+const tablesRead = /^\s*(\d+) tables?\s*$/m.exec(generate.stdout);
+
+if (tablesRead && tablesRead[1] === "0") {
+  fail(
+    "`drizzle-kit generate` read the schema and found no tables.\n\n" +
+      "Every table would be dropped by the next migration generated from it.\n" +
+      "Check what `schema` in `drizzle.config.ts` matches.",
+    `${generate.stdout}${generate.stderr}`,
+  );
+}
+
+if (!tablesRead) {
+  fail(
+    "`drizzle-kit generate` exited cleanly without reporting a table count.\n\n" +
+      "It prints one on every successful run, so this is one of two things:\n\n" +
+      "  - a schema file failed to load. drizzle-kit prints the error and\n" +
+      "    exits 0 anyway, having diffed against an empty schema, so without\n" +
+      "    this check the run would have been reported as in sync. The error\n" +
+      "    is below.\n" +
+      "  - drizzle-kit changed its output. Check the version against the line\n" +
+      "    this looks for, in `scripts/check-migration-drift.mjs`.",
     `${generate.stdout}${generate.stderr}`,
   );
 }

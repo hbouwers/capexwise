@@ -10,20 +10,26 @@
  * it belongs to is a way to write a test that passes with the tenancy boundary
  * broken. Required argument, no default, no exceptions.
  *
- * `createOrganization` is the one factory that takes no `orgId`, because
- * `organizations` is the tenancy root and has no `org_id` of its own — every
- * other factory's first argument comes from this one's return value.
- *
- * There is exactly one factory here because there is exactly one table (#24 adds
- * `users`, `memberships` and `invitations`). The shape is set now so the second
- * one is written to it rather than establishing a different pattern.
+ * Two factories here take no `orgId`, and both are on the tenancy root's side of
+ * the boundary rather than exceptions to it. `createOrganization` builds the
+ * root itself, which has no `org_id` of its own. `createUser` builds a row that
+ * is deliberately *above* the boundary: a person belongs to more than one org
+ * with one account (`docs/data-model.md` §2), so a `users` row that belonged to
+ * an org would misrepresent the schema. `createMembership` is the one that joins
+ * them, and it takes an `orgId` first like every domain factory does.
  */
-import { organizations } from "@/db/schema";
+import { invitations, memberships, organizations, users } from "@/db/schema";
 
 import { testDb } from "./db";
 
 type Organization = typeof organizations.$inferSelect;
 type OrganizationInput = typeof organizations.$inferInsert;
+type User = typeof users.$inferSelect;
+type UserInput = typeof users.$inferInsert;
+type Membership = typeof memberships.$inferSelect;
+type MembershipInput = typeof memberships.$inferInsert;
+type Invitation = typeof invitations.$inferSelect;
+type InvitationInput = typeof invitations.$inferInsert;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -34,17 +40,34 @@ type OrganizationInput = typeof organizations.$inferInsert;
 let sequence = 0;
 
 /**
+ * `returning()` on a single-row insert always yields one row, but its type is an
+ * array and `noUncheckedIndexedAccess` is on, so the impossible case is still a
+ * branch. It throws rather than asserting non-null: if it ever does happen, a
+ * message beats a `TypeError` two lines later.
+ */
+function firstRow<T>(rows: T[], table: string): T {
+  const [row] = rows;
+
+  if (!row) {
+    throw new Error(`Inserting into ${table} returned no row.`);
+  }
+
+  return row;
+}
+
+/**
  * Inserts an organization and returns the row as the database wrote it —
  * defaults, generated id and all — rather than the values handed in. Tests that
  * assert on `id`, `plan` or `createdAt` are then asserting on what Postgres
- * actually did, which is the point of a database-backed test.
+ * actually did, which is the point of a database-backed test. Every factory
+ * below returns its row the same way and for the same reason.
  */
 export async function createOrganization(
   overrides: Partial<OrganizationInput> = {},
 ): Promise<Organization> {
   sequence += 1;
 
-  const [organization] = await testDb()
+  const rows = await testDb()
     .insert(organizations)
     .values({
       name: `Test Organization ${sequence}`,
@@ -53,13 +76,71 @@ export async function createOrganization(
     })
     .returning();
 
-  // `returning()` on a single-row insert always yields one row, but its type is
-  // an array and `noUncheckedIndexedAccess` is on, so the impossible case is
-  // still a branch. It throws rather than asserting non-null: if it ever does
-  // happen, a message beats a `TypeError` two lines later.
-  if (!organization) {
-    throw new Error("Inserting an organization returned no row.");
-  }
+  return firstRow(rows, "organizations");
+}
 
-  return organization;
+/**
+ * No `orgId`, and not an oversight — see the module comment. A user reaches an
+ * org through `createMembership`, which is the only thing that puts them in one.
+ */
+export async function createUser(
+  overrides: Partial<UserInput> = {},
+): Promise<User> {
+  sequence += 1;
+
+  const rows = await testDb()
+    .insert(users)
+    .values({
+      email: `test-user-${sequence}@example.test`,
+      name: `Test User ${sequence}`,
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "users");
+}
+
+/**
+ * The join, and the first factory to take the required `orgId`. `userId` is
+ * required for the same reason: a membership that could invent its own user
+ * would let a test assert on tenancy while quietly holding both sides fixed.
+ */
+export async function createMembership(
+  orgId: string,
+  userId: string,
+  overrides: Partial<MembershipInput> = {},
+): Promise<Membership> {
+  const rows = await testDb()
+    .insert(memberships)
+    .values({ orgId, userId, ...overrides })
+    .returning();
+
+  return firstRow(rows, "memberships");
+}
+
+/**
+ * `expiresAt` has no default in the schema — an invitation that never expires is
+ * not a thing the table allows — so the factory supplies a plausible one rather
+ * than making every caller invent a date it does not care about. A test about
+ * expiry passes its own.
+ */
+export async function createInvitation(
+  orgId: string,
+  inviterId: string,
+  overrides: Partial<InvitationInput> = {},
+): Promise<Invitation> {
+  sequence += 1;
+
+  const rows = await testDb()
+    .insert(invitations)
+    .values({
+      orgId,
+      inviterId,
+      email: `test-invitee-${sequence}@example.test`,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "invitations");
 }
