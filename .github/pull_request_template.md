@@ -15,7 +15,8 @@ Closes #
 
 ## Screenshots
 
-<!-- Desktop and 375px. Delete this section if nothing visual changed. -->
+<!-- Optional. Worth attaching only for a state that is awkward to reach locally, or a
+     before-and-after. Delete this section otherwise — which is most of the time. -->
 
 ---
 
@@ -31,7 +32,7 @@ for `git log`.
 ## Checklist
 
 - [ ] `/code-review` run — required for anything touching code, skipped for markdown-only
-- [ ] Screenshots above, desktop and 375px, for any change that moves pixels
+- [ ] UI change → run the branch locally; screenshots only if a still shows something running it does not
 - [ ] Migration SQL read before committing — it is forward-only, there is no `down`
 - [ ] New table added → the cross-org isolation test extended to cover it (#27)
 - [ ] New environment variable → in `src/lib/env-schema.mts` _and_ `.env.example`, and no
