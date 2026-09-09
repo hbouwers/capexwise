@@ -4,7 +4,10 @@
 **Last updated:** 2026-09-08
 **Supersedes:** the sketch in [PRD](PRD.md) section 10
 
-This is the contract for the first migration (#17). Nothing here is implemented yet.
+This is the contract the migrations implement. **`organizations` is built** — #17 landed the
+Drizzle pipeline and needed one real table to exercise it. Everything else here is still prose:
+`users`, `memberships` and `invitations` are #24, the Better Auth tables come with the provider in
+#25, and row-level security is #28.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -770,6 +773,15 @@ create policy buildings_org_isolation on buildings
 | `users`, `sessions`, `accounts`, `verifications` | Above the tenancy boundary; read during sign-in, before an org context exists (§2) |
 | `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations and seeds |
 | `organizations` | Has a policy, but keyed on `id = current_org_id`, not `org_id` |
+
+**`organizations` needs more thought than the template, and #28 owns it.** A policy of
+`id = current_org_id` with a matching `WITH CHECK` cannot admit the row that creates an org: at
+signup there is no org context yet, and the check would require `current_org_id` to already equal an
+id that does not exist. Either the id is generated in the application and set before the insert, or
+org creation runs on a path the policy does not apply to — which is a decision about who is allowed
+to create an org, not a detail of the policy. The soft delete is the second half of the same
+question: `deleted_at is null` belongs in the `USING` clause, and then a purge job cannot see the
+rows it exists to remove. Both are why `organizations` did not get RLS in #17 along with the table.
 
 ### The per-table checklist
 
