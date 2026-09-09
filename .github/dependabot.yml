@@ -1,0 +1,58 @@
+# Weekly, grouped, and deliberately quiet.
+#
+# A solo dev with one open PR at a time cannot absorb a PR per dependency, so
+# everything that is a minor or a patch arrives as one PR per ecosystem. Majors
+# come one at a time, because a major is a decision and deserves its own review.
+#
+# Two majors are pinned shut here rather than left to be closed by hand every
+# week. Both are contracts written down in CLAUDE.md, not preferences:
+#
+#   eslint        stays on 9 — eslint-config-next still peers on <10 through
+#                 eslint-plugin-react, and ESLint 10 crashes on rule load rather
+#                 than degrading. Revisit on the next eslint-config-next major.
+#   node          stays on 24 — .nvmrc, `engines`, the Dockerfile base image and
+#                 Vercel's runtime all have to agree, and Vercel runs 24 LTS.
+#
+# Dependabot's default commit subject — "Bump next from 16.3.4 to 16.4.0" — is
+# already imperative and already says what it does, so it is left alone.
+
+version: 2
+
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      # One PR a week for everything routine, dev and production together. They
+      # are split in package.json because the bundler cares; a review of a patch
+      # bump does not.
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    groups:
+      # CI pins actions to a major (`actions/checkout@v7`), so most weeks this
+      # is empty and the occasional week is one PR moving several at once.
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
