@@ -20,10 +20,18 @@ import prettier from "eslint-config-prettier/flat";
  *   src/db/client.ts           the pool it wraps (#26)
  *   src/db/migrate.mts         the migration runner, which predates any org
  *                              context and opens its own connection
+ *   src/test/db.ts             the integration harness (#21)
  *
- * Only the runner exists so far.
+ * The runner and the harness exist so far.
  *
- * One `ignores` list covers all three rather than a block per file, because
+ * The harness is on the list for a reason that is the opposite of a concession.
+ * #27's cross-org isolation test has to prove that a scoped handle hides another
+ * org's rows, and a test that can only see through the scoped handle cannot tell
+ * a row that was correctly hidden from one that was never written. Reading it
+ * unscoped is the assertion. Nothing in `src/` imports this file; it is loaded
+ * by Vitest and by nothing else.
+ *
+ * One `ignores` list covers all four rather than a block per file, because
  * `no-restricted-syntax` is replaced and not merged when two config blocks both
  * set it — a second block would silently disarm the dynamic-import guard below
  * for every file it matched. The cost is that the list is a little looser than
@@ -35,6 +43,7 @@ const UNSCOPED_DB_ALLOWED = [
   "src/server/org-context.ts",
   "src/db/client.ts",
   "src/db/migrate.mts",
+  "src/test/db.ts",
 ];
 
 const RAW_DB_MESSAGE =
