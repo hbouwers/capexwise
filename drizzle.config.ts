@@ -8,11 +8,13 @@ import { defineConfig } from "drizzle-kit";
  * live database. That is deliberate: it lets CI verify a migration is checked
  * in without provisioning Postgres for the job.
  *
- * So `dbCredentials` must not be required to load this file. It is read
- * leniently here, and `src/db/migrate.ts` — the one command that genuinely
- * needs a database — does the strict check with an error that says what to do.
- * `.env.example` plus real boot-time validation is #20; this is the minimum
- * that works until then.
+ * So `dbCredentials` must not be required to load this file, and this is the one
+ * place in the repository that reads `process.env` without validating it. That
+ * is the whole exception rather than a precedent: `drizzle-kit studio` is the
+ * only subcommand here that connects, and it fails on its own with a connection
+ * error that is hard to misread. Everything that needs a value it can rely on
+ * goes through `src/lib/env-schema.mts` — `src/db/migrate.mts` for the migration
+ * runner, `src/server/env.ts` for the application.
  */
 // Next.js loads `.env.local` for the application; drizzle-kit is a separate
 // process and loads nothing, so it is read here. `process.loadEnvFile` throws

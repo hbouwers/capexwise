@@ -25,23 +25,47 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
 
+import {
+  EnvironmentError,
+  migrationEnvSchema,
+  parseEnv,
+} from "../lib/env-schema.mts";
+
 // Next.js loads `.env.local` for the application; this is a plain Node process
-// and loads nothing, so it is read here. `.env.example` plus real boot-time
-// validation is #20 — until then this is the check, and it is deliberately a
-// hard failure rather than a fallback to the local compose database. A silent
-// default would mean a mis-set variable in CI migrates a developer's laptop.
+// and loads nothing, so it is read here.
 if (existsSync(".env.local")) {
   process.loadEnvFile(".env.local");
 }
 
-const url = process.env.DATABASE_URL;
+// A relative specifier with the extension spelled out, above, rather than the
+// `@/` alias the rest of the codebase uses: Node runs this file directly, so
+// there is no bundler to resolve the alias. Same reason `drizzle.config.ts`
+// loads `.env.local` by hand.
+//
+// `migrationEnvSchema` rather than the whole server schema, because this command
+// needs a database and nothing else. Validating every variable the application
+// grows would make an auth secret a prerequisite for applying a migration, and
+// the CI job that runs this on a push to `main` (ADR-0006) has no reason to hold
+// one.
+//
+// The failure is deliberately hard rather than a fallback to the local compose
+// database. A silent default would mean a mis-set variable in CI migrates a
+// developer's laptop.
+let url: string;
 
-if (!url) {
-  console.error(
-    "DATABASE_URL is not set.\n\n" +
-      "Locally: `npm run db:up`, then put the connection string from the README\n" +
-      "into `.env.local`. In CI and on deploy it comes from the environment.",
-  );
+try {
+  ({ DATABASE_URL: url } = parseEnv(
+    migrationEnvSchema,
+    process.env,
+    "Locally: `npm run db:up`, then copy `.env.example` to `.env.local`.\n" +
+      "In CI and on deploy it comes from the environment.",
+  ));
+} catch (error) {
+  // An `EnvironmentError` is the operator's problem and its message is written
+  // to be read on its own; anything else is a bug and keeps its stack.
+  if (!(error instanceof EnvironmentError)) throw error;
+
+  console.error(error.message);
   process.exit(1);
 }
 

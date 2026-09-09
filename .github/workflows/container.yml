@@ -66,7 +66,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker run -d --name capexwise-ci -p 127.0.0.1:3000:3000 capexwise-app:ci
+          # `DATABASE_URL` because the server validates its configuration in the
+          # instrumentation hook and exits non-zero without it (#20). It points
+          # at nothing: no process in this job listens on 5432, and nothing in
+          # the application connects yet. Validation is a parse, so a
+          # well-formed string is all it wants — and using an unreachable one
+          # keeps this job honest about what it proves, which is that the image
+          # boots and serves, not that it can reach a database.
+          docker run -d --name capexwise-ci \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:5432/capexwise \
+            -p 127.0.0.1:3000:3000 capexwise-app:ci
 
           for _ in $(seq 1 30); do
             if curl -fsS -o /dev/null http://127.0.0.1:3000/; then
