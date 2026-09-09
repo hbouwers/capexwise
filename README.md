@@ -113,7 +113,9 @@ The repository is the source of truth.
 
 ## Local development
 
-Node 24 — the version is pinned in [`.nvmrc`](./.nvmrc), so `nvm use` picks it up.
+**Prerequisites.** Node 24, pinned in [`.nvmrc`](./.nvmrc), so `nvm use` picks it up. Docker
+Desktop is needed for the database only — on Windows take the WSL2 backend, which is the current
+default; the Hyper-V one is legacy and is not what this is run against.
 
 ```bash
 npm install
@@ -125,10 +127,52 @@ That serves a placeholder page on `http://localhost:3000`, and the design system
 primitive on one page, so that a value drifting away from
 [`docs/ui/tokens.md`](docs/ui/tokens.md) is visible rather than discovered on a screen later.
 
-There is nothing to configure yet: no environment variables are read and no database is required,
-because neither exists. The database, the environment template and the container are tracked in
-[the v0 milestone](https://github.com/hbouwers/capexwise/milestone/1), and this section grows as
-each lands.
+**No environment variables are read yet, and `npm run dev` does not need the database** — nothing
+in the application connects to it so far. Skip the next section entirely if you only want the app
+running.
+
+### The database
+
+Postgres 18 in a container, via [`docker-compose.yml`](./docker-compose.yml):
+
+```bash
+npm run db:up
+```
+
+`db:up` waits for Postgres to actually accept connections rather than returning as soon as the
+container starts, so it is safe to run a migration on the next line. The connection string, once
+something reads one, is:
+
+```
+postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise
+```
+
+Those credentials are committed in the compose file on purpose. They guard a database that holds
+no real data and is published to loopback only — the file explains why that is the safe
+combination, and why the password must not be reused anywhere reachable off the machine.
+
+Data lives in the named volume `capexwise-pgdata` and survives `db:down` and a machine restart.
+`db:reset` deletes that volume and recreates it empty, which is the way to start clean.
+
+**The major version is pinned to 18 and that is load-bearing.** [ADR-0005](docs/adr/0005-identifiers-money-dates.md)
+makes `uuidv7()` the primary key default, and it is a Postgres 18 built-in — so the managed
+instance in [#33](https://github.com/hbouwers/capexwise/issues/33) has to be 18 or newer too, and
+a provider that lags on majors is disqualified.
+
+| Script | What it does |
+| --- | --- |
+| `npm run db:up` | Start Postgres, waiting until it accepts connections |
+| `npm run db:down` | Stop it, keeping the data |
+| `npm run db:reset` | **Destroys the data** — removes the volume and starts empty |
+| `npm run db:psql` | A `psql` shell in the container, so none is needed on the host |
+
+Migrations and the demo seed are not part of this yet: `db:reset` leaves an empty database, and
+the full clone → install → up → migrate → seed → dev walkthrough lands with Drizzle in
+[#17](https://github.com/hbouwers/capexwise/issues/17) and the seed framework in
+[#34](https://github.com/hbouwers/capexwise/issues/34). The environment template and boot-time
+validation are [#20](https://github.com/hbouwers/capexwise/issues/20).
+
+### Scripts
 
 | Script | What it does |
 | --- | --- |
@@ -136,6 +180,8 @@ each lands.
 | `npm run build` | Production build |
 | `npm start` | Serve a production build |
 | `npm run lint` | ESLint |
+| `npm run format` | Prettier, writing in place |
+| `npm run format:check` | Prettier, checking only — what CI asks |
 | `npm run typecheck` | Generate route types, then `tsc --noEmit` |
 
 ## Licence
