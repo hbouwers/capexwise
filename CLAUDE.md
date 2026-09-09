@@ -53,7 +53,8 @@ eventually be world-readable.
 | `src/lib/env-schema.mts` | The environment contract — the schema, and the parser that formats a failure without printing a value. `.mts` because the migration runner imports it and runs under plain Node |
 | `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
 | `drizzle/` | Generated migrations, committed. Read the SQL before committing it; there is no `down` |
-| `e2e/` | Playwright specs (#21). Unit tests are colocated as `*.test.ts` next to what they test |
+| `src/test/` | The integration harness — test database lifecycle and factories. Loaded by Vitest, never imported by application code |
+| `e2e/` | Playwright specs. Vitest tests are colocated: `*.test.ts` for unit, `*.integration.test.ts` for the database-backed ones |
 
 Directories appear when there is something real to put in them; this table is the convention,
 not a skeleton to pre-create.
@@ -131,11 +132,39 @@ every screen is undefined and has to be specified, not improvised (#12).
 
 ## Testing
 
-- **The forecast maths and the tax maths get real unit tests.** They are the product. UI does not
-  need coverage targets.
+Three suites, and which one a test belongs in is decided by what it needs, not by what it is
+about. Anything that can be a unit test is one.
+
+| | Command | Needs | Holds |
+| --- | --- | --- | --- |
+| Unit | `npm test` | nothing | `src/**/*.test.ts`, colocated |
+| Integration | `npm run test:integration` | `npm run db:up` | `src/**/*.integration.test.ts`, colocated |
+| End-to-end | `npm run test:e2e` | a browser, a dev server | `e2e/*.spec.ts` |
+
+The integration suite creates `capexwise_test` itself, migrates it, and truncates every table
+before each test. It refuses to run against a database whose name does not end in `_test`.
+
+### The coverage stance
+
+- **The forecast maths and the tax maths get real unit tests.** They are the product, they are
+  pure functions over integer cents, and a wrong number on a tax page is worse than no tax page.
+  This is where thoroughness is spent — edge cases, boundaries, the years a schedule changes.
+- **UI does not need coverage targets.** No target, no ratchet, no assertions on markup that will
+  be redrawn. The end-to-end suite covers the shell — that a route renders, that the CSS applies,
+  that the fonts resolve — and stops there.
+- **Test behaviour the database owns, in the database.** Defaults, triggers, partial indexes and
+  constraints are claims `npm run typecheck` cannot check. `organizations.integration.test.ts` is
+  the pattern.
+- **A test whose failure would not change what anyone does is not worth writing.** Prefer one test
+  of a real regression — `src/lib/cn.test.ts` is a bug that actually shipped — to ten that restate
+  the implementation.
 - **One cross-org isolation test, extended per table** (#27). Any migration that adds a table
-  extends it — this is on the PR checklist.
-- Both suites run in CI on every PR (#22).
+  extends it — this is on the PR checklist. `src/test/db.ts` holds an unscoped connection so that
+  test can see the rows a scoped handle hides; that is the only reason it exists.
+- **Factories take an `orgId` as a required first argument**, never an optional one with a default.
+  A factory that can invent an org is a way to write a test that passes with tenancy broken.
+- All three suites run in CI on every PR, in `.github/workflows/test.yml`. #22 folds that job into
+  the full pipeline.
 
 ## Decided, and not up for re-litigation
 

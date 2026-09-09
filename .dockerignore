@@ -48,11 +48,18 @@ docs
 *.md
 LICENSE
 
-# Tests. Nothing in the image runs them; CI does, in its own job.
+# Tests. Nothing in the image runs them; CI does, in its own job. `src/test` is
+# the integration harness — it is the one thing under `src` the application never
+# imports, and the one file in the repository allowed an unscoped database
+# connection, so keeping it out of the image is worth stating rather than
+# incidental.
 e2e
+src/test
 **/*.test.ts
 **/*.test.tsx
+**/*.test.mts
 playwright.config.ts
+vitest.config.mts
 test-results
 playwright-report
 

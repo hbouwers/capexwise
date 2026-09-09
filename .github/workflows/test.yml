@@ -1,0 +1,113 @@
+# Runs the test suites on every pull request. Three of them, in one job and in
+# increasing order of cost: unit, then database-backed integration, then the
+# browser.
+#
+# One job rather than three, because three would each pay for a checkout and an
+# `npm ci` to run suites that together take under a minute — the setup would cost
+# more than the tests. The ordering is the useful part: the cheapest suite fails
+# first, so a broken pure function does not wait on a browser download to say so.
+#
+# This is a standalone workflow for the same reason `container.yml` is: #22 adds
+# the full pipeline — typecheck, lint, build, migration drift — and folds this
+# job into it. Until then it stands alone rather than not existing.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One run per branch. A push that supersedes an in-flight run cancels it rather
+# than queueing behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit, integration and end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # Postgres 18 because ADR-0005 makes `uuidv7()` the primary key default and
+      # that is an 18 built-in — an older major here would fail on the first
+      # migration rather than on anything that points at the cause. Same major as
+      # `docker-compose.yml`; the two are meant to agree.
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: capexwise
+          POSTGRES_USER: capexwise
+          # The committed local credential, same as `docker-compose.yml` and
+          # `.env.example`. It guards a throwaway database on a runner that is
+          # destroyed minutes later, so it is deliberately not a secret — a
+          # secret here would only mean the workflow could not be read.
+          POSTGRES_PASSWORD: capexwise_local_dev
+        ports:
+          - 5432:5432
+        # `npm ci` below is slower than Postgres takes to start, so this rarely
+        # waits. It is here because "rarely" is not "never", and the failure it
+        # prevents is a connection refused on the first integration test.
+        options: >-
+          --health-cmd "pg_isready -U capexwise -d capexwise"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The integration suite creates this database itself and truncates it
+      # between tests; `src/test/db.ts` refuses any name not ending in `_test`.
+      # It is the harness's own default too, and is written out here so the
+      # workflow says what it runs against without anyone opening that file.
+      TEST_DATABASE_URL: postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise_test
+      # For the dev server Playwright starts: `src/instrumentation.ts` validates
+      # the environment before serving anything, so the server needs a valid
+      # value to boot. Nothing queries the database yet — this has to parse, not
+      # to connect.
+      DATABASE_URL: postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # `.nvmrc` is the single source for the Node major. Naming a version
+          # here as well is how the two drift.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      # Chromium only, matching `playwright.config.ts`. Uncached: the download is
+      # around forty seconds and caching it correctly means keying on the
+      # Playwright version and handling a partial restore, which is more moving
+      # parts than the time is worth while this suite is one file. #22 revisits
+      # it if the pipeline gets slow enough to notice.
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      # Only on failure, and only then worth the upload: the report is the trace
+      # and the screenshots for whatever went red, which is the difference
+      # between debugging a browser failure from a log line and from the actual
+      # page.
+      - name: Upload the Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

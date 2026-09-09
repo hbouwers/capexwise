@@ -302,6 +302,48 @@ all of `node_modules` — a dependency loaded by a path that cannot be traced st
 It runs as the unprivileged `node` user. And its base image is pinned by digest as well as by tag,
 so a build that passed last week and fails today has changed for a reason visible in the diff.
 
+### Tests
+
+Three suites, split by what they need rather than by what they cover. The cheapest one needs
+nothing and runs in under a second, which is the point: anything that can be a unit test is one.
+
+```bash
+npm test
+```
+
+That is the unit suite — pure functions, no database, no server, no network. `npm run test:watch`
+is the same thing left running.
+
+```bash
+npm run db:up
+npm run test:integration
+```
+
+The integration suite runs against **its own database**, `capexwise_test`, which it creates and
+migrates on first run and truncates between every test. It never touches the `capexwise` database
+`npm run dev` uses, and it refuses outright to run against any database whose name does not end in
+`_test` — so a `TEST_DATABASE_URL` copied from the wrong line fails loudly instead of emptying
+something. Leave that variable unset unless you want a different server; the default is the compose
+database.
+
+What belongs here is the part of the schema that lives in SQL: defaults, triggers, partial indexes,
+constraints, and — from #27 onward — cross-org isolation. Those are claims `npm run typecheck`
+cannot check.
+
+```bash
+npm run test:e2e
+```
+
+The end-to-end suite, one Chromium browser against a dev server Playwright starts on port 3100.
+It covers the failures that need a real browser to see: a route that 500s, a stylesheet that never
+arrives, a font that silently falls back. It is deliberately small — the container workflow already
+proves the production image boots and serves, and everything else is faster to assert in Vitest.
+The browser is not installed with the dependencies; `npx playwright install chromium` gets it.
+
+All three run on every pull request in
+[`.github/workflows/test.yml`](.github/workflows/test.yml). The coverage stance — what gets real
+tests and what deliberately does not — is in [CLAUDE.md](./CLAUDE.md) under "Testing".
+
 ### Scripts
 
 | Script | What it does |
@@ -309,6 +351,10 @@ so a build that passed last week and fails today has changed for a reason visibl
 | `npm run dev` | Development server |
 | `npm run build` | Production build |
 | `npm start` | Serve a production build |
+| `npm test` | Unit tests. Needs nothing |
+| `npm run test:watch` | Unit tests, left running |
+| `npm run test:integration` | Database-backed tests. Needs `npm run db:up` |
+| `npm run test:e2e` | Playwright, against a dev server it starts |
 | `npm run lint` | ESLint |
 | `npm run format` | Prettier, writing in place |
 | `npm run format:check` | Prettier, checking only — what CI asks |
