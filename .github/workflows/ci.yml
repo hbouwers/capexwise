@@ -182,10 +182,11 @@ jobs:
         id: playwright
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
-      # Chromium is a forty-second download on every run otherwise. That does not
-      # move the pipeline's wall clock — the container job is the long pole
-      # either way — but this repository is private, so runner minutes are a
-      # quota rather than free, and forty seconds a run is worth eight lines.
+      # Chromium is a forty-second download on every run otherwise, and this job
+      # is the pipeline's long pole — 1m26s against 45s for the build and 26s for
+      # the container, which is mostly BuildKit cache hits. So the download is on
+      # the critical path, and it is also billed: this repository is private, so
+      # runner minutes are a quota rather than free.
       #
       # Only the browser is cached. The system libraries `--with-deps` installs
       # live outside this path, which is why the install step still runs on a
