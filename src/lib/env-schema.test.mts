@@ -23,20 +23,41 @@ import {
 
 const VALID = "postgresql://user:hunter2@localhost:5432/capexwise";
 
+/**
+ * A complete, valid server environment, with `overrides` applied on top.
+ *
+ * `serverEnvSchema` is not one variable and never was — every test below is
+ * about one of them, and without this every one of them would also have to
+ * restate the other four. The consequence worth naming: a variable added to the
+ * schema and not to this object turns every test in the file red at once, with a
+ * message naming the variable. That is the intended failure, not an annoyance to
+ * route around.
+ */
+function serverEnv(
+  overrides: Record<string, string | undefined> = {},
+): Record<string, string | undefined> {
+  return {
+    DATABASE_URL: VALID,
+    APP_URL: "http://localhost:3000",
+    BETTER_AUTH_SECRET: "x".repeat(32),
+    GOOGLE_CLIENT_ID: "client-id.apps.googleusercontent.com",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    ...overrides,
+  };
+}
+
 describe("parseEnv", () => {
   describe("what it accepts", () => {
     it("returns the parsed values", () => {
-      expect(parseEnv(serverEnvSchema, { DATABASE_URL: VALID })).toEqual({
-        DATABASE_URL: VALID,
-      });
+      expect(parseEnv(serverEnvSchema, serverEnv())).toEqual(serverEnv());
     });
 
     it("accepts both spellings of the scheme", () => {
       const short = "postgres://user:pw@localhost:5432/capexwise";
 
-      expect(parseEnv(serverEnvSchema, { DATABASE_URL: short })).toEqual({
-        DATABASE_URL: short,
-      });
+      expect(
+        parseEnv(serverEnvSchema, serverEnv({ DATABASE_URL: short })),
+      ).toEqual(serverEnv({ DATABASE_URL: short }));
     });
 
     it("accepts the Cloud SQL unix-socket form", () => {
@@ -48,16 +69,30 @@ describe("parseEnv", () => {
       const socket =
         "postgresql://user:pw@/capexwise?host=/cloudsql/project:region:instance";
 
-      expect(parseEnv(serverEnvSchema, { DATABASE_URL: socket })).toEqual({
-        DATABASE_URL: socket,
-      });
+      expect(
+        parseEnv(serverEnvSchema, serverEnv({ DATABASE_URL: socket })),
+      ).toEqual(serverEnv({ DATABASE_URL: socket }));
     });
 
     it("trims surrounding whitespace", () => {
       // A trailing newline pasted into a secrets UI is invisible in it.
       expect(
-        parseEnv(serverEnvSchema, { DATABASE_URL: `  ${VALID}\n` }),
-      ).toEqual({ DATABASE_URL: VALID });
+        parseEnv(serverEnvSchema, serverEnv({ DATABASE_URL: `  ${VALID}\n` })),
+      ).toEqual(serverEnv());
+    });
+
+    it("accepts an APP_URL on either scheme, with a port", () => {
+      // `http` because that is what local development is, and a schema that
+      // demanded `https` would be one every developer has to work around.
+      for (const origin of [
+        "http://localhost:3000",
+        "https://capexwise.com",
+        "https://capexwise-git-feat-x.vercel.app",
+      ]) {
+        expect(
+          parseEnv(serverEnvSchema, serverEnv({ APP_URL: origin })),
+        ).toEqual(serverEnv({ APP_URL: origin }));
+      }
     });
   });
 
@@ -107,6 +142,42 @@ describe("parseEnv", () => {
       expect(() => parseEnv(schema, {})).toThrow(/FIRST[\s\S]*SECOND/);
     });
 
+    it("rejects an APP_URL with a trailing slash", () => {
+      // Better Auth concatenates its base path onto this, so a trailing slash
+      // produces `//api/auth/...` — which most hosts serve and Google's
+      // redirect-URI matching treats as a different URI. The failure lands at
+      // the provider, saying nothing about us.
+      expect(() =>
+        parseEnv(serverEnvSchema, serverEnv({ APP_URL: "https://x.com/" })),
+      ).toThrow(/APP_URL is invalid/);
+    });
+
+    it("rejects an APP_URL that is a path rather than an origin", () => {
+      expect(() =>
+        parseEnv(serverEnvSchema, serverEnv({ APP_URL: "capexwise.com" })),
+      ).toThrow(/APP_URL is invalid/);
+    });
+
+    it("rejects a short BETTER_AUTH_SECRET", () => {
+      // 32 characters is Better Auth's own floor. Checking it here means a short
+      // value fails at boot, naming the variable, rather than at the first
+      // sign-in.
+      expect(() =>
+        parseEnv(serverEnvSchema, serverEnv({ BETTER_AUTH_SECRET: "short" })),
+      ).toThrow(/BETTER_AUTH_SECRET is invalid/);
+    });
+
+    it("names the Google client variables when they are absent", () => {
+      // ADR-0004 makes Google the only way in during v0, so an instance without
+      // these is an application nobody can enter.
+      expect(() =>
+        parseEnv(
+          serverEnvSchema,
+          serverEnv({ GOOGLE_CLIENT_ID: undefined, GOOGLE_CLIENT_SECRET: "" }),
+        ),
+      ).toThrow(/GOOGLE_CLIENT_ID is not set[\s\S]*GOOGLE_CLIENT_SECRET/);
+    });
+
     it("includes the hint it was given", () => {
       expect(() =>
         parseEnv(serverEnvSchema, {}, "Run `npm run db:up`."),
@@ -141,6 +212,28 @@ describe("parseEnv", () => {
         expect.unreachable("a malformed DATABASE_URL should throw");
       } catch (error) {
         expect((error as Error).message).not.toContain(password);
+      }
+    });
+
+    it("does not leak the auth secret when it is rejected for length", () => {
+      // The one variable in the schema whose *whole value* is a secret, and the
+      // one rejected by a rule about the value itself rather than its shape —
+      // so a message that helpfully showed what it got would print the secret in
+      // full. `BETTER_AUTH_SECRET` signs every session cookie and encrypts the
+      // OAuth tokens in `accounts`.
+      const secret = "too-short-but-still-a-real-secret";
+
+      try {
+        parseEnv(
+          serverEnvSchema,
+          serverEnv({ BETTER_AUTH_SECRET: secret.slice(0, 20) }),
+        );
+        expect.unreachable("a short BETTER_AUTH_SECRET should throw");
+      } catch (error) {
+        const { message } = error as Error;
+
+        expect(message).toContain("BETTER_AUTH_SECRET");
+        expect(message).not.toContain(secret.slice(0, 20));
       }
     });
   });

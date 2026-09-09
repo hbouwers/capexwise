@@ -99,9 +99,13 @@ jobs:
       # BuildKit and behind a layer cache, so its log answers "does the image
       # build" rather than "does the application".
       #
-      # No `DATABASE_URL`, deliberately. ADR-0006 keeps the database out of the
-      # build and the Dockerfile builds without one — if that stops being true,
-      # it stops here first.
+      # No environment at all, deliberately — not `DATABASE_URL`, not the auth
+      # secret, not the Google client. ADR-0006 keeps the database out of the
+      # build, ADR-0002 wants an image that is the same artefact wherever it
+      # runs, and the Dockerfile builds with none of this set. Keeping it true
+      # is why `@/server/env`, `@/db/client` and `@/server/auth` all read on
+      # first use rather than on import; if that stops being true, it stops
+      # here first.
       - name: Build
         run: npm run build
 
@@ -154,9 +158,21 @@ jobs:
       TEST_DATABASE_URL: postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise_test
       # For the dev server Playwright starts: `src/instrumentation.ts` validates
       # the environment before serving anything, so the server needs a valid
-      # value to boot. Nothing queries the database yet — this has to parse, not
-      # to connect.
+      # value for every variable in `src/lib/env-schema.mts` to boot. Nothing in
+      # the suite queries the database or reaches Google — these have to parse,
+      # not to work.
       DATABASE_URL: postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise
+      APP_URL: http://localhost:3100
+      # Not a secret and deliberately not stored as one. It signs cookies for a
+      # server that lives for ninety seconds on a runner that is then destroyed,
+      # and a value in a repository secret here would only mean the workflow
+      # could not be read. The name says what it is so nobody promotes it.
+      BETTER_AUTH_SECRET: ci-only-not-a-secret-ci-only-not-a-secret
+      # No sign-in happens here and none can: completing a Google round trip in
+      # CI means a real account and a real password in a secret, which #25
+      # weighed and declined. `e2e/smoke.spec.ts` says so at length.
+      GOOGLE_CLIENT_ID: ci-only-not-a-real-client
+      GOOGLE_CLIENT_SECRET: ci-only-not-a-real-secret
 
     steps:
       - uses: actions/checkout@v7
@@ -251,15 +267,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          # `DATABASE_URL` because the server validates its configuration in the
-          # instrumentation hook and exits non-zero without it (#20). It points
-          # at nothing: no process in this job listens on 5432, and nothing in
-          # the application connects yet. Validation is a parse, so a
-          # well-formed string is all it wants — and using an unreachable one
-          # keeps this job honest about what it proves, which is that the image
-          # boots and serves, not that it can reach a database.
+          # The server validates its configuration in the instrumentation hook
+          # and exits non-zero without it (#20), so every variable in
+          # `src/lib/env-schema.mts` has to be here. All of them point at
+          # nothing: no process in this job listens on 5432 and none of these
+          # reaches Google. Validation is a parse, so well-formed is all it
+          # wants — and using values that cannot work keeps this job honest about
+          # what it proves, which is that the image boots and serves.
+          #
+          # The image itself was built with none of this set, which is the
+          # property ADR-0006 wants and `src/server/env.ts` explains how it is
+          # kept: nothing parses the environment until something uses a value.
           docker run -d --name capexwise-ci \
             -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:5432/capexwise \
+            -e APP_URL=http://127.0.0.1:3000 \
+            -e BETTER_AUTH_SECRET=ci-only-not-a-secret-ci-only-not-a-secret \
+            -e GOOGLE_CLIENT_ID=ci-only-not-a-real-client \
+            -e GOOGLE_CLIENT_SECRET=ci-only-not-a-real-secret \
             -p 127.0.0.1:3000:3000 capexwise-app:ci
 
           for _ in $(seq 1 30); do
