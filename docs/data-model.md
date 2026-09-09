@@ -176,6 +176,12 @@ create table invitations (              -- Better Auth `invitation`, #30
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
+
+-- One live invitation per address per org. Partial, so a person who let an
+-- invitation lapse can be invited again and the history of that stays: a plain
+-- unique on (org_id, email) would refuse the re-invite forever.
+create unique index invitations_org_email_pending
+  on invitations (org_id, email) where status = 'pending';
 ```
 
 `sessions`, `accounts` and `verifications` follow Better Auth's shape with our id type and are not
@@ -712,6 +718,8 @@ the table that establishes the boundary rather than one that sits inside it.
 -- which is already a btree over (org_id, user_id) under that name.
 create index memberships_user         on memberships (user_id);  -- "which orgs am I in"
 create index invitations_org_status   on invitations (org_id, status, expires_at);
+-- `invitations_org_email_pending` is in §2 with the table: it is a constraint
+-- that happens to be an index, not an index added for a query.
 
 -- Buildings and units
 create index buildings_org_status     on buildings (org_id, status);

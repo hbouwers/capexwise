@@ -1,5 +1,5 @@
 {
-  "id": "34c0b8a7-2de8-42d0-94f8-1782604d595b",
+  "id": "d4cb5363-b9ee-4afe-bca4-d15c2974de0b",
   "prevId": "1b70ef45-a488-42a4-88ea-8be2752753cd",
   "version": "7",
   "dialect": "postgresql",
@@ -370,6 +370,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "invitations_org_email_pending": {
+          "name": "invitations_org_email_pending",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'pending'",
           "concurrently": false,
           "method": "btree",
           "with": {}

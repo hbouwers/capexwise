@@ -5,6 +5,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -67,6 +68,24 @@ export const invitations = pgTable(
       table.status,
       table.expiresAt,
     ),
+    // One live invitation per address per org. Partial, so it constrains only
+    // `pending` — the same person can be invited again after their first
+    // invitation is canceled or expires, and the history of that stays.
+    //
+    // Without it a double-submitted invite form writes two pending rows, the
+    // invitee gets two links, and accepting one leaves the other pending until
+    // it expires: it cannot be accepted either, because `memberships` is unique
+    // on `(org_id, user_id)`. `docs/data-model.md` §2 did not specify this and
+    // it belongs here rather than in #30's flow — an index is cheap to add to
+    // an empty table and expensive to add to one that already holds the
+    // duplicates it would reject.
+    //
+    // Raw SQL in the predicate for the same reason as `organizations_one_demo`:
+    // Drizzle renders a column reference table-qualified, which is not valid
+    // inside `CREATE INDEX ... WHERE`.
+    uniqueIndex("invitations_org_email_pending")
+      .on(table.orgId, table.email)
+      .where(sql`status = 'pending'`),
     // Named for what a violation means rather than for the columns, so the
     // constraint name in the error says which rule was broken.
     check(

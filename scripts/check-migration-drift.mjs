@@ -138,14 +138,34 @@ if (generate.status !== 0) {
 //
 // The table count it prints is the tell: a real run always names it, and a run
 // that loaded no schema cannot. Absent, or zero, means the schema never loaded.
-const tablesRead = /^\s*(\d+) tables?$/m.exec(generate.stdout);
-if (!tablesRead || tablesRead[1] === "0") {
+//
+// That is human-readable output rather than a contract, so the two cases are
+// reported differently. Zero tables is unambiguous — drizzle-kit counted, and
+// counted none. A missing line is not: it means either the same failure or a
+// drizzle-kit release that reworded its output, and `drizzle-kit` is a caret
+// range that Dependabot bumps weekly. Naming both beats asserting the wrong one
+// on the morning a dependency PR turns CI red.
+const tablesRead = /^\s*(\d+) tables?\s*$/m.exec(generate.stdout);
+
+if (tablesRead && tablesRead[1] === "0") {
   fail(
-    "`drizzle-kit generate` exited cleanly without reading the schema.\n\n" +
-      "It reports a table count on every real run, and this run reported " +
-      `${tablesRead ? "zero" : "none"}. That is a schema file failing to\n` +
-      "load — the error is below, and drizzle-kit exits 0 after printing it.\n" +
-      "Until it is fixed this check cannot see drift at all.",
+    "`drizzle-kit generate` read the schema and found no tables.\n\n" +
+      "Every table would be dropped by the next migration generated from it.\n" +
+      "Check what `schema` in `drizzle.config.ts` matches.",
+    `${generate.stdout}${generate.stderr}`,
+  );
+}
+
+if (!tablesRead) {
+  fail(
+    "`drizzle-kit generate` exited cleanly without reporting a table count.\n\n" +
+      "It prints one on every successful run, so this is one of two things:\n\n" +
+      "  - a schema file failed to load. drizzle-kit prints the error and\n" +
+      "    exits 0 anyway, having diffed against an empty schema, so without\n" +
+      "    this check the run would have been reported as in sync. The error\n" +
+      "    is below.\n" +
+      "  - drizzle-kit changed its output. Check the version against the line\n" +
+      "    this looks for, in `scripts/check-migration-drift.mjs`.",
     `${generate.stdout}${generate.stderr}`,
   );
 }

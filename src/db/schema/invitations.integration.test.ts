@@ -22,6 +22,7 @@ import {
   CHECK_VIOLATION,
   rejectsWith,
   RESTRICT_VIOLATION,
+  UNIQUE_VIOLATION,
 } from "@/test/postgres-errors";
 
 describe("invitations", () => {
@@ -67,6 +68,57 @@ describe("invitations", () => {
       await expect(
         createInvitation(org.id, inviter.id, { status: "cancelled" }),
       ).rejects.toSatisfy(rejectsWith(CHECK_VIOLATION));
+    });
+  });
+
+  describe("one live invitation per address", () => {
+    it("refuses a second pending invitation to the same address", async () => {
+      // The double-submitted invite form. Two pending rows would send the
+      // invitee two links, and accepting one would leave the other pending and
+      // unacceptable — `memberships` is unique on `(org_id, user_id)`, so the
+      // second acceptance is rejected and the row sits there until it expires.
+      const org = await createOrganization();
+      const inviter = await createUser();
+      await createInvitation(org.id, inviter.id, { email: "dup@example.test" });
+
+      await expect(
+        createInvitation(org.id, inviter.id, { email: "dup@example.test" }),
+      ).rejects.toSatisfy(rejectsWith(UNIQUE_VIOLATION));
+    });
+
+    it("allows a fresh invitation once the first is no longer pending", async () => {
+      // The half of a partial index that is easy to lose, and the reason it is
+      // partial: re-inviting someone who let an invitation lapse is ordinary,
+      // and a plain unique on `(org_id, email)` would refuse it forever.
+      const org = await createOrganization();
+      const inviter = await createUser();
+      await createInvitation(org.id, inviter.id, {
+        email: "again@example.test",
+        status: "expired",
+      });
+
+      const second = await createInvitation(org.id, inviter.id, {
+        email: "again@example.test",
+      });
+
+      expect(second.status).toBe("pending");
+    });
+
+    it("allows the same address to be invited to two organizations", async () => {
+      // `org_id` leads the index. A person can hold memberships in several orgs
+      // and so can be invited to several at once.
+      const first = await createOrganization({ slug: "first" });
+      const second = await createOrganization({ slug: "second" });
+      const inviter = await createUser();
+
+      await createInvitation(first.id, inviter.id, {
+        email: "both@example.test",
+      });
+      const other = await createInvitation(second.id, inviter.id, {
+        email: "both@example.test",
+      });
+
+      expect(other.orgId).toBe(second.id);
     });
   });
 

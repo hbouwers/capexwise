@@ -38,4 +38,5 @@ ALTER TABLE "invitations" ADD CONSTRAINT "invitations_org_id_organizations_id_fk
 ALTER TABLE "invitations" ADD CONSTRAINT "invitations_inviter_id_users_id_fk" FOREIGN KEY ("inviter_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "memberships_org_user" ON "memberships" USING btree ("org_id","user_id");--> statement-breakpoint
 CREATE INDEX "memberships_user" ON "memberships" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX "invitations_org_status" ON "invitations" USING btree ("org_id","status","expires_at");
+CREATE INDEX "invitations_org_status" ON "invitations" USING btree ("org_id","status","expires_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "invitations_org_email_pending" ON "invitations" USING btree ("org_id","email") WHERE status = 'pending';
