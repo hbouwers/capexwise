@@ -23,7 +23,7 @@ import prettier from "eslint-config-prettier/flat";
  *                              context and opens its own connection
  *   src/test/db.ts             the integration harness (#21)
  *
- * All but `org-context.ts` exist so far.
+ * All five exist as of #26.
  *
  * `src/server/auth.ts` is the one that looks like a concession and is not. The
  * four tables Better Auth reads through the handle sit *above* the tenancy
