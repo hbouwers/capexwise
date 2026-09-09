@@ -16,27 +16,7 @@ import { describe, expect, it } from "vitest";
 import { organizations } from "@/db/schema";
 import { testDb } from "@/test/db";
 import { createOrganization } from "@/test/factories";
-
-/**
- * Postgres error codes reach us through however many layers Drizzle wraps them
- * in, and that depth is a detail of the ORM version rather than something a test
- * should assert on. Walking the `cause` chain keeps these tests about Postgres.
- */
-function postgresErrorCode(error: unknown): string | undefined {
-  let current: unknown = error;
-
-  while (current instanceof Error) {
-    const { code } = current as { code?: unknown };
-    if (typeof code === "string") return code;
-
-    current = current.cause;
-  }
-
-  return undefined;
-}
-
-/** 23505 is unique_violation. */
-const UNIQUE_VIOLATION = "23505";
+import { rejectsWith, UNIQUE_VIOLATION } from "@/test/postgres-errors";
 
 describe("organizations", () => {
   describe("the harness itself", () => {
@@ -112,7 +92,7 @@ describe("organizations", () => {
       await createOrganization({ slug: "acme" });
 
       await expect(createOrganization({ slug: "acme" })).rejects.toSatisfy(
-        (error: unknown) => postgresErrorCode(error) === UNIQUE_VIOLATION,
+        rejectsWith(UNIQUE_VIOLATION),
       );
     });
 
@@ -134,9 +114,7 @@ describe("organizations", () => {
 
       await expect(
         createOrganization({ slug: "demo-two", isDemo: true }),
-      ).rejects.toSatisfy(
-        (error: unknown) => postgresErrorCode(error) === UNIQUE_VIOLATION,
-      );
+      ).rejects.toSatisfy(rejectsWith(UNIQUE_VIOLATION));
     });
   });
 
