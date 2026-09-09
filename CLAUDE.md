@@ -143,15 +143,10 @@ every screen is undefined and has to be specified, not improvised (#12).
 | Typeface | **IBM Plex Sans + IBM Plex Mono**, self-hosted via `next/font`, weights 400/500/600 ([components](docs/ui/components.md) §12). Every number that is a *value* renders in the mono; everything else in the sans. Rejected: the prototype's system stack — Arial and Segoe UI have no Medium, so 45 deliberate 500/600 weights collapse to two on Windows, and their digits are unrelated to the mono's |
 | Expense entry | **In v1** (PRD §12, question 5). Rent periods gave money-in; without money-out the F0 cash flow tile is half a number and the F4 Schedule E runs on assumptions. `transactions` was already fully specified in [data-model](docs/data-model.md) §6, so this cost no schema design — the migration ships with the feature. Still the largest single scope item in v1, and it adds a screen the prototype never drew (#12) |
 | Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
+| Default service lives | **National defaults, user-overridable** (PRD §12, question 4). The fix for regional variance is a per-org override, not a climate-zone question at signup — onboarding speed is already a first-class design problem (#39). Drives the `capital_item_types` seed (#34): one national default per item type, editable per org, with a visible `defaults_updated_at` |
+| Portfolio forecasting | **In v1** (PRD §12, question 6). The dashboard rollup (F0) was already settled and in v1; the 10-year forecast and reserve projection get the same portfolio view in v1 rather than staying per-building until v1.1 |
 
-## Still open — check before building on them
-
-- **How deep portfolio-level forecasting goes in v1** (#13, question 6). The dashboard rollup is
-  settled and in v1. What is open is whether the 10-year forecast and the reserve projection get a
-  portfolio view in v1 or stay per-building until v1.1 — an F3 scope question.
-- **How opinionated the default service lives are** (#13, question 4). National defaults with an
-  override, or ask for a climate zone during onboarding. Drives the `capital_item_types` seed, so
-  it wants answering before #34 rather than after.
+All six PRD open questions (#13) are now settled — see PRD §12.
 
 ## Live state is not duplicated here
 
