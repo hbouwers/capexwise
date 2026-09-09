@@ -11,8 +11,12 @@
  *   drizzle-kit check      the journal and the snapshots agree with each other
  *                          (a hand-edited snapshot, a duplicated index, a
  *                          migration added on two branches at once)
- *   drizzle-kit generate   produces nothing new, which is only true when the
- *                          snapshots already describe the TypeScript schema
+ *   drizzle-kit generate   reads the schema, and produces nothing new — which
+ *                          is only true when the snapshots already describe the
+ *                          TypeScript schema. Both halves are checked: a schema
+ *                          file that fails to load makes drizzle-kit print the
+ *                          error and exit 0 having read no tables, and then
+ *                          "produced nothing new" is vacuously true
  *
  * Both are file-based, so this needs no database and CI does not have to
  * provision one for the job (#22).
@@ -122,6 +126,26 @@ for (const path of changed) {
 if (generate.status !== 0) {
   fail(
     "`drizzle-kit generate` failed.",
+    `${generate.stdout}${generate.stderr}`,
+  );
+}
+
+// An exit code is not enough on its own. drizzle-kit `require`s each schema file,
+// and when one of them throws it prints the error and exits 0 anyway — having
+// diffed the migrations against an empty schema. From out here "generated
+// nothing" and "read nothing" look identical, so this check happily reported
+// four tables as in sync while the generator was reading none of them.
+//
+// The table count it prints is the tell: a real run always names it, and a run
+// that loaded no schema cannot. Absent, or zero, means the schema never loaded.
+const tablesRead = /^\s*(\d+) tables?$/m.exec(generate.stdout);
+if (!tablesRead || tablesRead[1] === "0") {
+  fail(
+    "`drizzle-kit generate` exited cleanly without reading the schema.\n\n" +
+      "It reports a table count on every real run, and this run reported " +
+      `${tablesRead ? "zero" : "none"}. That is a schema file failing to\n` +
+      "load — the error is below, and drizzle-kit exits 0 after printing it.\n" +
+      "Until it is fixed this check cannot see drift at all.",
     `${generate.stdout}${generate.stderr}`,
   );
 }
