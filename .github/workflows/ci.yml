@@ -175,29 +175,18 @@ jobs:
       - name: Integration tests
         run: npm run test:integration
 
-      # Read off the installed package rather than out of `package.json`, which
-      # carries a range: the key has to name the version that is actually there,
-      # or a lockfile bump silently reuses the previous browser.
-      - name: Resolve the Playwright version
-        id: playwright
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      # Chromium is a forty-second download on every run otherwise, and this job
-      # is the pipeline's long pole — 1m26s against 45s for the build and 26s for
-      # the container, which is mostly BuildKit cache hits. So the download is on
-      # the critical path, and it is also billed: this repository is private, so
-      # runner minutes are a quota rather than free.
+      # Chromium only, matching `playwright.config.ts`, and uncached — measured
+      # rather than assumed. This job is the pipeline's long pole (about 1m25s,
+      # against 45s for the build and 26s for the container, which is mostly
+      # BuildKit cache hits), so the browser looked like the thing to cache.
       #
-      # Only the browser is cached. The system libraries `--with-deps` installs
-      # live outside this path, which is why the install step still runs on a
-      # hit; with the browser already there it becomes an apt check.
-      - name: Cache the browser
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-
-      # Chromium only, matching `playwright.config.ts`.
+      # It is not. `~/.cache/ms-playwright` keyed on the installed Playwright
+      # version took the step from 24s to 21s, and cost a 5s restore and a 5s
+      # save to do it — because most of the time here is the system libraries
+      # `--with-deps` installs, which live outside that path and are reinstalled
+      # on a hit anyway. Three seconds is not worth a cache entry and ten lines
+      # of key management. Revisit if this suite ever needs more than one
+      # browser, where the download starts to dominate the apt work.
       - name: Install the browser
         run: npx playwright install --with-deps chromium
 

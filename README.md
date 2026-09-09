@@ -369,7 +369,7 @@ cover — the same rule the test suites are split by.
 | --- | --- | --- |
 | Types, lint and schema | nothing | `format:check`, `lint`, `typecheck`, `db:drift` |
 | Production build | nothing | `next build`, with no `DATABASE_URL` |
-| Unit, integration and end-to-end | a Postgres 18 service | the three suites, Chromium cached between runs |
+| Unit, integration and end-to-end | a Postgres 18 service | the three suites, against a Postgres service container |
 | Build and run the image | Docker | `docker build`, then start the container and check it serves a page and its stylesheet as a non-root user |
 
 Each job pays its own checkout and `npm ci`; with the npm cache warm that costs less than
