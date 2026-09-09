@@ -4,19 +4,38 @@ import nextTs from "eslint-config-next/typescript";
 import prettier from "eslint-config-prettier/flat";
 
 /**
- * The raw database client is unscoped. Reaching it directly is how a query
- * ships without an `org_id` filter, which is the one failure this codebase
- * cannot recover from — see ADR-0003.
+ * An unscoped database handle is how a query ships without an `org_id` filter,
+ * which is the one failure this codebase cannot recover from — see ADR-0003.
  *
- * Two files are allowed to import it, and nothing else ever is:
+ * There are two ways to get one and both are closed here. The first is
+ * `@/db/client`, the module that will hold the pool (#26). The second is the
+ * driver underneath it: `drizzle(new Pool(...))` produces exactly the same
+ * unscoped handle without going near `@/db/client`, so guarding only the module
+ * is bolting the front door of a house with an open window. `pg` arrived with
+ * the migration runner (#17), which is what made the second one reachable.
+ *
+ * The files allowed past:
  *
  *   src/server/org-context.ts  the scoping helper itself (#26)
- *   src/db/migrate.ts          the migration runner, which predates any org (#17)
+ *   src/db/client.ts           the pool it wraps (#26)
+ *   src/db/migrate.mts         the migration runner, which predates any org
+ *                              context and opens its own connection
  *
- * Neither exists yet. When #17 lands, if the runner takes a different path,
- * change it here rather than adding a third exemption.
+ * Only the runner exists so far.
+ *
+ * One `ignores` list covers all three rather than a block per file, because
+ * `no-restricted-syntax` is replaced and not merged when two config blocks both
+ * set it — a second block would silently disarm the dynamic-import guard below
+ * for every file it matched. The cost is that the list is a little looser than
+ * ideal: the runner is permitted to import `@/db/client` and `org-context.ts`
+ * to import `pg` directly, though neither should. Both are named right here,
+ * and they are the two files in this repository that get read most carefully.
  */
-const RAW_DB_CLIENT = ["@/db/client", "@/db/client.*", "**/db/client"];
+const UNSCOPED_DB_ALLOWED = [
+  "src/server/org-context.ts",
+  "src/db/client.ts",
+  "src/db/migrate.mts",
+];
 
 const RAW_DB_MESSAGE =
   "Never import the raw database client — it is not org-scoped. " +
@@ -24,41 +43,54 @@ const RAW_DB_MESSAGE =
   "which resolves the org from the session and returns a scoped handle. " +
   "See ADR-0003.";
 
-const RAW_DB_ALLOWED = ["src/server/org-context.ts", "src/db/migrate.ts"];
+const DRIVER_MESSAGE =
+  "Never construct a database connection outside src/db — a handle built here " +
+  "is not org-scoped, which is the failure the ESLint rule on '@/db/client' " +
+  "exists to prevent. Use `const { db } = await getOrgContext()` from " +
+  "'@/server/org-context'. See ADR-0003.";
+
+const UNSCOPED_DB_IMPORTS = [
+  {
+    group: ["@/db/client", "@/db/client.*", "**/db/client"],
+    message: RAW_DB_MESSAGE,
+  },
+  {
+    group: [
+      "pg",
+      "pg/*",
+      "drizzle-orm/node-postgres",
+      "drizzle-orm/node-postgres/*",
+    ],
+    message: DRIVER_MESSAGE,
+  },
+];
 
 /**
  * `no-restricted-imports` only inspects static import declarations — as of
  * ESLint 9.39 a dynamic `import("@/db/client")` walks straight past it. This
- * selector closes that door. A non-literal specifier is still out of reach,
- * which is the limit of what lint can see.
+ * selector closes that door for both groups above. A non-literal specifier is
+ * still out of reach, which is the limit of what lint can see.
  */
-const RAW_DB_DYNAMIC_IMPORT = String.raw`ImportExpression[source.value=/(^|\/)db\/client(\.[a-z]+)?$/]`;
+const UNSCOPED_DB_DYNAMIC_IMPORT = String.raw`ImportExpression[source.value=/^(pg|drizzle-orm\/node-postgres)(\/|$)|(^|\/)db\/client(\.[a-z]+)?$/]`;
 
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
 
   {
-    name: "capexwise/no-raw-db-client",
+    name: "capexwise/no-unscoped-db",
     // The carve-out is an `ignores` on this block rather than a later block
     // setting these rules to "off". An "off" block is a hole that the next
     // restricted-syntax rule added here would fall into unnoticed.
-    ignores: RAW_DB_ALLOWED,
+    ignores: UNSCOPED_DB_ALLOWED,
     rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: RAW_DB_CLIENT,
-              message: RAW_DB_MESSAGE,
-            },
-          ],
-        },
-      ],
+      "no-restricted-imports": ["error", { patterns: UNSCOPED_DB_IMPORTS }],
       "no-restricted-syntax": [
         "error",
-        { selector: RAW_DB_DYNAMIC_IMPORT, message: RAW_DB_MESSAGE },
+        {
+          selector: UNSCOPED_DB_DYNAMIC_IMPORT,
+          message: RAW_DB_MESSAGE,
+        },
       ],
     },
   },

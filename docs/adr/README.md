@@ -41,7 +41,7 @@ explicitly — it is the number that matters when the decision is revisited.
 
 ## Written
 
-All five are written. New decisions take the next number and are added here in the same pull request.
+New decisions take the next number and are added here in the same pull request.
 
 | ADR | Subject | Issue |
 | --- | --- | --- |
@@ -50,3 +50,4 @@ All five are written. New decisions take the next number and are added here in t
 | [0003](0003-multi-tenancy.md) | Multi-tenancy — org_id everywhere, server-resolved context, RLS as layer two | [#6](https://github.com/hbouwers/capexwise/issues/6) |
 | [0004](0004-auth-provider.md) | Auth provider — Better Auth, orgs in our own Postgres | [#7](https://github.com/hbouwers/capexwise/issues/7) |
 | [0005](0005-identifiers-money-dates.md) | Identifiers, money, and dates | [#8](https://github.com/hbouwers/capexwise/issues/8) |
+| [0006](0006-migrations.md) | Migrations — forward-only, run outside the build | [#17](https://github.com/hbouwers/capexwise/issues/17) |

@@ -45,9 +45,10 @@ eventually be world-readable.
 | `src/server/queries/` | Read paths, org-scoped, one file per domain area. Called from Server Components; never from the client |
 | `src/server/org-context.ts` | `getOrgContext()` and the scoped `db.forOrg(orgId)` (#26). One of the two files allowed to import the raw client |
 | `src/db/schema/` | Drizzle table definitions, one file per domain area, matching `docs/data-model.md` |
-| `src/db/client.ts` | The raw database client. Importing it from anywhere else is an ESLint error (#16) |
+| `src/db/client.ts` | The raw database client — added by #26. Importing it, or the `pg` driver, from anywhere else is an ESLint error |
+| `src/db/migrate.mts` | The migration runner. Forward-only, and it opens its own connection — [ADR-0006](docs/adr/0006-migrations.md) |
 | `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
-| `drizzle/` | Generated migrations, committed (#17) |
+| `drizzle/` | Generated migrations, committed. Read the SQL before committing it; there is no `down` |
 | `e2e/` | Playwright specs (#21). Unit tests are colocated as `*.test.ts` next to what they test |
 
 Directories appear when there is something real to put in them; this table is the convention,
@@ -172,8 +173,9 @@ Milestones map to the PRD release plan: v0 personal, v0.5 demo, v1 paid, v2 prem
   `git show`, which applies EOL conversion and lies.
 - PowerShell and bash each need their own syntax. PowerShell splits multi-line strings into
   multiple arguments for `gh`, so use bash with a heredoc for anything multi-line.
-- Docker is not installed yet (#18). Local Postgres depends on it, and so does keeping the
-  Dockerfile honest.
+- **Docker Desktop is installed** (WSL2 backend), and `npm run db:up` brings up local Postgres 18.
+  `npm run db:migrate` applies the committed migrations; a clean slate is `db:reset` then
+  `db:migrate`. The Dockerfile that #19 adds is buildable on this machine.
 - **Node 24.** Pinned in `.nvmrc` and in `engines`, and Vercel runs 24 LTS for both builds and
   functions. The major is the contract; CI reads `.nvmrc` and the Dockerfile pins a base image
   digest, so nothing else needs to agree on a patch number.

@@ -127,32 +127,40 @@ That serves a placeholder page on `http://localhost:3000`, and the design system
 primitive on one page, so that a value drifting away from
 [`docs/ui/tokens.md`](docs/ui/tokens.md) is visible rather than discovered on a screen later.
 
-**No environment variables are read yet, and `npm run dev` does not need the database** — nothing
-in the application connects to it so far. Skip the next section entirely if you only want the app
-running.
+**`npm run dev` does not need the database yet** — nothing in the application connects to it so
+far, and `DATABASE_URL` is read only by the migration tooling. Skip the next two sections entirely
+if you only want the app running.
 
 ### The database
 
 Postgres 18 in a container, via [`docker-compose.yml`](./docker-compose.yml):
 
 ```bash
+cp .env.example .env.local
 npm run db:up
+npm run db:migrate
 ```
 
 `db:up` waits for Postgres to actually accept connections rather than returning as soon as the
-container starts, so it is safe to run a migration on the next line. The connection string, once
-something reads one, is:
+container starts, so `db:migrate` on the next line is safe. That is the whole setup — clone,
+`npm install`, those three lines, `npm run dev`.
+
+`.env.local` is gitignored and [`.env.example`](./.env.example) holds one variable, `DATABASE_URL`,
+because that is all anything reads today:
 
 ```
 postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise
 ```
 
-Those credentials are committed in the compose file on purpose. They guard a database that holds
-no real data and is published to loopback only — the file explains why that is the safe
-combination, and why the password must not be reused anywhere reachable off the machine.
+Those credentials are committed in the compose file on purpose. They guard a database that holds no
+real data and is published to loopback only — the file explains why that is the safe combination,
+and why the password must not be reused anywhere reachable off the machine. The full variable list
+and boot-time validation, so a missing value fails at start rather than on the first query, are
+[#20](https://github.com/hbouwers/capexwise/issues/20).
 
 Data lives in the named volume `capexwise-pgdata` and survives `db:down` and a machine restart.
-`db:reset` deletes that volume and recreates it empty, which is the way to start clean.
+`db:reset` deletes that volume and recreates it empty, so a clean slate is `db:reset` followed by
+`db:migrate`.
 
 **The major version is pinned to 18 and that is load-bearing.** [ADR-0005](docs/adr/0005-identifiers-money-dates.md)
 makes `uuidv7()` the primary key default, and it is a Postgres 18 built-in — so the managed
@@ -166,11 +174,40 @@ a provider that lags on majors is disqualified.
 | `npm run db:reset` | **Destroys the data** — removes the volume and starts empty |
 | `npm run db:psql` | A `psql` shell in the container, so none is needed on the host |
 
-Migrations and the demo seed are not part of this yet: `db:reset` leaves an empty database, and
-the full clone → install → up → migrate → seed → dev walkthrough lands with Drizzle in
-[#17](https://github.com/hbouwers/capexwise/issues/17) and the seed framework in
-[#34](https://github.com/hbouwers/capexwise/issues/34). The environment template and boot-time
-validation are [#20](https://github.com/hbouwers/capexwise/issues/20).
+### Schema changes
+
+The Drizzle schema in `src/db/schema/` is the source of truth, and `docs/data-model.md` is the prose
+version of it. A change to one without the other is a bug in whichever was changed alone.
+
+```bash
+npm run db:generate -- --name what_it_does
+```
+
+That writes SQL to `drizzle/`. **Read it before committing it** — migrations are forward-only, so
+there is no `down` to fall back on and review of the SQL is what stands in for one. Then
+`npm run db:migrate` to apply it locally, and commit the generated file alongside the schema change.
+`npm run db:drift` is the check CI runs: it fails if the schema is ahead of the committed
+migrations, which is otherwise invisible in review — the types are right, the queries compile, and
+the column exists in no database.
+
+Triggers and functions are hand-written, because Drizzle does not model them —
+`npm run db:generate -- --custom --name what_it_does` prepares an empty migration to write SQL into.
+`drizzle/0001_updated_at_trigger.sql` is the example to copy.
+
+**How migrations reach production, and why there is no rollback**, is
+[ADR-0006](docs/adr/0006-migrations.md): they run in CI on `main`, never in the Vercel build, and
+every migration has to be compatible with the release already running. Read it before writing a
+migration that drops anything.
+
+| Script | What it does |
+| --- | --- |
+| `npm run db:generate` | Generate a migration from the schema. Takes `-- --name a_description` |
+| `npm run db:migrate` | Apply committed migrations. Needs `DATABASE_URL` |
+| `npm run db:drift` | Fail if the schema is ahead of the committed migrations |
+| `npm run db:studio` | Drizzle Studio, a browser UI over the data |
+
+The demo seed is [#34](https://github.com/hbouwers/capexwise/issues/34), so `db:migrate` leaves a
+schema with no rows in it.
 
 ### Scripts
 
