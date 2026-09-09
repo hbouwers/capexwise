@@ -60,6 +60,25 @@ export const serverEnvSchema = z.object({
 export const migrationEnvSchema = serverEnvSchema.pick({ DATABASE_URL: true });
 
 /**
+ * The integration suite's database, which is deliberately not `DATABASE_URL`.
+ *
+ * It is a separate variable rather than a reuse of the server's because the two
+ * mean opposite things: one names a database to preserve, the other names one
+ * the suite truncates before every test. Sharing a name would make a mistake in
+ * either direction silent, and the mistake in one of those directions is losing
+ * a developer's local data. `src/test/db.ts` additionally refuses any value that
+ * does not name a database ending in `_test`.
+ *
+ * It is not in `serverEnvSchema` because the server never reads it — putting it
+ * there would make a test-only variable a prerequisite for booting production.
+ * The suite supplies its own local default, so this schema is what validates an
+ * override rather than what demands a value.
+ */
+export const testEnvSchema = z.object({
+  TEST_DATABASE_URL: postgresConnectionString,
+});
+
+/**
  * There are no public variables today, and this is the note that says so rather
  * than an empty schema pretending to be one. When the first `NEXT_PUBLIC_`
  * variable arrives it gets a `publicEnvSchema` here and a `src/lib/env-public.ts`
