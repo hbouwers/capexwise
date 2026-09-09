@@ -32,11 +32,12 @@ export default async function SignInPage({
   // mirror of `requireSession()` and the reason both live behind one constant.
   if (await getSession()) redirect(AFTER_SIGN_IN_PATH);
 
-  // Set by `errorCallbackURL` in the sign-in action: Google's own failures — a
-  // declined consent screen, a cancelled flow. Deliberately one flag rather than
-  // the provider's message, which is not written for this reader and is not ours
-  // to render verbatim.
-  const failed = (await searchParams).error === "oauth";
+  // Better Auth appends `?error=<code>` when an OAuth round trip fails, and
+  // `errorCallbackURL` in the sign-in action points it here. Presence is the
+  // signal, not the value: the codes are the library's and grow with it, and the
+  // provider's own `error_description` is not written for this reader and is not
+  // ours to render verbatim. One banner covers all of them.
+  const failed = (await searchParams).error !== undefined;
 
   return (
     <main className="flex flex-1 items-center justify-center bg-surface-page p-8">

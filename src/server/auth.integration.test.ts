@@ -25,7 +25,13 @@
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { memberships, organizations, sessions, users } from "@/db/schema";
+import {
+  memberships,
+  organizations,
+  rateLimits,
+  sessions,
+  users,
+} from "@/db/schema";
 import { testDatabaseUrl, testDb } from "@/test/db";
 import { createMembership, createOrganization } from "@/test/factories";
 
@@ -51,6 +57,25 @@ async function internalAdapter() {
   const { internalAdapter } = await getAuth().$context;
 
   return internalAdapter;
+}
+
+/**
+ * The organization plugin's own adapter — the layer its endpoints read through,
+ * and the only way to exercise that mapping without a signed session cookie.
+ * Reaching for it is a deliberate trade: the alternative is forging a cookie,
+ * which would test the forging.
+ */
+async function organizationAdapter() {
+  const { getOrgAdapter } = await import("better-auth/plugins/organization");
+  const auth = getAuth();
+  const context = await auth.$context;
+
+  const plugin = auth.options.plugins?.find(
+    (candidate) => candidate.id === "organization",
+  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return getOrgAdapter(context as any, (plugin as any)?.options ?? {});
 }
 
 let sequence = 0;
@@ -111,6 +136,72 @@ describe("the schema mapping", () => {
     // `activeOrganizationId` in the provider, `active_org_id` in the database.
     // This assertion is the field mapping in `src/server/auth.ts`, checked.
     expect(row?.activeOrgId).not.toBeNull();
+  });
+});
+
+describe("the mapping the plugin reads through", () => {
+  it("finds the org, the membership and the user behind it", async () => {
+    // The writes above go through the core adapter; these are the *organization
+    // plugin's* own reads, and they use a different mapping —
+    // `organizationId` → `orgId` — plus joins from `memberships` to `users` and
+    // `invitations`. Nothing in the product calls them yet: the org switcher is
+    // #29 and the invites screen is #30. Which is exactly why they are worth
+    // pinning now, because the failure otherwise surfaces in whichever of those
+    // is built first, a long way from the four strings that caused it.
+    const user = await signUp();
+    const adapter = await internalAdapter();
+    const session = await adapter.createSession(user.id, false);
+
+    // From the row rather than from the returned session: `createSession`'s
+    // return type is Better Auth's base `Session`, and the org id is a field the
+    // plugin adds, so it is present at runtime and absent from the type.
+    const [row] = await testDb()
+      .select()
+      .from(sessions)
+      .where(eq(sessions.id, session.id));
+
+    const orgId = row!.activeOrgId!;
+
+    const orgAdapter = await organizationAdapter();
+
+    expect(await orgAdapter.listOrganizations(user.id)).toMatchObject([
+      { id: orgId, name: "Casey's portfolio" },
+    ]);
+
+    expect(
+      await orgAdapter.findMemberByOrgId({
+        userId: user.id,
+        organizationId: orgId,
+      }),
+    ).toMatchObject({ organizationId: orgId, userId: user.id, role: "owner" });
+
+    expect(
+      await orgAdapter.findFullOrganization({ organizationId: orgId }),
+    ).toMatchObject({
+      id: orgId,
+      invitations: [],
+      members: [{ userId: user.id, user: { email: user.email } }],
+    });
+  });
+
+  it("counts rate limits in the table it was told to use", async () => {
+    // The one piece of configuration that fires on *every* authenticated
+    // request and that no other test reaches: `rateLimit.storage: "database"`
+    // plus `modelName: "rateLimits"`. It only runs for a real HTTP request, so
+    // this goes through `auth.handler` rather than through `auth.api`.
+    //
+    // A wrong model name here is a 500 on the first request anybody makes.
+    const response = await getAuth().handler(
+      new Request("http://localhost:3000/api/auth/get-session", {
+        headers: { "x-forwarded-for": "203.0.113.9" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+
+    const [row] = await testDb().select().from(rateLimits);
+
+    expect(row).toMatchObject({ key: "203.0.113.9|/get-session", count: 1 });
   });
 });
 

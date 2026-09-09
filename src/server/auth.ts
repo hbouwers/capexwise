@@ -120,6 +120,21 @@ function slugify(name: string) {
  * because failing to pick a *default* org must never be what stops somebody
  * signing in. #26 is where a request with no org context becomes an error, and
  * it has the routing to send them somewhere that says so.
+ *
+ * **Known race, deliberately left open.** The read and the write are not one
+ * atomic step, so two session creations for the same brand-new account, in
+ * flight at the same time, would each see no membership and each create an org.
+ * Nothing is corrupted — the second org is empty and the account is owner of
+ * both — but it is a second free unit under the pricing model and a confusing
+ * entry in the org switcher.
+ *
+ * It is left because the fix is worse than the fault today. Closing it properly
+ * means `SELECT ... FOR UPDATE` on the `users` row from this connection, while
+ * Better Auth is mid-flow on its own connection, on the sign-in path — trading a
+ * rare duplicate row for a possible deadlock at the front door. And the trigger
+ * is narrow: two OAuth callbacks for one new account completing within
+ * milliseconds, each having consumed its own single-use state token. Revisit
+ * with the billing work, which is what makes a duplicate org cost anything.
  */
 async function resolveActiveOrganization(user: {
   id: string;

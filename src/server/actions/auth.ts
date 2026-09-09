@@ -31,10 +31,17 @@ export async function signInWithGoogle(): Promise<void> {
       callbackURL: AFTER_SIGN_IN_PATH,
       // Where Google's own failures land — a declined consent screen, a
       // cancelled flow. Without it Better Auth redirects to its own error page,
-      // which is a bare JSON-ish screen at a URL under `/api`. Back to the
-      // sign-in page with a flag it can render is the same information somewhere
-      // the person can act on.
-      errorCallbackURL: `${SIGN_IN_PATH}?error=oauth`,
+      // which is a bare screen at a URL under `/api`; back to the sign-in page
+      // is the same information somewhere the person can act on.
+      //
+      // **No query string of our own here.** Better Auth *appends* `?error=...`
+      // to this value rather than replacing it, so a `?error=oauth` written here
+      // arrives as `?error=oauth&error=access_denied` — a repeated key, which
+      // Next.js hands to the page as an array, which then matches no string the
+      // page is looking for. The page treats the presence of `error` as the
+      // signal instead, which also covers every failure Better Auth names
+      // without us having to enumerate them.
+      errorCallbackURL: SIGN_IN_PATH,
     },
     // The endpoint sets the OAuth state cookie, and this is what carries it back
     // out: the `nextCookies()` plugin writes it through Next's own cookie API,
