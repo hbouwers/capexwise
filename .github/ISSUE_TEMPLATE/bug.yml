@@ -1,0 +1,58 @@
+name: Bug report
+description: Something behaves differently from how it is documented or specified.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw. Paste the error and the stack trace if there was one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: >
+        If a doc, spec or ADR says it should work the other way, link it — that turns a
+        preference into a defect.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      description: Numbered steps, starting from a clean checkout where that matters.
+      placeholder: |
+        1. npm run db:reset && npm run db:migrate
+        2. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: The commit SHA, branch, or deploy URL where you saw it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser and OS for anything visual; Node version and platform for anything server-side.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Before you submit
+      options:
+        - label: >
+            This report contains no access codes, tokens, connection strings or tenant data.
+            Redact them — issues on this repository are world-readable once it goes public.
+          required: true

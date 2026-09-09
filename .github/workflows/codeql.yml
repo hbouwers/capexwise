@@ -1,0 +1,60 @@
+# CodeQL, staged now and switched on by going public.
+#
+# Code scanning on a private repository needs GitHub Advanced Security, which
+# this account does not have; on a public one it is free. The repository flips
+# public at v0.5, so rather than leave #23's last box unticked until then, the
+# workflow lands now behind a visibility check and starts running by itself on
+# the commit that makes the repository public. Nothing to remember later.
+#
+# Separate from ci.yml on purpose. That file is the gate — four jobs that all
+# have to be green before a branch merges, and a job that is skipped on every
+# run for months would be noise in the middle of it. This one reports to the
+# Security tab, not to the merge decision.
+#
+# No `schedule:` trigger, which the default CodeQL template has. A scheduled run
+# carries no `github.event.repository`, so the guard below would read an empty
+# string and skip the job forever — a check that silently never runs is worse
+# than no check. Push and pull request cover a repository that is committed to
+# most days. Add the cron alongside a real fix for the guard if this ever goes
+# quiet for months at a time.
+
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze JavaScript and TypeScript
+    # The whole workflow in one line: public means analyse, private means skip.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          # No compilation step to observe — CodeQL reads the source directly.
+          build-mode: none
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:javascript-typescript"

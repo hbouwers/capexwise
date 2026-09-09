@@ -100,6 +100,7 @@ The repository is the source of truth.
 | `docs/ui/components.md` | Component inventory |
 | `docs/ui/screens/` | One spec per screen |
 | `docs/ui/reference/` | The design prototype, as the visual source of truth |
+| `CONTRIBUTING.md` | Branch, commit and pull request conventions, and the protection to turn on at v0.5 |
 | `CLAUDE.md` | Conventions and hard rules, indexing the above |
 
 ## Releases
@@ -361,9 +362,9 @@ tests and what deliberately does not — is in [CLAUDE.md](./CLAUDE.md) under "T
 
 ## Continuous integration
 
-One workflow, [`.github/workflows/ci.yml`](.github/workflows/ci.yml), on every pull request and on
-every push to `main`. Four jobs, in parallel, split by what they need rather than by what they
-cover — the same rule the test suites are split by.
+One workflow gates a merge: [`.github/workflows/ci.yml`](.github/workflows/ci.yml), on every pull
+request and on every push to `main`. Four jobs, in parallel, split by what they need rather than
+by what they cover — the same rule the test suites are split by.
 
 | Job | Needs | What it runs |
 | --- | --- | --- |
@@ -379,6 +380,13 @@ local one, and the `DATABASE_URL` the container job passes points at nothing on 
 Vercel builds every pull request too, and that check is not this workflow. It is the deploy
 preview, it builds without `output: "standalone"` ([#68](https://github.com/hbouwers/capexwise/issues/68)),
 and it goes away with the move to Cloud Run — which is exactly why the container job exists.
+
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) is the one other workflow, and it
+is not part of that gate — it reports to the Security tab. Code scanning needs GitHub Advanced
+Security on a private repository and is free on a public one, so the job guards itself on
+repository visibility: it skips on every run today and starts analysing by itself on the commit
+that makes the repository public at v0.5. [`CONTRIBUTING.md`](./CONTRIBUTING.md) lists what else
+to switch on at that point, including the branch protection the current plan does not offer.
 
 ## Licence
 
