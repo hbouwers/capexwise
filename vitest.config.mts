@@ -28,7 +28,30 @@ const src = fileURLToPath(new URL("./src", import.meta.url));
  * repeated here. A second alias appearing in `tsconfig.json` and not here is a
  * test-only module-not-found, which is why there is only ever meant to be one.
  */
-const alias = { "@": src };
+/**
+ * `server-only` is a marker package: imported through the `react-server`
+ * condition it is an empty module, and through any other condition it throws
+ * "This module cannot be imported from a Client Component module". Next.js sets
+ * that condition on the server graph; Vitest sets no conditions at all, so every
+ * module that guards itself with it — `@/server/env`, `@/db/client`,
+ * `@/server/auth` — would be untestable.
+ *
+ * Aliased to the package's own `empty.js` rather than to a stub of ours, and
+ * rather than adding `react-server` to `resolve.conditions`: it is the exact
+ * module Next would resolve, and it does not change how anything *else*
+ * resolves. React ships a `react-server` build too, and switching the whole
+ * suite onto it to fix an import guard would be a much larger change than the
+ * problem.
+ *
+ * The guard itself still works where it matters. It is a build-time boundary,
+ * and `next build` is what enforces it — CI runs that as its own job.
+ */
+const alias = {
+  "@": src,
+  "server-only": fileURLToPath(
+    new URL("./node_modules/server-only/empty.js", import.meta.url),
+  ),
+};
 
 export default defineConfig({
   resolve: { alias },

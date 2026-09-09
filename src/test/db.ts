@@ -18,6 +18,7 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
 
+import { closeDb } from "@/db/client";
 import * as schema from "@/db/schema";
 import { parseEnv, testEnvSchema } from "@/lib/env-schema.mts";
 
@@ -57,6 +58,15 @@ const { TEST_DATABASE_URL: url } = parseEnv(
   "It is optional: unset, the suite uses the local compose database with " +
     "`_test` appended, which `npm run db:up` provides.",
 );
+
+/**
+ * The same string, exported, so a test can point a module that reads
+ * `DATABASE_URL` at the test database rather than at the developer's own.
+ * `src/server/auth.integration.test.ts` is why it exists: the provider builds
+ * its handle from `@/server/env`, and without this it would run happily against
+ * whatever `.env.local` names — and truncate it between tests.
+ */
+export const testDatabaseUrl = url;
 
 /**
  * The connection string carries a password, so — as everywhere else that touches
@@ -164,6 +174,13 @@ export async function openTestConnection(): Promise<void> {
 }
 
 export async function closeTestConnection(): Promise<void> {
+  // The application's own pool, which is normally never opened here: only a test
+  // that exercises a module reaching for `@/db/client` — `src/server/auth.ts` is
+  // the one so far — causes one to exist. `closeDb()` is a no-op otherwise, and
+  // closing it from the harness rather than from that test is what keeps
+  // `@/db/client` out of the ESLint allowlist for a test file.
+  await closeDb();
+
   if (!open) return;
 
   const { client } = open;

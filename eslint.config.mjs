@@ -17,12 +17,22 @@ import prettier from "eslint-config-prettier/flat";
  * The files allowed past:
  *
  *   src/server/org-context.ts  the scoping helper itself (#26)
- *   src/db/client.ts           the pool it wraps (#26)
+ *   src/db/client.ts           the pool it wraps (#25 needed it first)
+ *   src/server/auth.ts         the auth provider (#25)
  *   src/db/migrate.mts         the migration runner, which predates any org
  *                              context and opens its own connection
  *   src/test/db.ts             the integration harness (#21)
  *
- * The runner and the harness exist so far.
+ * All but `org-context.ts` exist so far.
+ *
+ * `src/server/auth.ts` is the one that looks like a concession and is not. The
+ * four tables Better Auth reads through the handle sit *above* the tenancy
+ * boundary by construction — `docs/data-model.md` §2 — and are read during
+ * sign-in, before any org exists to scope by, so there is no filter to omit. It
+ * also touches `organizations`, `memberships` and `invitations`, and what keeps
+ * that honest is that it reaches them only through the organization plugin's own
+ * endpoints, which scope by the signed-in user's membership. #27's cross-org
+ * isolation test is where that stops being a claim.
  *
  * The harness is on the list for a reason that is the opposite of a concession.
  * #27's cross-org isolation test has to prove that a scoped handle hides another
@@ -42,6 +52,7 @@ import prettier from "eslint-config-prettier/flat";
 const UNSCOPED_DB_ALLOWED = [
   "src/server/org-context.ts",
   "src/db/client.ts",
+  "src/server/auth.ts",
   "src/db/migrate.mts",
   "src/test/db.ts",
 ];
