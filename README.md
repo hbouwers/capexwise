@@ -79,6 +79,26 @@ deployment.
 - Postgres row-level security as an independent second layer
 - A cross-org isolation integration test, extended per table
 
+**Sign-in is Google OAuth and nothing else, through Better Auth**
+([ADR-0004](docs/adr/0004-auth-provider.md)). No passwords, therefore no password reset and no
+email provider to own; the organizations and memberships live in our own Postgres, which is what
+keeps a single source of truth under the tenancy boundary rather than a mirror kept in step by
+webhooks. Signing in for the first time creates the account's organization and an owner membership
+in one transaction.
+
+Two functions ask about the signed-in user, and `src/server/session.ts` is where they are
+documented:
+
+```ts
+const { user } = await requireSession();   // must not render to a stranger — redirects
+const session = await getSession();        // renders either way — the sign-in page
+```
+
+Neither is authorisation and neither hands back a database handle. They answer *who is this*; the
+org that person is acting in is `getOrgContext()`, which re-checks the session's active org against
+`memberships` on every request. There is deliberately **no middleware auth check**: middleware sees
+a cookie, not a validated session, so a redirect there is tidiness rather than a boundary.
+
 **Money is stored as integer cents.** Dates, identifiers and the estimated-versus-audited
 confidence model follow the conventions in
 [ADR-0005](https://github.com/hbouwers/capexwise/issues/8).
@@ -121,20 +141,23 @@ against.
 
 ```bash
 npm install
-cp .env.example .env.local
+cp .env.example .env.local   # then fill it in — see below
 npm run dev
 ```
 
-That serves a placeholder page on `http://localhost:3000`, and the design system on
+That serves the sign-in page on `http://localhost:3000`, and the design system on
 `http://localhost:3000/styleguide` — every design token and every state of every installed
 primitive on one page, so that a value drifting away from
-[`docs/ui/tokens.md`](docs/ui/tokens.md) is visible rather than discovered on a screen later.
+[`docs/ui/tokens.md`](docs/ui/tokens.md) is visible rather than discovered on a screen later. The
+styleguide is deliberately not behind sign-in; everything else is.
 
-**`npm run dev` does not need the database running yet** — nothing in the application connects to
-it so far. It does need `DATABASE_URL` to be *set*, which is what the `cp` is for: the server
-validates its configuration before it serves anything, so a variable that is missing stops the
-server and says which one rather than surfacing later as something else. Skip the next two sections
-if you only want the app running.
+**The copy is not enough on its own any more.** `.env.example` leaves the auth variables blank
+because a committed placeholder is a value somebody keeps, so filling them in is part of setup:
+generate a `BETTER_AUTH_SECRET`, and create a Google OAuth client. "Environment variables" below
+has both, and the server names whichever one is missing rather than starting without it.
+
+**`npm run dev` still does not need the database running** to serve the sign-in page. It does need
+it to sign in — that is the first thing in the application that writes a row.
 
 ### Environment variables
 
@@ -161,9 +184,15 @@ carries a password, this message lands in deploy logs, and deploy logs are retai
 readable. It is the rule the migration runner already follows when it logs the host and database it
 is about to migrate and never the connection string it read them from.
 
-`next build` is deliberately not covered. The Dockerfile builds with no `DATABASE_URL` because
-[ADR-0006](docs/adr/0006-migrations.md) keeps the database out of the build — configuration is a
-deploy-time concern, so it is checked at deploy time.
+`next build` is deliberately not covered, and that costs something to keep. The Dockerfile builds
+with no environment at all — not `DATABASE_URL`, not the auth secret, not the Google client —
+because [ADR-0006](docs/adr/0006-migrations.md) keeps the database out of the build and
+[ADR-0002](docs/adr/0002-hosting.md) wants an image that is the same artefact wherever it runs.
+Configuration is a deploy-time concern, so it is checked at deploy time. The way that stays true is
+that `src/server/env.ts`, `src/db/client.ts` and `src/server/auth.ts` all read on **first use**
+rather than on import: `next build` imports every route module to collect its configuration, and a
+parse at module scope would quietly make the build demand production secrets. CI runs the build
+with an empty environment for exactly this reason.
 
 **Server and public variables are separate halves of the file, and the separation is structural.**
 `src/server/env.ts` imports `server-only`, so a Client Component that reaches for it fails the
@@ -175,9 +204,38 @@ to start the server if a server variable carries the prefix. There are no public
 | Variable | Local | Preview | Production |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | `.env.local`, pointing at the compose database | Vercel project environment, Preview scope — a database separate from production's, settled in [#33](https://github.com/hbouwers/capexwise/issues/33) | Vercel project environment, Production scope, from the managed instance ([#32](https://github.com/hbouwers/capexwise/issues/32), [#33](https://github.com/hbouwers/capexwise/issues/33)) |
+| `APP_URL` | `http://localhost:3000` | **Per deployment.** A preview hostname is generated, so this cannot be set once at the project level ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
+| `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
+
+**Every environment needs its own `BETTER_AUTH_SECRET`.** It signs session cookies and encrypts the
+OAuth tokens stored in `accounts`, so sharing one across environments means a session forged in
+preview is valid in production. Generate one with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
 
 `npm run db:migrate` validates a strict subset — `DATABASE_URL` and nothing else — so the CI job
 that applies migrations on a push to `main` never needs an auth secret or a Stripe key to run one.
+
+#### The Google OAuth client
+
+[ADR-0004](docs/adr/0004-auth-provider.md) makes Google the only way to sign in during v0, so the
+application will not start without a client. Creating one, in the Google Cloud console:
+
+1. **APIs & Services → OAuth consent screen.** External, and leave it in **Testing** while the app
+   is personal — a Testing app needs no verification and works for up to 100 accounts. Add every
+   Google account that needs in as a **test user**, including your own.
+2. **APIs & Services → Credentials → Create credentials → OAuth client ID → Web application.**
+3. **Authorised redirect URIs:** one per environment, each of them that environment's `APP_URL`
+   plus `/api/auth/callback/google`. For local development that is
+   `http://localhost:3000/api/auth/callback/google` — and `http://localhost:3001/...` as well if
+   you sign in through `npm run docker:up`.
+4. Copy the client id and secret into `.env.local`.
+
+No scopes beyond the default profile and email are requested, and none should be: the product has
+no business reading anybody's Google data.
 
 ### The database
 
@@ -189,12 +247,13 @@ npm run db:migrate
 ```
 
 `db:up` waits for Postgres to actually accept connections rather than returning as soon as the
-container starts, so `db:migrate` on the next line is safe. That is the whole setup — clone,
-`npm install`, the copy, those two lines, `npm run dev`.
+container starts, so `db:migrate` on the next line is safe. That is the whole database setup —
+clone, `npm install`, the copy, those two lines, `npm run dev`. Signing in additionally needs a
+Google OAuth client, which "Environment variables" above covers.
 
-`.env.local` is gitignored and [`.env.example`](./.env.example) is the committed template. It holds
-one variable today, `DATABASE_URL`, and the value in it is the one the compose file configures — so
-the copy above works unedited:
+`.env.local` is gitignored and [`.env.example`](./.env.example) is the committed template. Its
+`DATABASE_URL` is the value the compose file configures, so that line works unedited; the auth
+variables above it do not, and "Environment variables" is where they come from:
 
 ```
 postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise

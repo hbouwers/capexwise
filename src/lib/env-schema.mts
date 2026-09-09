@@ -48,6 +48,52 @@ const postgresConnectionString = z.string().regex(/^postgres(ql)?:\/\/.+/, {
  */
 export const serverEnvSchema = z.object({
   DATABASE_URL: postgresConnectionString,
+
+  /**
+   * Where this deployment answers. Better Auth builds the OAuth callback from
+   * it, and Google refuses a callback that is not on the redirect-URI list of
+   * the client — so a wrong value here is a sign-in that fails at the provider
+   * with a message about a URI mismatch rather than anything about us.
+   *
+   * Deliberately ours and required rather than Better Auth's own
+   * `BETTER_AUTH_URL` picked up from the ambient environment: one name, checked
+   * at boot, named in the failure. Preview deployments have generated hostnames
+   * and so need it set per deployment, which is #32's job and is written down
+   * in `.env.example` rather than papered over with a `VERCEL_URL` fallback
+   * here — a fallback would make the wrong value a silent 302 to the wrong host.
+   */
+  APP_URL: z
+    .string()
+    .regex(/^https?:\/\/[^/]+$/, {
+      message:
+        "must be an origin with no trailing slash, like " +
+        "http://localhost:3000 or https://capexwise.com",
+    })
+    .describe("The origin this deployment answers on."),
+
+  /**
+   * Signs session cookies and encrypts the OAuth tokens in `accounts`
+   * (`account.encryptOAuthTokens`). Rotating it invalidates every session and
+   * makes every stored provider token undecryptable, which is the correct
+   * response to a leak and a bad surprise otherwise.
+   *
+   * 32 characters is Better Auth's own floor and is checked here so a short
+   * value fails at boot rather than at the first sign-in. Length only — this
+   * cannot tell a strong secret from `aaaa...`, and pretending otherwise would
+   * be a check that reassures without protecting.
+   */
+  BETTER_AUTH_SECRET: z
+    .string()
+    .min(32, { message: "must be at least 32 characters" }),
+
+  /**
+   * The Google OAuth client. Required, not optional: ADR-0004 makes Google the
+   * only way to sign in during v0, so an instance without these is an
+   * application nobody can enter. That is a startup failure naming the
+   * variable, not a runtime discovery.
+   */
+  GOOGLE_CLIENT_ID: z.string().min(1),
+  GOOGLE_CLIENT_SECRET: z.string().min(1),
 });
 
 /**

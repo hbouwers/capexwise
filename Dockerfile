@@ -98,8 +98,15 @@ EXPOSE 3000
 # Cloud Run ignores this, and that is fine; it is here for the local compose run and
 # for anything else that reads container health. `node` rather than curl or wget so
 # it depends on nothing the image would not otherwise have.
+#
+# `/sign-in` rather than `/`, because `/` is a protected route (#25) and answers a
+# request with no cookie by redirecting here. `fetch` would follow that and still
+# report healthy, so this is not a fix — it is the check asking the question it
+# means: does the server render a page. `/sign-in` is also the one route that
+# reaches neither the database nor Google, so an unhealthy container here means the
+# process, not its dependencies.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/sign-in').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # `server.js`, not `next start`. The standalone output has no `next` binary in it —
 # that is the point of it.

@@ -1,7 +1,7 @@
 # ADR-0004: Auth provider
 
-**Status:** Proposed — accepted on merge of the PR that adds it
-**Date:** 2026-09-07
+**Status:** Accepted
+**Date:** 2026-09-07 (accepted 2026-09-09, when #25 wired it)
 **Decided by:** Holden
 
 ## Context
@@ -108,12 +108,49 @@ means rebuilding the org model and backfilling it from their API, against live c
 asymmetry is what decides this ADR. If the recommendation here is wrong, it is wrong in the
 cheap direction.
 
+## What #25 settled
+
+Four things this ADR left as intentions and the implementation had to resolve. Recorded here
+because each is a decision, not a detail, and the file that made it is not the file anybody reads
+first.
+
+**`better-auth@1.7.3`, pinned exactly, no caret.** This ADR committed to pinning; the version is
+written down so an upgrade is a diff. The mapping in `src/server/auth.ts` is written against the
+schema *that* version reports, and `advanced.database.validateSchema` — on by default — turns a
+mismatch after an upgrade into a boot failure naming the field.
+
+**The database generates ids** (`advanced.database.generateId: false`), which is what makes
+`organizations.id` a `uuid` from `uuidv7()` rather than Better Auth's random string.
+`docs/data-model.md` §2 already required this; the option name was left to be confirmed and this
+is it.
+
+**The plugin knows only two roles.** `roles: { owner, member }` on the organization plugin, so it
+cannot write `"admin"` into a `membership_role` column that has no such value. The plugin's own
+permission sets for those two names are taken unchanged.
+
+**Org creation is closed** (`allowUserToCreateOrganization: false`), and that is a pricing decision
+as much as a scope one: the free unit is per *account*, not per org, so an endpoint that lets
+anyone mint organizations is an endpoint that hands out free units. The only organization anybody
+creates in v0 is their first, and a `databaseHooks.session.create.before` hook makes that one — as
+a session is created rather than as a user is, so that it is idempotent and repairs a
+half-finished sign-up on the next attempt.
+
+One consequence worth stating plainly, because it is the cost side of "we own the security
+surface": **rate limiting is ours now.** It is on in every environment, not only production, and
+counts in the database rather than in memory — on Vercel each serverless instance keeps its own
+counter, so an in-memory limit is barely a limit against exactly the traffic worth limiting. That
+adds a `rate_limits` table this ADR did not anticipate.
+
 ## Deliberately left open
 
 - Whether Google is the only OAuth provider at v0.5. GitHub is a reasonable second for a
   recruiter-facing demo, and it is cheap either way.
 - Whether invitations ship in v0 at all. The PRD puts memberships in v0, but the second human being
-  who needs one is a v1 concern.
+  who needs one is a v1 concern. The table exists — the plugin requires it — and #30 owns the flow.
+- Whether the session's five-minute cookie cache is the right window. It trades a database read per
+  request against a revoked session staying usable for that long. It is safe at any window for the
+  tenancy boundary, because the org id it caches is re-checked against `memberships` regardless;
+  the question is only about revocation latency, and there is nothing to revoke yet.
 
 ## Sources
 

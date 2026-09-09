@@ -94,6 +94,22 @@ services:
       # Inside a container loopback is the container, so pasting the host string in
       # here yields a connection refused that reads like the database is down.
       DATABASE_URL: postgresql://capexwise:capexwise_local_dev@postgres:5432/capexwise
+      # 3001 because that is the port this service is published on below, and the
+      # OAuth callback is built from this value. A Google client whose redirect
+      # URIs do not include `http://localhost:3001/api/auth/callback/google` will
+      # refuse the round trip from here even though it works under `npm run dev`.
+      APP_URL: http://localhost:3001
+      # Local-only, like the database password above and for the same reason:
+      # this service exists to prove the image boots and serves against a real
+      # database, and nothing it signs outlives the container. Never promote it.
+      BETTER_AUTH_SECRET: compose-only-not-a-secret-compose-only-not-a-secret
+      # Read from the host if they are set — a real sign-in through the image
+      # needs a real client — and obviously fake otherwise, so the server still
+      # boots. `${VAR:-default}` is compose's own substitution; it reads `.env`
+      # in this directory, not `.env.local`, so exporting them in the shell is
+      # the way to hand real values in.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-compose-only-not-a-real-client}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-compose-only-not-a-real-secret}
     ports:
       # 3001, not 3000, so this and `npm run dev` can both be up. Loopback-bound
       # for the same reason the database is.

@@ -17,9 +17,12 @@ import { defineConfig, devices } from "@playwright/test";
  * the pages not at all. So: the container workflow proves the production
  * artefact boots and serves, and this proves the pages render.
  *
- * The dev server runs `src/instrumentation.ts` like any other, so it needs a
- * valid `DATABASE_URL` to start — locally from `.env.local`, in CI from the
- * workflow. It does not need the database to be reachable; nothing queries yet.
+ * The dev server runs `src/instrumentation.ts` like any other, so it needs every
+ * variable in `src/lib/env-schema.mts` to be present and well-formed before it
+ * will start — locally from `.env.local`, in CI from the workflow. It does not
+ * need any of them to *work*: nothing here reaches the database or Google, so
+ * the Google client in CI is a pair of obviously-fake strings and that is the
+ * honest thing for it to be.
  */
 
 // Not 3000 and not 3001. `npm run dev` holds the first and `npm run docker:up`

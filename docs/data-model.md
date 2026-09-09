@@ -4,10 +4,10 @@
 **Last updated:** 2026-09-08
 **Supersedes:** the sketch in [PRD](PRD.md) section 10
 
-This is the contract the migrations implement. **`organizations` is built** — #17 landed the
-Drizzle pipeline and needed one real table to exercise it. Everything else here is still prose:
-`users`, `memberships` and `invitations` are #24, the Better Auth tables come with the provider in
-#25, and row-level security is #28.
+This is the contract the migrations implement. **Section 2 is built**: `organizations` came with
+#17, `users`, `memberships` and `invitations` with #24, and `sessions`, `accounts`, `verifications`
+and `rate_limits` with the provider in #25. Everything from section 3 on is still prose, and
+row-level security is #28.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -83,10 +83,22 @@ generates string ids by default, and a `text` `organizations.id` would make `org
 column on twelve domain tables and every index that leads with it. Uniform `uuid` keys are worth
 more than the setup cost.
 
-The adapter is configured so **the database supplies ids** rather than the library
-(`advanced.database.generateId`). Confirm the exact option name against the pinned version when
-#25 wires the provider — ADR-0004 already commits to pinning exactly and reading release notes,
-and this is one of the things to read them for.
+The adapter is configured so **the database supplies ids** rather than the library: the option is
+`advanced.database.generateId`, and the value is `false` — "use the column default", which is
+`uuidv7()`. Confirmed against `better-auth@1.7.3` by #25, which is the version pinned in
+`package.json`.
+
+Two column-level consequences of the reconciliation, both settled by #25 and neither obvious from
+the prose above:
+
+- **`organizations` carries `logo` and `metadata`**, and nothing in the product reads either. The
+  plugin declares them on its `organization` model, so the adapter's schema check refuses to boot
+  without them. Nothing we write should go into `metadata` — a value the schema does not describe
+  is a value the migrations, the drift check and this document all miss.
+- **`sessions` carries `active_org_id`**, the plugin's `activeOrganizationId` under the house
+  spelling, mapped in `src/server/auth.ts`. Field mappings there name the *Drizzle property*, not
+  the SQL column, which is the detail that makes them easy to get wrong; the mapping is exercised
+  against a real database by `src/server/auth.integration.test.ts`.
 
 **Cost, stated plainly:** a Better Auth upgrade that changes its expected schema is a migration we
 write by hand instead of one the CLI generates. That is the trade for owning the names.
@@ -100,6 +112,9 @@ They cannot. A person can belong to two orgs with one account, so identity is de
 the tenancy boundary — and these rows are read during sign-in, *before* any org context exists to
 scope them by. A policy keyed on `app.current_org_id` would evaluate against an unset GUC on every
 authentication request.
+
+`rate_limits` has no `org_id` either, and for a plainer reason: a rate-limit bucket is an IP address
+and a path, observed before anybody has identified themselves.
 
 The consequence has to be stated rather than left implied: **these four tables are outside the
 ADR-0003 protection scheme.** They are not covered by `db.forOrg()`, their RLS policies are not
@@ -117,6 +132,10 @@ create table organizations (
   id            uuid primary key default uuidv7(),
   name          text not null,
   slug          text not null unique,
+  -- Better Auth's, not ours. Nothing in the product reads either; the plugin
+  -- declares them, so the adapter refuses to boot without them.
+  logo          text,
+  metadata      text,
   plan          org_plan not null default 'free',
   is_demo       boolean not null default false,
   deleted_at    timestamptz,            -- see §7: purge grace period
@@ -186,6 +205,18 @@ create unique index invitations_org_email_pending
 
 `sessions`, `accounts` and `verifications` follow Better Auth's shape with our id type and are not
 reproduced here — they hold no domain data and their columns are the library's to change.
+`src/db/schema/auth.ts` is the definition, and says which decisions in it are ours: the OAuth
+tokens in `accounts` are encrypted at rest rather than stored raw, and `accounts.password` is
+permanently null while Google is the only sign-in method.
+
+**`rate_limits` is a fourth table there, and it is a deployment decision rather than a
+reconciliation.** Better Auth counts rate limits in memory by default; on Vercel each serverless
+instance keeps its own counter, so an in-memory limit is barely a limit against exactly the traffic
+worth limiting. Moving the counter into the database costs a read and a write per auth request,
+which is the right trade on a path meant to be rare. It is also **the one table in the schema with
+no `created_at` / `updated_at`** — the rows are counters the provider overwrites in place and
+deletes when the window closes, so §1's rule does not apply and a trigger would sit on the hottest
+write in the auth flow.
 
 **`org_plan` has three values, not two.** Pricing settled at **$5 per unit per month with the
 first unit free** (PRD §12, questions 2 and 3), which separates *pays us* from *has F7 and F8* —
