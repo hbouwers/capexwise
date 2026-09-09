@@ -12,6 +12,15 @@
 # collation differs from the glibc/ICU collation every managed provider runs, so
 # `ORDER BY` on text can disagree between a developer's machine and production.
 
+# The project name is pinned rather than inherited from the directory name, which
+# is what Compose does by default. This checkout is still called `propex` from
+# before the rename, so the default would be `propex` here and `capexwise`
+# after renaming the folder — and Compose would then treat the two as unrelated
+# projects. A `db:down` from the renamed folder silently does nothing while the
+# old container keeps holding port 5432, and the next `db:up` fails on a
+# container-name conflict rather than on anything that points at the cause.
+name: capexwise
+
 services:
   postgres:
     image: postgres:18
