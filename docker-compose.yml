@@ -73,6 +73,36 @@ services:
       retries: 10
       start_period: 10s
 
+  # The container from #19 and ADR-0002, behind a profile so it is inert for the
+  # normal `npm run db:up` — Compose starts no profiled service unless asked. It is
+  # here because the Dockerfile is only an escape hatch while someone runs it, and
+  # `npm run docker:up` is the one command that makes running it the easy path.
+  #
+  # This is not how the application is deployed. Production is Vercel today and
+  # Cloud Run at the trigger, and both get their configuration from the
+  # environment; this service exists so the image is exercised against a real
+  # database before that move, not to model either one.
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+    image: capexwise-app
+    container_name: capexwise-app
+    restart: unless-stopped
+    environment:
+      # `postgres`, the service name — not the `127.0.0.1` that `.env.local` uses.
+      # Inside a container loopback is the container, so pasting the host string in
+      # here yields a connection refused that reads like the database is down.
+      DATABASE_URL: postgresql://capexwise:capexwise_local_dev@postgres:5432/capexwise
+    ports:
+      # 3001, not 3000, so this and `npm run dev` can both be up. Loopback-bound
+      # for the same reason the database is.
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      postgres:
+        # Waits for the healthcheck above, not merely for the container to exist.
+        condition: service_healthy
+
 volumes:
   capexwise-pgdata:
     name: capexwise-pgdata

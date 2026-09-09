@@ -114,8 +114,9 @@ The repository is the source of truth.
 ## Local development
 
 **Prerequisites.** Node 24, pinned in [`.nvmrc`](./.nvmrc), so `nvm use` picks it up. Docker
-Desktop is needed for the database only — on Windows take the WSL2 backend, which is the current
-default; the Hyper-V one is legacy and is not what this is run against.
+Desktop for the database, and for building the application container — on Windows take the WSL2
+backend, which is the current default; the Hyper-V one is legacy and is not what this is run
+against.
 
 ```bash
 npm install
@@ -208,6 +209,54 @@ migration that drops anything.
 
 The demo seed is [#34](https://github.com/hbouwers/capexwise/issues/34), so `db:migrate` leaves a
 schema with no rows in it.
+
+### The container
+
+[`Dockerfile`](./Dockerfile) is the escape hatch from [ADR-0002](docs/adr/0002-hosting.md), and it
+is maintained from commit one rather than written when it is needed. Vercel Hobby forbids
+commercial use, so Stripe going live at v1 forces a move to Cloud Run — and whether that is an
+afternoon or a quarter comes down to whether the image has been built and run recently. CI builds
+it and starts it on every pull request for that reason.
+
+```bash
+npm run docker:up
+```
+
+That builds the image and starts it against the compose database, on
+`http://localhost:3001` — 3001 rather than 3000 so it and `npm run dev` can be up together.
+`npm run docker:down` stops it. The app service sits behind a Compose profile, so
+`npm run db:up` is unaffected and starts Postgres alone.
+
+| Script | What it does |
+| --- | --- |
+| `npm run docker:build` | Build the image only |
+| `npm run docker:up` | Build and start it, plus the database, waiting until both are healthy |
+| `npm run docker:down` | Stop both, keeping the data |
+
+**Configuration comes from the environment, never from a baked-in value.** That is the property
+that makes the Cloud Run move a config exercise instead of a rebuild, so `.env*` is in
+[`.dockerignore`](./.dockerignore) deliberately.
+
+| Variable | Needed | Default in the image | Notes |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | At runtime, once anything reads it | none | Not needed at build time, and deliberately so — [ADR-0006](docs/adr/0006-migrations.md) keeps the database out of the build. Nothing in the application connects yet; [#20](https://github.com/hbouwers/capexwise/issues/20) makes a missing value a startup error |
+| `PORT` | No | `3000` | Cloud Run injects its own, so the server reads it rather than hardcoding one |
+| `HOSTNAME` | No | `0.0.0.0` | Load-bearing. The standalone server binds `127.0.0.1` otherwise, which inside a container means nothing can reach it and the failure reads like the app never started |
+| `NODE_ENV` | No | `production` | Set in the image; nothing should need to override it |
+
+The list grows with [#20](https://github.com/hbouwers/capexwise/issues/20), which is where every
+variable and its per-environment home are recorded. Anything added there that the server reads at
+runtime is passed to the container the same way — as environment, at deploy.
+
+**The container does not run migrations**, at boot or otherwise. They run in CI on a push to
+`main`, for the reasons in [ADR-0006](docs/adr/0006-migrations.md).
+
+Three things about the image are worth knowing before changing it. It is built from
+`output: "standalone"`, so it ships the server and the modules Next traced as reachable rather than
+all of `node_modules` — a dependency loaded by a path that cannot be traced statically works under
+`npm start` and is missing here, which is why CI starts the container instead of only building it.
+It runs as the unprivileged `node` user. And its base image is pinned by digest as well as by tag,
+so a build that passed last week and fails today has changed for a reason visible in the diff.
 
 ### Scripts
 
