@@ -14,10 +14,10 @@ import {
  * and the two are expected to match — a divergence is a bug in whichever was
  * changed without the other.
  *
- * Only this table is here. `users`, `memberships` and `invitations` are #24,
- * and the four Better Auth tables come with the provider in #25. This one
- * exists now because #17 needs a real migration to exercise the pipeline with,
- * and because everything else in the schema will reference it.
+ * `users`, `memberships` and `invitations` joined it in #24; `sessions`,
+ * `accounts` and `verifications` come with the provider in #25. This table came
+ * first because #17 needed a real migration to exercise the pipeline with, and
+ * because everything else in the schema references it.
  *
  * Row-level security is deliberately not enabled here yet. #28 owns it, and
  * `organizations` is the one table the standard policy template does not fit —
