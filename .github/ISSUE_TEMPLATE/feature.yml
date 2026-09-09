@@ -1,0 +1,41 @@
+name: Feature request
+description: Something the product should do and does not.
+labels: ["feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What a landlord cannot do today, and what it costs them. Describe the situation,
+        not the feature — the feature is the part that is up for discussion.
+    validations:
+      required: true
+
+  - type: textarea
+    id: who
+    attributes:
+      label: Who has this problem
+      description: >
+        How many units, how many buildings, self-managing or not. Scope decides priority
+        more than the idea does.
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: What a fix might look like
+      description: Optional. A sketch, not a spec — say if you are unsure.
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do instead today
+      description: >
+        The spreadsheet, the notebook, the thing in Zillow. A workaround that already
+        works is the bar a feature has to clear.
+    validations:
+      required: false

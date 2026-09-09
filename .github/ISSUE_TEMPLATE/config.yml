@@ -1,0 +1,4 @@
+# Blank issues stay on. Most issues here are written by the owner as design notes
+# that fit no form, and a form that has to be fought is a form that gets bypassed.
+# The templates below are for the reports that arrive once the repository is public.
+blank_issues_enabled: true
