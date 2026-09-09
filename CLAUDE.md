@@ -5,8 +5,10 @@ Companion to Zillow Rental Manager, not a replacement: Zillow keeps rent collect
 listings, tenants and messaging; this owns the capital asset lifecycle, CapEx forecasting, tax
 planning, maintenance scheduling, vendor contacts and building operational facts.
 
-**Status: scaffolded, not yet functional.** The Next.js application builds and serves a
-placeholder page; there is no database, no auth, and no feature code. Rules below that describe
+**Status: the tenancy spine is in; no feature code yet.** The application signs in with Google,
+creates the account's org and owner membership, and protects its routes — #25. The schema through
+`docs/data-model.md` §2 is migrated. Everything the product is *for* — buildings, capital items,
+the forecast, the tax planner — is still unwritten. Rules below that describe
 runtime behaviour describe what the code *will* do — they are the contract to build against, not
 a description of something already working. Anything already true is marked as such.
 
@@ -43,13 +45,15 @@ eventually be world-readable.
 | `src/instrumentation.ts` | The boot hook Next.js calls before a server instance serves anything. It validates the environment there, so a bad value stops the process instead of surfacing in a request |
 | `src/components/ui/` | shadcn/ui primitives as generated. Restyled to the tokens, not rewritten |
 | `src/components/` | Composed application components, grouped by feature once there is more than one |
-| `src/server/actions/` | `"use server"` mutations, one file per domain area. Every one starts with `getOrgContext()` |
+| `src/server/actions/` | `"use server"` mutations, one file per domain area. Every one starts with `getOrgContext()` — `auth.ts` is the one exception, and says why: it runs before there is a session to resolve an org from |
 | `src/server/queries/` | Read paths, org-scoped, one file per domain area. Called from Server Components; never from the client |
-| `src/server/org-context.ts` | `getOrgContext()` and the scoped `db.forOrg(orgId)` (#26). One of the two files allowed to import the raw client |
-| `src/server/env.ts` | The validated environment. Import this, never `process.env`; it is `server-only`, so a Client Component that reaches for it fails the build |
+| `src/server/org-context.ts` | `getOrgContext()` and the scoped `db.forOrg(orgId)` (#26). One of the files allowed to import the raw client |
+| `src/server/auth.ts` | The Better Auth provider — the adapter mapping, the Google client, the organization plugin, rate limiting. Also allowed the raw client, for the reason `eslint.config.mjs` gives |
+| `src/server/session.ts` | `requireSession()` and `getSession()` — the protected-route pattern, documented once. Identity only; the org is `getOrgContext()` |
+| `src/server/env.ts` | The validated environment. Call `env()`, never `process.env`; it is `server-only`, so a Client Component that reaches for it fails the build. It parses on **first use**, not on import — `next build` imports every route module, and a parse at module scope would make the build demand production secrets |
 | `src/server/boot.ts` | What `src/instrumentation.ts` runs at startup. Separate from it because that file is compiled for the Edge runtime too, where `server-only` and `process.exit` are a build error and a build warning |
 | `src/db/schema/` | Drizzle table definitions, one file per domain area, matching `docs/data-model.md` |
-| `src/db/client.ts` | The raw database client — added by #26. Importing it, or the `pg` driver, from anywhere else is an ESLint error |
+| `src/db/client.ts` | The raw database client. Importing it, or the `pg` driver, from anywhere outside the allowlist is an ESLint error |
 | `src/db/migrate.mts` | The migration runner. Forward-only, and it opens its own connection — [ADR-0006](docs/adr/0006-migrations.md) |
 | `src/lib/env-schema.mts` | The environment contract — the schema, and the parser that formats a failure without printing a value. `.mts` because the migration runner imports it and runs under plain Node |
 | `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
@@ -70,7 +74,8 @@ These are the ones that are expensive or impossible to fix later. Everything els
   param, not a header, not a request body. A client-supplied org id is ignored, not validated.
 - **Never import the raw database client.** Use `getOrgContext()` and the scoped `db.forOrg(orgId)`
   it returns. An ESLint rule enforces this (#16); wanting to route around it is the signal to fix
-  the helper's ergonomics, not to add an exception.
+  the helper's ergonomics, not to add an exception. `eslint.config.mjs` lists the files that are
+  past it and why each one is.
 - **Money is integer cents.** Never a float, never a `numeric` round-tripped through JavaScript.
   One `Money` type, one formatter.
 - **Identifiers are non-sequential** (UUIDv7 or ULID — #8). Sequential ids on a multi-tenant
@@ -180,7 +185,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Licence | All rights reserved. Public as a portfolio artifact, not open source. Reversible toward permissive; the other direction is not |
 | Demo city | **Indianapolis**, matching the PRD and the real portfolio. The prototype's Somerville, MA data is presentation only |
 | Land vs building basis | Split on `buildings` from the start (#9). Depreciation applies to the building portion only, so without it the tax planner is wrong in year one, not year two |
-| Auth | Better Auth + its `organization` plugin, orgs and memberships in our own Postgres ([ADR-0004](docs/adr/0004-auth-provider.md)). Google OAuth only in v0 — no passwords, no email provider, no domain. Rejected: Auth.js (v5 still beta, no org primitive) and Clerk (would own the tenancy boundary) |
+| Auth | Better Auth + its `organization` plugin, orgs and memberships in our own Postgres ([ADR-0004](docs/adr/0004-auth-provider.md)). Google OAuth only in v0 — no passwords, no email provider, no domain. Rejected: Auth.js (v5 still beta, no org primitive) and Clerk (would own the tenancy boundary). **Pinned to an exact version, no caret** — the ADR's own mitigation for the youngest dependency in the stack, and the mapping in `src/server/auth.ts` is written against the schema that version reports. **No middleware auth check**: middleware sees a cookie, not a validated session |
 | Name | **CapExWise**, `capexwise.com` registered 2026-09-08 (#3). Repository, board and Vercel project take the same name |
 | Trademark | **Do not register yet** (#3). Rights come from use in commerce, and an Intent-to-Use filing keeps priority available later, so registration waits for the first paying customer, public launch, or real branding spend. "CapExWise" is suggestive-to-descriptive in a category already full of CapEx-named tools, so it is a weak mark and early registration buys little. **Clearance came back clear on 2026-09-08** and no longer blocks #32 or v0.5 — USPTO turned up nothing on the exact string or on confusingly similar marks, and the sweep for unregistered common-law users found none. Use ™ freely; **® is unlawful before registration**. Not legal advice; an attorney gives the real opinion before any money is spent on branding |
 | Pricing | **$5 per unit per month, first unit free permanently, no trial and no card to start** (PRD §12, questions 2–3). The free tier *is* the trial: a clock short enough to convert expires long before a tax-year or ten-year instrument pays off, and it would run during manual entry. Gating is by capacity, never by feature — hiding the forecast hides the thing that justifies paying. The free unit is per **account**, not per org. Conversion event is the second rental, not a timer. Left to the billing work: a taper above ~10 units, and an annual plan |
