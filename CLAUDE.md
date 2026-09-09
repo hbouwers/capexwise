@@ -108,7 +108,9 @@ These are the ones that are expensive or impossible to fix later. Everything els
   subject is a sentence, and [CONTRIBUTING.md](CONTRIBUTING.md) says why and what to write instead.
 - **Close issues from commit messages** — `Closes #12`. The board picks it up.
 - **Run `/code-review` before opening any PR that touches code.** Markdown-only changes skip it.
-- **UI changes get screenshots on the PR**, desktop and 375px where layout is affected.
+- **Screenshots on a PR are optional.** Holden runs the branch locally, which is a better look at a
+  UI change than two stills — so a screenshot is worth attaching only when it shows something a
+  local run would not: a state that is awkward to reach, or a before-and-after.
 - **Configuration comes from `@/server/env`, not `process.env`.** It is parsed once at boot, so a
   missing or malformed value is a startup error naming the variable. A new variable goes in
   `src/lib/env-schema.mts` *and* `.env.example`; one without the other is half a change.

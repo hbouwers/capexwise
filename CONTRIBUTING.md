@@ -54,11 +54,14 @@ branch of one enormous commit is skimmed.
 
 ## Pull requests
 
-The template prompts for the rest. Two things it cannot check for you:
+The template prompts for the rest. The one thing it cannot check for you:
 
 - **Run `/code-review` before opening any pull request that touches code.** Markdown-only changes
   skip it.
-- **Screenshots for anything that moves pixels**, desktop and 375px.
+
+**Screenshots are optional.** A UI change is reviewed by running the branch, which sees hover,
+focus, keyboard order and real data — none of which a still shows. Attach one when it carries
+something a local run would not: a state that is awkward to reach, or a before-and-after.
 
 Squash merge only. Merge commits and rebase merges are disabled at the repository level, branches
 delete on merge, and history stays linear by construction.
