@@ -137,7 +137,12 @@ create table users (                    -- Better Auth `user`
   updated_at     timestamptz not null default now()
 );
 
-create type membership_role as enum ('owner', 'member');
+-- Ordered least-to-most privileged rather than alphabetically, because that is
+-- the order a permission check reads in. Two values today; the enum exists so a
+-- third — the limited or read-only role the management-group persona wants — is
+-- `ALTER TYPE ... ADD VALUE` rather than a schema change with a data migration
+-- behind it.
+create type membership_role as enum ('member', 'owner');
 
 create table memberships (              -- Better Auth `member`
   id         uuid primary key default uuidv7(),
@@ -146,7 +151,11 @@ create table memberships (              -- Better Auth `member`
   role       membership_role not null default 'member',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (org_id, user_id)
+  -- Named, because it is also the index §8 lists as `memberships_org_user`:
+  -- a unique constraint is already a btree over exactly those columns, and
+  -- creating both would give Postgres two identical structures to maintain on
+  -- every write.
+  constraint memberships_org_user unique (org_id, user_id)
 );
 
 create table invitations (              -- Better Auth `invitation`, #30
@@ -154,7 +163,13 @@ create table invitations (              -- Better Auth `invitation`, #30
   org_id       uuid not null references organizations (id) on delete cascade,
   email        text not null,
   role         membership_role not null default 'member',
+  -- `text` with a check rather than a native enum, and the one place that
+  -- departs from §1's test: these four values are Better Auth's, not ours, so
+  -- widening the set has to be a one-line migration rather than a coordination
+  -- problem. Named for what a violation means, so the error says which rule
+  -- was broken.
   status       text not null default 'pending'
+                 constraint invitations_status_known
                  check (status in ('pending', 'accepted', 'canceled', 'expired')),
   expires_at   timestamptz not null,
   inviter_id   uuid not null references users (id) on delete restrict,
@@ -686,9 +701,15 @@ Every index on a domain table **leads with `org_id`**, per ADR-0003. Not a conve
 that does not lead with `org_id` invites a plan that reads another tenant's rows before discarding
 them.
 
+`memberships_user` is the one index below that does not, and it is why the rule is about *domain*
+tables. "Which orgs am I in" is the query behind the org switcher (#29), and it runs before there
+is an org context to lead with — an index on `(org_id, user_id)` cannot serve it. `memberships` is
+the table that establishes the boundary rather than one that sits inside it.
+
 ```sql
 -- Tenancy and identity
-create index memberships_org_user     on memberships (org_id, user_id);
+-- `memberships_org_user` is not listed here: it is the unique constraint in §2,
+-- which is already a btree over (org_id, user_id) under that name.
 create index memberships_user         on memberships (user_id);  -- "which orgs am I in"
 create index invitations_org_status   on invitations (org_id, status, expires_at);
 
