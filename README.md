@@ -336,12 +336,11 @@ npm run test:e2e
 
 The end-to-end suite, one Chromium browser against a dev server Playwright starts on port 3100.
 It covers the failures that need a real browser to see: a route that 500s, a stylesheet that never
-arrives, a font that silently falls back. It is deliberately small — the container workflow already
+arrives, a font that silently falls back. It is deliberately small — the container job in CI already
 proves the production image boots and serves, and everything else is faster to assert in Vitest.
 The browser is not installed with the dependencies; `npx playwright install chromium` gets it.
 
-All three run on every pull request in
-[`.github/workflows/test.yml`](.github/workflows/test.yml). The coverage stance — what gets real
+All three run on every pull request, in the pipeline below. The coverage stance — what gets real
 tests and what deliberately does not — is in [CLAUDE.md](./CLAUDE.md) under "Testing".
 
 ### Scripts
@@ -359,6 +358,27 @@ tests and what deliberately does not — is in [CLAUDE.md](./CLAUDE.md) under "T
 | `npm run format` | Prettier, writing in place |
 | `npm run format:check` | Prettier, checking only — what CI asks |
 | `npm run typecheck` | Generate route types, then `tsc --noEmit` |
+
+## Continuous integration
+
+One workflow, [`.github/workflows/ci.yml`](.github/workflows/ci.yml), on every pull request and on
+every push to `main`. Four jobs, in parallel, split by what they need rather than by what they
+cover — the same rule the test suites are split by.
+
+| Job | Needs | What it runs |
+| --- | --- | --- |
+| Types, lint and schema | nothing | `format:check`, `lint`, `typecheck`, `db:drift` |
+| Production build | nothing | `next build`, with no `DATABASE_URL` |
+| Unit, integration and end-to-end | a Postgres 18 service | the three suites, Chromium cached between runs |
+| Build and run the image | Docker | `docker build`, then start the container and check it serves a page and its stylesheet as a non-root user |
+
+Each job pays its own checkout and `npm ci`; with the npm cache warm that costs less than
+serialising them would. Nothing here needs a secret — the Postgres credential is the committed
+local one, and the `DATABASE_URL` the container job passes points at nothing on purpose.
+
+Vercel builds every pull request too, and that check is not this workflow. It is the deploy
+preview, it builds without `output: "standalone"` ([#68](https://github.com/hbouwers/capexwise/issues/68)),
+and it goes away with the move to Cloud Run — which is exactly why the container job exists.
 
 ## Licence
 

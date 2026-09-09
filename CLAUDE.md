@@ -163,8 +163,8 @@ before each test. It refuses to run against a database whose name does not end i
   test can see the rows a scoped handle hides; that is the only reason it exists.
 - **Factories take an `orgId` as a required first argument**, never an optional one with a default.
   A factory that can invent an org is a way to write a test that passes with tenancy broken.
-- All three suites run in CI on every PR, in `.github/workflows/test.yml`. #22 folds that job into
-  the full pipeline.
+- All three suites run in CI on every PR, in `.github/workflows/ci.yml`, alongside typecheck,
+  lint, formatting, migration drift, `next build` and the container build.
 
 ## Decided, and not up for re-litigation
 

@@ -1,0 +1,316 @@
+# The pipeline. Everything that has to be green before a branch merges runs here,
+# in one workflow rather than several, so a pull request shows one story instead
+# of a scoreboard.
+#
+# Four jobs, running in parallel, split by what they need rather than by what
+# they cover — the same rule the test suites are split by:
+#
+#   checks      nothing        types, lint, formatting, migration drift
+#   build       nothing        `next build`
+#   test        Postgres       unit, integration, end-to-end
+#   container   Docker         build the image, start it, check it serves
+#
+# Parallel because the wall clock is what a solo dev waits on, and the four are
+# independent. Each pays its own checkout and `npm ci`; with the npm cache warm
+# that is around twenty seconds, which is less than serialising them would cost.
+# Within a job the steps run cheapest first, so the fastest failure is the one
+# you see.
+#
+# This replaces the standalone `test.yml` and `container.yml`, which each said in
+# their own header that #22 would fold them in. Their job names are carried over
+# unchanged, so the checks on a pull request keep their identities across the
+# move.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One run per branch. A push that supersedes an in-flight run cancels it rather
+# than queueing behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Matching the Dockerfile. Next.js collects telemetry from CI runs otherwise.
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  checks:
+    name: Types, lint and schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # `.nvmrc` is the single source for the Node major. Naming a version
+          # here as well is how the two drift.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Types
+        run: npm run typecheck
+
+      # The one check here that is about the database and needs no database.
+      # `db:drift` compares the TypeScript schema against the committed
+      # snapshots, so it catches a change to `src/db/schema/` that shipped
+      # without its migration — invisible in review, because the types are right,
+      # the queries compile, and the column exists in no database.
+      - name: Migration drift
+        run: npm run db:drift
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Not the same signal as `typecheck`, and not redundant with the container
+      # job either. `tsc` does not see the Server/Client boundary: a Client
+      # Component importing `@/server/env` is a build error and a clean
+      # typecheck. The container job does compile the application, but through
+      # BuildKit and behind a layer cache, so its log answers "does the image
+      # build" rather than "does the application".
+      #
+      # No `DATABASE_URL`, deliberately. ADR-0006 keeps the database out of the
+      # build and the Dockerfile builds without one — if that stops being true,
+      # it stops here first.
+      - name: Build
+        run: npm run build
+
+  test:
+    name: Unit, integration and end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # Postgres 18 because ADR-0005 makes `uuidv7()` the primary key default and
+      # that is an 18 built-in — an older major here would fail on the first
+      # migration rather than on anything that points at the cause. Same major as
+      # `docker-compose.yml`; the two are meant to agree.
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: capexwise
+          POSTGRES_USER: capexwise
+          # The committed local credential, same as `docker-compose.yml` and
+          # `.env.example`. It guards a throwaway database on a runner that is
+          # destroyed minutes later, so it is deliberately not a secret — a
+          # secret here would only mean the workflow could not be read.
+          POSTGRES_PASSWORD: capexwise_local_dev
+        ports:
+          - 5432:5432
+        # `npm ci` below is slower than Postgres takes to start, so this rarely
+        # waits. It is here because "rarely" is not "never", and the failure it
+        # prevents is a connection refused on the first integration test.
+        #
+        # `-h 127.0.0.1` matters, for the reason `docker-compose.yml` spells out
+        # at length: it forces the check onto TCP, which is what a client
+        # actually connects over. Bare `pg_isready` probes the unix socket, and
+        # on a first run that socket answers too early — the entrypoint runs
+        # initdb and then starts a temporary socket-only server to execute init
+        # scripts. A socket check passes against that, the service is marked
+        # healthy, and the first step to connect finds nothing listening on the
+        # port.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U capexwise -d capexwise"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+
+    env:
+      # The integration suite creates this database itself and truncates it
+      # between tests; `src/test/db.ts` refuses any name not ending in `_test`.
+      # It is the harness's own default too, and is written out here so the
+      # workflow says what it runs against without anyone opening that file.
+      TEST_DATABASE_URL: postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise_test
+      # For the dev server Playwright starts: `src/instrumentation.ts` validates
+      # the environment before serving anything, so the server needs a valid
+      # value to boot. Nothing queries the database yet — this has to parse, not
+      # to connect.
+      DATABASE_URL: postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      # Read off the installed package rather than out of `package.json`, which
+      # carries a range: the key has to name the version that is actually there,
+      # or a lockfile bump silently reuses the previous browser.
+      - name: Resolve the Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Chromium is a forty-second download on every run otherwise. That does not
+      # move the pipeline's wall clock — the container job is the long pole
+      # either way — but this repository is private, so runner minutes are a
+      # quota rather than free, and forty seconds a run is worth eight lines.
+      #
+      # Only the browser is cached. The system libraries `--with-deps` installs
+      # live outside this path, which is why the install step still runs on a
+      # hit; with the browser already there it becomes an apt check.
+      - name: Cache the browser
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # Chromium only, matching `playwright.config.ts`.
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      # Only on failure, and only then worth the upload: the report is the trace
+      # and the screenshots for whatever went red, which is the difference
+      # between debugging a browser failure from a log line and from the actual
+      # page.
+      - name: Upload the Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ADR-0002 is why the image gets a job of its own rather than a line in another
+  # one: the container is the escape hatch from Vercel, and an escape hatch nobody
+  # has opened is a guess. A build that passed today is the difference between the
+  # move to Cloud Run being an afternoon and being a project.
+  #
+  # It builds unconditionally rather than behind a `paths` filter. A dependency
+  # bump, a Node version change or an edit to next.config.ts all break the image
+  # without touching the Dockerfile, which is exactly the class of breakage a
+  # `paths` filter would hide until the day it mattered.
+  container:
+    name: Build and run the image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          # Into the local daemon, not a registry. Nothing is published here —
+          # this job proves the image builds and runs, and the first thing that
+          # pushes a tag is the Cloud Run move itself.
+          load: true
+          tags: capexwise-app:ci
+          # The build cache lives in the Actions cache, so an unchanged
+          # `package-lock.json` skips the `npm ci` layer entirely.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Attestations are a registry concept and the docker exporter rejects
+          # them, so `load: true` fails with them left on.
+          provenance: false
+
+      # Building is not the same as working. `output: "standalone"` traces the
+      # modules the server reaches, and a module it could not trace statically is
+      # present in `npm start` and missing here — a failure that only appears when
+      # the process actually boots. Same for the static assets, which standalone
+      # does not trace and the Dockerfile copies separately: miss them and the
+      # container serves HTML with no CSS and exits zero.
+      - name: Start it, and check it serves
+        run: |
+          set -euo pipefail
+
+          # `DATABASE_URL` because the server validates its configuration in the
+          # instrumentation hook and exits non-zero without it (#20). It points
+          # at nothing: no process in this job listens on 5432, and nothing in
+          # the application connects yet. Validation is a parse, so a
+          # well-formed string is all it wants — and using an unreachable one
+          # keeps this job honest about what it proves, which is that the image
+          # boots and serves, not that it can reach a database.
+          docker run -d --name capexwise-ci \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:5432/capexwise \
+            -p 127.0.0.1:3000:3000 capexwise-app:ci
+
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/; then
+              served=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "${served:-0}" != "1" ]; then
+            echo "::error::The container never served a request."
+            docker logs capexwise-ci
+            exit 1
+          fi
+
+          # The stylesheet, fetched by the URL the rendered page actually asks
+          # for. This is the check that catches a missing `.next/static`.
+          #
+          # `head -n1` because `grep -o` prints every match on a line and the
+          # rendered page puts the preload and the stylesheet link on one, so
+          # there are always several. `|| true` because under `pipefail` this
+          # pipeline fails for two reasons that are not the image: grep exits 1
+          # when it matches nothing, and grep can take a SIGPIPE when head closes
+          # the pipe first. Either would kill the step here, intermittently, and
+          # never reach the check below that says what actually went wrong.
+          css=$(curl -fsS http://127.0.0.1:3000/ | grep -o '/_next/static/[^"]*\.css' | head -n1 || true)
+
+          if [ -z "$css" ]; then
+            echo "::error::The page referenced no stylesheet."
+            docker logs capexwise-ci
+            exit 1
+          fi
+
+          curl -fsS -o /dev/null "http://127.0.0.1:3000$css"
+
+          # Non-root, asserted rather than assumed — a base image bump is enough
+          # to lose this quietly.
+          if [ "$(docker exec capexwise-ci id -u)" = "0" ]; then
+            echo "::error::The container runs as root."
+            exit 1
+          fi
+
+          docker rm -f capexwise-ci
