@@ -30,6 +30,7 @@ eventually be world-readable.
 | `docs/ui/components.md` | Component inventory — names, layers, shadcn mapping. The contract the screen specs reference |
 | `docs/ui/screens/` | One markdown spec per screen — **not written yet**, see #12 |
 | `docs/ui/reference/rental-manager.html` | The design prototype. Visual source of truth |
+| `CONTRIBUTING.md` | Branch, commit and PR conventions, and the protection to enable at v0.5 |
 
 ### Source layout
 
@@ -92,11 +93,14 @@ These are the ones that are expensive or impossible to fix later. Everything els
 - **Branch per issue**, named `type/short-description` — `feat/`, `fix/`, `docs/`, `chore/`,
   `refactor/`. One open PR at a time where practical.
 - **Never push to `main`.** The one exception was the bootstrap commit, which had no base branch
-  to target.
+  to target. Nothing enforces this: GitHub offers no branch protection or rulesets on a private
+  repository outside a paid plan, so it is convention until the repo goes public at v0.5
+  ([CONTRIBUTING.md](CONTRIBUTING.md) lists the ruleset to turn on then).
 - **Squash merge only.** Merge commits and rebase merges are disabled at the repository level,
   branches delete on merge, and history stays linear by construction.
 - **Small commits inside one PR**, each standing alone: green build, green tests, and a message
-  saying what it does and why. The commit is the review unit.
+  saying what it does and why. The commit is the review unit. **No Conventional Commits** — the
+  subject is a sentence, and [CONTRIBUTING.md](CONTRIBUTING.md) says why and what to write instead.
 - **Close issues from commit messages** — `Closes #12`. The board picks it up.
 - **Run `/code-review` before opening any PR that touches code.** Markdown-only changes skip it.
 - **UI changes get screenshots on the PR**, desktop and 375px where layout is affected.
