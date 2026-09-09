@@ -1,0 +1,77 @@
+# What the build context is allowed to carry. Two jobs: keep host artefacts from
+# leaking into the image, and keep the context small enough that a rebuild is
+# quick.
+#
+# Deny-list rather than allow-list, matching `.gitignore` in shape so the two can
+# be read side by side. Anything added here that the build genuinely needs fails
+# loudly at `npm run build`, not silently at runtime.
+
+# Host dependencies and host build output. Both are reinstalled and rebuilt inside
+# the image, and both are platform-specific — a `node_modules` populated on Windows
+# carries the wrong native binaries for an Alpine container.
+node_modules
+.next
+out
+build
+dist
+
+# Git. Large, and it is the whole history of a repository that goes public at v0.5.
+.git
+.gitattributes
+.gitignore
+.github
+
+# Environment files. `.env.example` is committed and harmless, but nothing in this
+# family belongs in an image: configuration reaches the container from the
+# environment, per ADR-0002, because that is what makes a Cloud Run move a config
+# exercise. Baking a value in would make it a rebuild instead.
+.env
+.env.*
+
+# Secrets, matching `.gitignore`. Belt and braces: these should never exist in the
+# checkout, and if one does it must not become a layer.
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.local.*
+service-account*.json
+gha-creds-*.json
+
+# Local database. The image never talks to the compose database at build time.
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Documentation and the design prototype. `docs/ui/reference/` alone is 456KB.
+docs
+*.md
+LICENSE
+
+# Tests. Nothing in the image runs them; CI does, in its own job.
+e2e
+**/*.test.ts
+**/*.test.tsx
+playwright.config.ts
+test-results
+playwright-report
+
+# Tooling that only ever runs on a developer's machine or in CI.
+.husky
+.vscode
+.idea
+.prettierrc.json
+.prettierignore
+eslint.config.mjs
+.eslintcache
+drizzle.config.ts
+
+# Caches and noise.
+*.tsbuildinfo
+*.log
+coverage
+.vercel
+.turbo
+scratch
+.DS_Store
+Thumbs.db
