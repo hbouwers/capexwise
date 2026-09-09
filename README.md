@@ -120,6 +120,7 @@ against.
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
@@ -128,26 +129,71 @@ That serves a placeholder page on `http://localhost:3000`, and the design system
 primitive on one page, so that a value drifting away from
 [`docs/ui/tokens.md`](docs/ui/tokens.md) is visible rather than discovered on a screen later.
 
-**`npm run dev` does not need the database yet** — nothing in the application connects to it so
-far, and `DATABASE_URL` is read only by the migration tooling. Skip the next two sections entirely
+**`npm run dev` does not need the database running yet** — nothing in the application connects to
+it so far. It does need `DATABASE_URL` to be *set*, which is what the `cp` is for: the server
+validates its configuration before it serves anything, so a variable that is missing stops the
+server and says which one rather than surfacing later as something else. Skip the next two sections
 if you only want the app running.
+
+### Environment variables
+
+[`.env.example`](./.env.example) is the copyable list, and `src/lib/env-schema.mts` is the schema it
+mirrors. A variable added to one and not the other is half a change.
+
+**Validation runs at boot, not at first use.** `src/instrumentation.ts` is the hook Next.js calls
+once before a server instance serves anything; through `src/server/boot.ts` it imports
+`src/server/env.ts`, which parses `process.env` against the schema. A missing or malformed value
+prints what is wrong with which variable and exits non-zero:
+
+```
+Invalid environment configuration:
+
+  DATABASE_URL is not set
+
+Set it in the environment the process runs in — locally by copying `.env.example` to `.env.local`,
+on a deploy through the platform's own environment configuration. `.env.example` lists every
+variable, and the README says where each value comes from in each environment.
+```
+
+**No value is ever printed** — only variable names and what is wrong with them. `DATABASE_URL`
+carries a password, this message lands in deploy logs, and deploy logs are retained and widely
+readable. It is the rule the migration runner already follows when it logs the host and database it
+is about to migrate and never the connection string it read them from.
+
+`next build` is deliberately not covered. The Dockerfile builds with no `DATABASE_URL` because
+[ADR-0006](docs/adr/0006-migrations.md) keeps the database out of the build — configuration is a
+deploy-time concern, so it is checked at deploy time.
+
+**Server and public variables are separate halves of the file, and the separation is structural.**
+`src/server/env.ts` imports `server-only`, so a Client Component that reaches for it fails the
+build. A `NEXT_PUBLIC_` variable is the opposite of that: the compiler inlines its value into the
+client bundle as a literal, so it is published to every browser and stays published in every cached
+build — a secret that acquires the prefix cannot be un-published by removing it. The schema refuses
+to start the server if a server variable carries the prefix. There are no public variables yet.
+
+| Variable | Local | Preview | Production |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | `.env.local`, pointing at the compose database | Vercel project environment, Preview scope — a database separate from production's, settled in [#33](https://github.com/hbouwers/capexwise/issues/33) | Vercel project environment, Production scope, from the managed instance ([#32](https://github.com/hbouwers/capexwise/issues/32), [#33](https://github.com/hbouwers/capexwise/issues/33)) |
+
+`npm run db:migrate` validates a strict subset — `DATABASE_URL` and nothing else — so the CI job
+that applies migrations on a push to `main` never needs an auth secret or a Stripe key to run one.
 
 ### The database
 
 Postgres 18 in a container, via [`docker-compose.yml`](./docker-compose.yml):
 
 ```bash
-cp .env.example .env.local
 npm run db:up
 npm run db:migrate
 ```
 
 `db:up` waits for Postgres to actually accept connections rather than returning as soon as the
 container starts, so `db:migrate` on the next line is safe. That is the whole setup — clone,
-`npm install`, those three lines, `npm run dev`.
+`npm install`, the copy, those two lines, `npm run dev`.
 
-`.env.local` is gitignored and [`.env.example`](./.env.example) holds one variable, `DATABASE_URL`,
-because that is all anything reads today:
+`.env.local` is gitignored and [`.env.example`](./.env.example) is the committed template. It holds
+one variable today, `DATABASE_URL`, and the value in it is the one the compose file configures — so
+the copy above works unedited:
 
 ```
 postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise
@@ -155,9 +201,7 @@ postgresql://capexwise:capexwise_local_dev@127.0.0.1:5432/capexwise
 
 Those credentials are committed in the compose file on purpose. They guard a database that holds no
 real data and is published to loopback only — the file explains why that is the safe combination,
-and why the password must not be reused anywhere reachable off the machine. The full variable list
-and boot-time validation, so a missing value fails at start rather than on the first query, are
-[#20](https://github.com/hbouwers/capexwise/issues/20).
+and why the password must not be reused anywhere reachable off the machine.
 
 Data lives in the named volume `capexwise-pgdata` and survives `db:down` and a machine restart.
 `db:reset` deletes that volume and recreates it empty, so a clean slate is `db:reset` followed by
@@ -239,14 +283,14 @@ that makes the Cloud Run move a config exercise instead of a rebuild, so `.env*`
 
 | Variable | Needed | Default in the image | Notes |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | At runtime, once anything reads it | none | Not needed at build time, and deliberately so — [ADR-0006](docs/adr/0006-migrations.md) keeps the database out of the build. Nothing in the application connects yet; [#20](https://github.com/hbouwers/capexwise/issues/20) makes a missing value a startup error |
+| `DATABASE_URL` | **At startup** | none | The container validates it and exits non-zero without it, so a misconfigured deploy fails immediately rather than on the first query. Not needed at *build* time, and deliberately so — [ADR-0006](docs/adr/0006-migrations.md) keeps the database out of the build |
 | `PORT` | No | `3000` | Cloud Run injects its own, so the server reads it rather than hardcoding one |
 | `HOSTNAME` | No | `0.0.0.0` | Load-bearing. The standalone server binds `127.0.0.1` otherwise, which inside a container means nothing can reach it and the failure reads like the app never started |
 | `NODE_ENV` | No | `production` | Set in the image; nothing should need to override it |
 
-The list grows with [#20](https://github.com/hbouwers/capexwise/issues/20), which is where every
-variable and its per-environment home are recorded. Anything added there that the server reads at
-runtime is passed to the container the same way — as environment, at deploy.
+Anything added to [`.env.example`](./.env.example) that the server reads at runtime is passed to the
+container the same way — as environment, at deploy. "Environment variables" above is where each
+value's per-environment home is recorded.
 
 **The container does not run migrations**, at boot or otherwise. They run in CI on a push to
 `main`, for the reasons in [ADR-0006](docs/adr/0006-migrations.md).

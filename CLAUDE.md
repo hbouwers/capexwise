@@ -39,14 +39,18 @@ eventually be world-readable.
 | Path | What it holds |
 | --- | --- |
 | `src/app/` | Routes. App Router segments, layouts, pages. Server Components by default; `"use client"` is opt-in and stays as far down the tree as it can |
+| `src/instrumentation.ts` | The boot hook Next.js calls before a server instance serves anything. It validates the environment there, so a bad value stops the process instead of surfacing in a request |
 | `src/components/ui/` | shadcn/ui primitives as generated. Restyled to the tokens, not rewritten |
 | `src/components/` | Composed application components, grouped by feature once there is more than one |
 | `src/server/actions/` | `"use server"` mutations, one file per domain area. Every one starts with `getOrgContext()` |
 | `src/server/queries/` | Read paths, org-scoped, one file per domain area. Called from Server Components; never from the client |
 | `src/server/org-context.ts` | `getOrgContext()` and the scoped `db.forOrg(orgId)` (#26). One of the two files allowed to import the raw client |
+| `src/server/env.ts` | The validated environment. Import this, never `process.env`; it is `server-only`, so a Client Component that reaches for it fails the build |
+| `src/server/boot.ts` | What `src/instrumentation.ts` runs at startup. Separate from it because that file is compiled for the Edge runtime too, where `server-only` and `process.exit` are a build error and a build warning |
 | `src/db/schema/` | Drizzle table definitions, one file per domain area, matching `docs/data-model.md` |
 | `src/db/client.ts` | The raw database client — added by #26. Importing it, or the `pg` driver, from anywhere else is an ESLint error |
 | `src/db/migrate.mts` | The migration runner. Forward-only, and it opens its own connection — [ADR-0006](docs/adr/0006-migrations.md) |
+| `src/lib/env-schema.mts` | The environment contract — the schema, and the parser that formats a failure without printing a value. `.mts` because the migration runner imports it and runs under plain Node |
 | `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
 | `drizzle/` | Generated migrations, committed. Read the SQL before committing it; there is no `down` |
 | `e2e/` | Playwright specs (#21). Unit tests are colocated as `*.test.ts` next to what they test |
@@ -71,6 +75,11 @@ These are the ones that are expensive or impossible to fix later. Everything els
   product leak portfolio size to anyone who can read a URL.
 - **Never log an access code, and never log PII.** Access codes are encrypted at rest and masked
   by default (#31). Log that a reveal happened, never the value.
+- **A secret never carries a `NEXT_PUBLIC_` prefix.** The compiler inlines any variable with it
+  into the client bundle as a literal, so the value is published to every browser and stays
+  published in every cached build — removing the prefix afterwards un-publishes nothing.
+  `src/lib/env-schema.mts` refuses to start the server if a server variable has one. A value
+  reaches the client by being passed down from a Server Component, never by being renamed.
 - **The tax surface has to be traceable.** Every figure on a tax page traces to its inputs, and the
   disclaimer — a planning aid, not tax advice, confirm with a CPA — is a stated PRD requirement,
   not a nicety. Wrong numbers on a tax page are worse than no tax page.
@@ -90,6 +99,9 @@ These are the ones that are expensive or impossible to fix later. Everything els
 - **Close issues from commit messages** — `Closes #12`. The board picks it up.
 - **Run `/code-review` before opening any PR that touches code.** Markdown-only changes skip it.
 - **UI changes get screenshots on the PR**, desktop and 375px where layout is affected.
+- **Configuration comes from `@/server/env`, not `process.env`.** It is parsed once at boot, so a
+  missing or malformed value is a startup error naming the variable. A new variable goes in
+  `src/lib/env-schema.mts` *and* `.env.example`; one without the other is half a change.
 - Match the style of the file being edited. Plain code, no speculative abstraction.
 
 ## Working with the design
