@@ -15,9 +15,9 @@ import {
  * changed without the other.
  *
  * `users`, `memberships` and `invitations` joined it in #24; `sessions`,
- * `accounts` and `verifications` come with the provider in #25. This table came
- * first because #17 needed a real migration to exercise the pipeline with, and
- * because everything else in the schema references it.
+ * `accounts`, `verifications` and `rate_limits` came with the provider in #25.
+ * This table came first because #17 needed a real migration to exercise the
+ * pipeline with, and because everything else in the schema references it.
  *
  * Row-level security is deliberately not enabled here yet. #28 owns it, and
  * `organizations` is the one table the standard policy template does not fit —
@@ -47,6 +47,18 @@ export const organizations = pgTable(
       .default(sql`uuidv7()`),
     name: text("name").notNull(),
     slug: text("slug").notNull().unique(),
+    // Better Auth's, not ours, and the two columns in this table that no
+    // CapExWise screen reads. The `organization` plugin declares both on its
+    // `organization` model, so the adapter's schema check refuses to boot
+    // without them (#25). Mapping them away is not an option — a field the
+    // provider writes has to land somewhere.
+    //
+    // `logo` may become real if orgs ever get branding. `metadata` is the
+    // plugin's arbitrary JSON-in-a-text-column escape hatch, and nothing we
+    // write should go in it: a value the schema does not describe is a value the
+    // migrations, the drift check and `docs/data-model.md` all miss.
+    logo: text("logo"),
+    metadata: text("metadata"),
     plan: orgPlan("plan").notNull().default("free"),
     isDemo: boolean("is_demo").notNull().default(false),
     // Soft delete, one of only two in the schema. Access stops when this is
