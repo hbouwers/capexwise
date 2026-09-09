@@ -286,8 +286,14 @@ jobs:
             -e GOOGLE_CLIENT_SECRET=ci-only-not-a-real-secret \
             -p 127.0.0.1:3000:3000 capexwise-app:ci
 
+          # `/sign-in` rather than `/`, because `/` is a protected route now
+          # (#25) and answers a signed-out request with a 307. `curl -f` treats
+          # a redirect as success and returns an empty body, so the stylesheet
+          # check below would fail here saying the page had no CSS — a message
+          # about the wrong thing entirely. This is the page a signed-out browser
+          # actually gets, which is what makes it the right one to check.
           for _ in $(seq 1 30); do
-            if curl -fsS -o /dev/null http://127.0.0.1:3000/; then
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/sign-in; then
               served=1
               break
             fi
@@ -310,7 +316,7 @@ jobs:
           # when it matches nothing, and grep can take a SIGPIPE when head closes
           # the pipe first. Either would kill the step here, intermittently, and
           # never reach the check below that says what actually went wrong.
-          css=$(curl -fsS http://127.0.0.1:3000/ | grep -o '/_next/static/[^"]*\.css' | head -n1 || true)
+          css=$(curl -fsS http://127.0.0.1:3000/sign-in | grep -o '/_next/static/[^"]*\.css' | head -n1 || true)
 
           if [ -z "$css" ]; then
             echo "::error::The page referenced no stylesheet."
