@@ -7,12 +7,22 @@ import prettier from "eslint-config-prettier/flat";
  * An unscoped database handle is how a query ships without an `org_id` filter,
  * which is the one failure this codebase cannot recover from — see ADR-0003.
  *
- * There are two ways to get one and both are closed here. The first is
- * `@/db/client`, the module that will hold the pool (#26). The second is the
- * driver underneath it: `drizzle(new Pool(...))` produces exactly the same
- * unscoped handle without going near `@/db/client`, so guarding only the module
- * is bolting the front door of a house with an open window. `pg` arrived with
- * the migration runner (#17), which is what made the second one reachable.
+ * There are three ways to get one and all three are closed here. The first is
+ * `@/db/client`, the module that holds the pool. The second is the driver
+ * underneath it: `drizzle(new Pool(...))` produces exactly the same unscoped
+ * handle without going near `@/db/client`, so guarding only the module is
+ * bolting the front door of a house with an open window. `pg` arrived with the
+ * migration runner (#17), which is what made the second one reachable.
+ *
+ * The third arrived with #26 and is the subtlest, because what it produces is
+ * not an unscoped handle but a *wrongly* scoped one. `forOrg(orgId)` takes an
+ * org id and checks nothing about it — the membership check is `getOrgContext()`'s
+ * — so `forOrg(params.orgId)` reads another tenant's rows while looking entirely
+ * ordinary. ADR-0003 calls that the failure that is invisible in review because
+ * correct and incorrect code look identical, and a doc comment saying "do not
+ * call this" is not a guard against a failure described that way. The export
+ * exists for `getOrgContext()`, which is in the same file and needs no import,
+ * and for the one test that has to build a handle without a session.
  *
  * The files allowed past:
  *
@@ -22,8 +32,10 @@ import prettier from "eslint-config-prettier/flat";
  *   src/db/migrate.mts         the migration runner, which predates any org
  *                              context and opens its own connection
  *   src/test/db.ts             the integration harness (#21)
- *
- * All five exist as of #26.
+ *   src/server/org-context.integration.test.ts
+ *                              the only test that calls `forOrg()` directly,
+ *                              because proving `SET LOCAL` is local means
+ *                              driving the helper without a session (#26)
  *
  * `src/server/auth.ts` is the one that looks like a concession and is not. The
  * four tables Better Auth reads through the handle sit *above* the tenancy
@@ -41,16 +53,18 @@ import prettier from "eslint-config-prettier/flat";
  * unscoped is the assertion. Nothing in `src/` imports this file; it is loaded
  * by Vitest and by nothing else.
  *
- * One `ignores` list covers all four rather than a block per file, because
- * `no-restricted-syntax` is replaced and not merged when two config blocks both
- * set it — a second block would silently disarm the dynamic-import guard below
- * for every file it matched. The cost is that the list is a little looser than
- * ideal: the runner is permitted to import `@/db/client` and `org-context.ts`
- * to import `pg` directly, though neither should. Both are named right here,
- * and they are the two files in this repository that get read most carefully.
+ * One `ignores` list covers all of them rather than a block per file, because
+ * `no-restricted-syntax` and `no-restricted-imports` are both replaced and not
+ * merged when two config blocks set them — a second block would silently disarm
+ * the dynamic-import guard below for every file it matched. The cost is that the
+ * list is a little looser than ideal: the runner is permitted to import
+ * `@/db/client`, `org-context.ts` to import `pg` directly, and the integration
+ * test to do either. None of them should, all of them are named right here, and
+ * they are the files in this repository that get read most carefully.
  */
 const UNSCOPED_DB_ALLOWED = [
   "src/server/org-context.ts",
+  "src/server/org-context.integration.test.ts",
   "src/db/client.ts",
   "src/server/auth.ts",
   "src/db/migrate.mts",
@@ -69,6 +83,13 @@ const DRIVER_MESSAGE =
   "exists to prevent. Use `const { db } = await getOrgContext()` from " +
   "'@/server/org-context'. See ADR-0003.";
 
+const FOR_ORG_MESSAGE =
+  "Never import `forOrg` — it scopes to whatever org id you hand it and checks " +
+  "none of them, so an id that came from a request reads another tenant's " +
+  "rows. Use `const { db } = await getOrgContext()` from " +
+  "'@/server/org-context', which resolves the org from the session and joins " +
+  "`memberships` to decide. See ADR-0003.";
+
 const UNSCOPED_DB_IMPORTS = [
   {
     group: ["@/db/client", "@/db/client.*", "**/db/client"],
@@ -82,6 +103,14 @@ const UNSCOPED_DB_IMPORTS = [
       "drizzle-orm/node-postgres/*",
     ],
     message: DRIVER_MESSAGE,
+  },
+  {
+    // `importNames` rather than a `group`, because the module is the one every
+    // server component is meant to import — it is the single export inside it
+    // that must not travel.
+    group: ["@/server/org-context", "**/server/org-context"],
+    importNames: ["forOrg"],
+    message: FOR_ORG_MESSAGE,
   },
 ];
 

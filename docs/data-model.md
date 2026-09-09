@@ -834,6 +834,25 @@ create policy buildings_org_isolation on buildings
 | `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations and seeds |
 | `organizations` | Has a policy, but keyed on `id = current_org_id`, not `org_id` |
 
+**The query that establishes the context cannot be subject to the context, and it reads
+`memberships`.** `resolveOrgForUser()` in `src/server/org-context.ts` (#26) is what turns a session
+into an org: it joins `memberships` to `organizations` to decide which org the signed-in user may
+act in, and it necessarily runs *before* `app.current_org_id` is set, because setting it is what it
+exists to make possible. Give `memberships` the template policy above and give `organizations` the
+`id = current_org_id` one, and this query evaluates both against an unset GUC, matches nothing, and
+returns null — at which point every signed-in request raises `NoOrganizationError` and nobody can
+reach the product. It fails closed, which is the right direction to fail in, but it fails closed for
+everyone.
+
+This is the same chicken-and-egg as §2's four identity tables, one table further in, and it is a
+decision #28 has to make before it enables anything rather than a detail it can settle afterwards.
+The shapes available: run this one read as a role the policies do not apply to; key the
+`memberships` policy on the *user* rather than the org, since "which orgs am I in" is a question
+about a person and the `memberships_user` index in §8 already exists to serve it; or set the GUC
+from the session's `active_org_id` before the join and accept that the join is then only confirming
+a value RLS already trusted — which is the option that quietly moves the boundary and should
+probably lose. Whichever wins, `organizations` has the same problem for the same reason.
+
 **`organizations` needs more thought than the template, and #28 owns it.** A policy of
 `id = current_org_id` with a matching `WITH CHECK` cannot admit the row that creates an org: at
 signup there is no org context yet, and the check would require `current_org_id` to already equal an

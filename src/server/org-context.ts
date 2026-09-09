@@ -32,6 +32,18 @@
  * that is the clause you write. The pipe is laid now so that #28 is a migration
  * rather than a migration plus a rewrite of every call site.
  *
+ * **One thing #28 cannot simply apply the template to, and it is in this file.**
+ * `resolveOrgForUser()` below is the query that *establishes* the context, so it
+ * necessarily runs before there is a setting to filter by — the same
+ * chicken-and-egg `docs/data-model.md` §2 describes for `users` and `sessions`,
+ * one table further in. It reads `memberships` and `organizations`, and §9
+ * prescribes a policy for both. Apply those policies to the role this query runs
+ * as and `current_setting` is null, both policies filter everything out, the
+ * function returns `null`, and every signed-in request raises
+ * `NoOrganizationError`. It fails closed, which is the right direction, but it
+ * fails closed for everybody. #28 has to decide what this read path runs as
+ * before it enables anything; the issue carries the detail.
+ *
  * ## Why this file, and not a `where` clause everyone remembers
  *
  * The org id never comes from the caller. Not a route param, not a header, not a
