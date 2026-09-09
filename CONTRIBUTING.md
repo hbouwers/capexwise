@@ -69,9 +69,13 @@ delete on merge, and history stays linear by construction.
 GitHub does not offer branch protection or rulesets on a **private** repository outside a paid
 plan, and the API returns `403 Upgrade to GitHub Pro or make this repository public` for both.
 
-So the rules above are enforced by convention until one of two things happens — the repository
-goes public at v0.5, or the account moves to Pro. At that point, turn on, in one ruleset on
-`main`:
+The decision is to **wait for v0.5 rather than pay for Pro**. The convention has held across
+seventy-odd pull requests without a rule behind it, the repository goes public on a date that is
+already on the release plan, and that same date is what makes CodeQL, secret scanning and push
+protection free too — so paying now buys a few months of enforcement on a single-contributor
+repository and nothing else.
+
+At v0.5, then, create one ruleset on `main`:
 
 - Require a pull request before merging
 - Require status checks to pass: **Types, lint and schema**, **Production build**,
@@ -93,3 +97,9 @@ Dependabot runs weekly and groups minor and patch updates into one pull request 
 Two majors are pinned shut in [`dependabot.yml`](.github/dependabot.yml) because they are
 contracts rather than preferences: **ESLint stays on 9**, and **Node stays on 24**. Read the
 comment there before unpinning either.
+
+That file is only the version-updates half. The other half is two repository settings, both on
+and neither in a file: **vulnerability alerts** and **Dependabot security updates**, the second
+of which opens a pull request as soon as a CVE lands in the lockfile rather than waiting for the
+weekly run. Both are free on a private repository, so unlike everything under Branch protection
+above, neither waits for v0.5.
