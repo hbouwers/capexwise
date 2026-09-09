@@ -81,10 +81,11 @@ goes public at v0.5, or the account moves to Pro. At that point, turn on, in one
 - Require linear history
 - Block force pushes and deletions
 
-Going public also switches on, at no cost, the three things that need GitHub Advanced Security
-while the repository is private: CodeQL code scanning — the workflow is already committed and
-[guards itself on visibility](.github/workflows/codeql.yml) — plus secret scanning and push
-protection, which are settings rather than files and have to be ticked on by hand.
+Going public also makes free the three things that need GitHub Advanced Security while the
+repository is private. CodeQL code scanning needs nothing done: the workflow is already committed
+and [guards itself on visibility](.github/workflows/codeql.yml). Secret scanning and push
+protection are settings rather than files, and GitHub turns both on by default for public
+repositories — so confirm they are on rather than assuming either way.
 
 ## Dependencies
 

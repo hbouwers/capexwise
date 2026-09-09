@@ -48,6 +48,13 @@ updates:
       github-actions:
         patterns: ["*"]
 
+  # Unverified until this has run once. Every stage in the Dockerfile is
+  # `FROM ${NODE_IMAGE}`, with the digest living in a single ARG default, so
+  # there is no literal image reference for Dependabot's parser to match. If it
+  # does not resolve the ARG, this block is silently dead — no error, just no
+  # PRs, indistinguishable from a quiet week — and the base image digest stops
+  # collecting Alpine and Node CVE fixes. Check the Dependabot job log after the
+  # first weekly run; the fallback is a literal FROM in the deps stage.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
