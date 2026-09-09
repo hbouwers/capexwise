@@ -21,6 +21,9 @@
     "db:migrate": "node src/db/migrate.mts",
     "db:studio": "drizzle-kit studio",
     "db:drift": "node scripts/check-migration-drift.mjs",
+    "docker:build": "docker build -t capexwise-app .",
+    "docker:up": "docker compose --profile app up -d --build --wait",
+    "docker:down": "docker compose --profile app down",
     "prepare": "husky || exit 0"
   },
   "dependencies": {

@@ -170,7 +170,8 @@ Milestones map to the PRD release plan: v0 personal, v0.5 demo, v1 paid, v2 prem
   multiple arguments for `gh`, so use bash with a heredoc for anything multi-line.
 - **Docker Desktop is installed** (WSL2 backend), and `npm run db:up` brings up local Postgres 18.
   `npm run db:migrate` applies the committed migrations; a clean slate is `db:reset` then
-  `db:migrate`. The Dockerfile that #19 adds is buildable on this machine.
+  `db:migrate`. `npm run docker:up` builds the application image and runs it against that
+  database on port 3001 — the local half of what CI now checks on every PR.
 - **Node 24.** Pinned in `.nvmrc` and in `engines`, and Vercel runs 24 LTS for both builds and
   functions. The major is the contract; CI reads `.nvmrc` and the Dockerfile pins a base image
   digest, so nothing else needs to agree on a patch number.
