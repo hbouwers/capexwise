@@ -52,11 +52,21 @@ jobs:
         # `npm ci` below is slower than Postgres takes to start, so this rarely
         # waits. It is here because "rarely" is not "never", and the failure it
         # prevents is a connection refused on the first integration test.
+        #
+        # `-h 127.0.0.1` matters, for the reason `docker-compose.yml` spells out
+        # at length: it forces the check onto TCP, which is what a client
+        # actually connects over. Bare `pg_isready` probes the unix socket, and
+        # on a first run that socket answers too early — the entrypoint runs
+        # initdb and then starts a temporary socket-only server to execute init
+        # scripts. A socket check passes against that, the service is marked
+        # healthy, and the first step to connect finds nothing listening on the
+        # port.
         options: >-
-          --health-cmd "pg_isready -U capexwise -d capexwise"
+          --health-cmd "pg_isready -h 127.0.0.1 -U capexwise -d capexwise"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --health-start-period 10s
 
     env:
       # The integration suite creates this database itself and truncates it

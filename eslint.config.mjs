@@ -31,7 +31,7 @@ import prettier from "eslint-config-prettier/flat";
  * unscoped is the assertion. Nothing in `src/` imports this file; it is loaded
  * by Vitest and by nothing else.
  *
- * One `ignores` list covers all three rather than a block per file, because
+ * One `ignores` list covers all four rather than a block per file, because
  * `no-restricted-syntax` is replaced and not merged when two config blocks both
  * set it — a second block would silently disarm the dynamic-import guard below
  * for every file it matched. The cost is that the list is a little looser than
