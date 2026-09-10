@@ -75,7 +75,7 @@ import { makeSignature } from "better-auth/crypto";
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
-import { sessions } from "@/db/schema";
+import { organizations, sessions } from "@/db/schema";
 import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createInvitation,
@@ -101,6 +101,25 @@ vi.mock("next/headers", () => ({
   headers: async () => request.headers,
 }));
 
+/**
+ * `redirect()` ends a server action by throwing. Next.js catches the throw; here
+ * nothing would, so it is replaced with one that says where it was going.
+ */
+const Redirect = vi.hoisted(
+  () =>
+    class Redirect extends Error {
+      constructor(readonly url: string) {
+        super(`redirect to ${url}`);
+      }
+    },
+);
+
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => {
+    throw new Redirect(url);
+  },
+}));
+
 const APP_URL = "http://localhost:3000";
 
 process.env.DATABASE_URL = applicationDatabaseUrl;
@@ -113,6 +132,7 @@ process.env.GOOGLE_CLIENT_SECRET = "integration-suite-client-secret";
 // pool would be built from `.env.local` before the first line of this file ran.
 const { getAuth } = await import("@/server/auth");
 const { getOrgContext } = await import("@/server/org-context");
+const { switchOrganization } = await import("@/server/actions/organizations");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -845,6 +865,104 @@ describe("getOrgContext", () => {
 
     expect(context.org.id).toBe(b.org.id);
     expect(context.db.orgId).toBe(b.org.id);
+  });
+});
+
+/**
+ * The org switcher (#29) — the one path in the product where the browser names
+ * an org on purpose, and so the one where ADR-0003's "ignored, not validated"
+ * has to be visible from outside. Each refusal below is checked the same way:
+ * the session still points where it did, and nothing redirected — a refused
+ * switch must be indistinguishable from a click on the org already open.
+ *
+ * What is not checked here is the session cookie the switch rewrites (the
+ * action says why it matters). The provider writes it through `next/headers`
+ * from inside `node_modules`, which `vi.mock` does not reach, so the write
+ * lands on the real module and no-ops outside a request.
+ */
+describe("switchOrganization", () => {
+  /** Signs `userId` in, and says which org the session opened in. */
+  async function signedInAs(userId: string) {
+    const caller = await signIn(userId);
+
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+
+    return { caller, startedIn: await activeOrgOf(caller.sessionId) };
+  }
+
+  it("moves a member into another org they belong to", async () => {
+    const { a, b, shared } = await seedTwoOrgs();
+    const { caller, startedIn } = await signedInAs(shared.id);
+
+    // The oldest membership, per `resolveActiveOrganization()`. Asserted so the
+    // switch below is a change and not a coincidence.
+    expect(startedIn).toBe(a.org.id);
+
+    await expect(switchOrganization(b.org.id)).rejects.toMatchObject({
+      url: "/",
+    });
+
+    expect(await activeOrgOf(caller.sessionId)).toBe(b.org.id);
+
+    request.headers = new Headers({ cookie: caller.cookie });
+
+    expect((await getOrgContext()).org.id).toBe(b.org.id);
+  });
+
+  it("ignores another tenant's org", async () => {
+    const { a, b } = await seedTwoOrgs();
+    const { caller } = await signedInAs(a.owner.id);
+    const before = await rowsOwnedBy(b.org.id);
+
+    await expect(switchOrganization(b.org.id)).resolves.toBeUndefined();
+
+    expect(await activeOrgOf(caller.sessionId)).toBe(a.org.id);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("ignores an org whose deletion stopped access", async () => {
+    // `docs/data-model.md` §7: the membership outlives a soft delete by design,
+    // for the thirty days before the purge. Better Auth's own membership check
+    // sees that row and would let the switch through; the list this action
+    // consults is the one that knows the org is gone.
+    const { a, b, shared } = await seedTwoOrgs();
+
+    await testDb()
+      .update(organizations)
+      .set({ deletedAt: new Date() })
+      .where(eq(organizations.id, b.org.id));
+
+    const { caller } = await signedInAs(shared.id);
+
+    await expect(switchOrganization(b.org.id)).resolves.toBeUndefined();
+
+    expect(await activeOrgOf(caller.sessionId)).toBe(a.org.id);
+  });
+
+  it.each([
+    ["nothing", undefined],
+    ["a number", 42],
+    ["a string that is not an id", "not-an-org"],
+  ])("ignores %s", async (_, requested) => {
+    const { a, shared } = await seedTwoOrgs();
+    const { caller } = await signedInAs(shared.id);
+
+    await expect(switchOrganization(requested)).resolves.toBeUndefined();
+
+    expect(await activeOrgOf(caller.sessionId)).toBe(a.org.id);
+  });
+
+  it("ignores a real id wrapped in something that is not one", async () => {
+    // `===` against a string is what makes these miss. A lookup that coerced —
+    // `String(requested)`, a loose `==` — would unwrap the array and switch.
+    const { a, b, shared } = await seedTwoOrgs();
+    const { caller } = await signedInAs(shared.id);
+
+    for (const requested of [[b.org.id], { id: b.org.id }]) {
+      await expect(switchOrganization(requested)).resolves.toBeUndefined();
+    }
+
+    expect(await activeOrgOf(caller.sessionId)).toBe(a.org.id);
   });
 });
 

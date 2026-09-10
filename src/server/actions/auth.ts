@@ -14,8 +14,9 @@
  * and it buys reactivity that a sign-in button does not need: this is a form
  * post that ends in a redirect. Keeping it on the server holds to the "Server
  * Components by default" convention and keeps the auth library out of the client
- * bundle entirely. The org switcher (#29) is the first thing that might
- * genuinely want the client; it can add it then.
+ * bundle entirely. The org switcher (#29) was the first thing that might have
+ * wanted the client, and did not: it is a server action too, in
+ * `organizations.ts`.
  */
 
 import { headers } from "next/headers";

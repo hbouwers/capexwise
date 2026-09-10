@@ -112,6 +112,65 @@ Two import rules, and they are the whole point of the layering:
 `PageHeader`'s title and subtitle are per-screen strings; every screen has both, and #12 owes the
 pair for each.
 
+### As built
+
+[#29](https://github.com/hbouwers/capexwise/issues/29) built the layer, in `src/components/shell/`
+under the `(app)` route group's layout. What it settled that the table above does not say:
+
+**The nav departs from the prototype twice.** "Properties" is **Portfolio**, because the screen it
+opens is F0's portfolio dashboard — #12's `portfolio.md`, tiles above the building cards — and
+"Buildings" would name half of it. "Property detail" is **gone**: it was a nav item because the
+prototype had one building and no routing, and with more than one building a nav entry for "the"
+building has nothing to point at. A building's page is reached from its card. The routes are `/`,
+`/maintenance`, `/contacts`, `/forecast` and `/tax`, and each is a placeholder until its feature
+lands.
+
+**Nothing in the shell shows a figure it cannot trace.** The Maintenance count badge, the reserve
+meter's percentage and the user chip's "5 buildings · 8 doors" are all figures, and there is
+nothing to count until F1–F5 exist. So the count badge is left out, `SidebarStat` renders its empty
+state — what the reserve is waiting for, linked to `/forecast`, the screen that will own the
+number — and the chip's second line is the account's email address.
+
+**`OrgSwitcher` takes the prototype's brand slot.** The prototype's "My Property" over "Rental Ops"
+is a workspace name over a product name, and the org is the workspace, so the org's name sits
+there, with the product as the micro-label beneath it. Both the current org and the list come from
+the server — `getOrgContext()` and `listOrgsForUser()` — and the only thing the component sends
+back is an id it was handed. `switchOrganization()` treats that id as a lookup into the same list
+and drops anything it does not find, so a hand-edited request can do nothing a click could not.
+With a single org, which is every account until invitations
+([#30](https://github.com/hbouwers/capexwise/issues/30)), it is plain text rather than a menu of
+one. A switch lands on `/`, never back on the page it was made from, because that page belonged to
+the org being left.
+
+**`UserChip` is `AccountMenu`**, and sign-out lives in it. The avatar is the account's initials,
+not its Google photo: the photo is a URL at Google, and rendering it has the browser ask a third
+party about this user on every page.
+
+### Responsive behaviour
+
+The prototype is desktop-only at a hard `min-width: 1240px`. The shell's replacement, decided at
+#29:
+
+| Width | Rail | Pinned bar | Page header |
+| --- | --- | --- | --- |
+| `lg` and up (≥1024px) | Fixed, 238px, full height | The page header | Sticky, 64px, translucent with blur, as drawn |
+| Below `lg` | A drawer from the left, behind a menu button | A 64px bar: menu button and org name | In the flow, scrolls away, actions wrap under the title |
+
+- **One pinned bar at every width.** Two stacked sticky bars would spend a quarter of a phone's
+  height on chrome, so below `lg` the mobile bar is pinned and the page header is not.
+- **`lg` because `grid-two-column` already uses it.** The shell and the two-column screens inside
+  it change shape at the same width, so no screen has a range where the rail is back but the rail
+  column has not yet reflowed.
+- **The drawer is `Sheet`, and the same `Sidebar` renders in it** — one component in two places, so
+  the rail and the drawer cannot drift. It is modal: focus is trapped inside it, Escape and the
+  scrim close it, and the page behind it is hidden from assistive technology while it is open.
+  Focus opens on the link to the current page rather than on Radix's default — the first tabbable
+  element that is not a link, which here would be the account menu at the very bottom. Following a
+  link closes it; so does switching org, because the drawer is keyed by org.
+- **Everything in the rail is a real link or button** with `aria-current="page"` on the current
+  destination, per §9's first finding, and a skip link to `#main` is the first tab stop on every
+  page.
+
 ---
 
 ## 5. Layer 1 — shadcn primitives, and the density overrides
@@ -156,6 +215,14 @@ Primitives used as-is beyond those: `Label`, `Textarea`, `Checkbox`, `Separator`
 prototype, but the rent checkoff and the Confirm action both need an undo affordance). That list
 plus the table above **is** the installed set; nothing else is added until a screen needs it.
 
+`Sheet` is the first primitive added under that rule, by the app shell
+([#29](https://github.com/hbouwers/capexwise/issues/29)): the rail becomes a drawer below `lg`, and
+a drawer is a modal dialog anchored to an edge — which is what `Sheet` is, on the same Radix
+`Dialog` the `Dialog` above uses. It got the `Dialog` treatment: `cn` from `@/lib/cn`, the
+`--surface-overlay` scrim in place of `bg-black/10` and a backdrop blur, `--border-modal` plus
+`--shadow-modal` in place of `shadow-lg`, and the title's `text-base` — which does not generate,
+because the type scale is cleared — moved to `text-md`.
+
 Three things that apply across all of them:
 
 - **Focus is one rule, not nineteen.** The installed primitives each carry
@@ -197,7 +264,7 @@ These are the ones worth writing down, because each owns a rule.
 | `MaskedValue` | Access codes | custom | Masked by default. **Fixed-width mask, reveal is a server action** — §9 |
 | `FactRow` / `FactGroup` | Label-over-value pairs in the facts card | custom | Four groups: Access, Services, Utility accounts, Average bill |
 | `EmptyState` | **Not in the prototype** | custom | Title, one line, one action. Every list needs one; see §10 |
-| `PlanGate` | Wraps a premium surface | custom | Reads `can(org, feature)` from props, never from the client ([#29](https://github.com/hbouwers/capexwise/issues/29)) |
+| `PlanGate` | Wraps a premium surface | custom | Reads `can(org, feature)` from props, never from the client ([#29](https://github.com/hbouwers/capexwise/issues/29)). **Server-only**: a locked org's `children` are never rendered, so they are in neither the HTML nor the RSC payload. No upgrade button until billing gives it somewhere to go |
 | `PremiumBadge` | The `PREMIUM` pip | `Badge` | Cosmetic. `PlanGate` does the gating; this only labels it |
 | `TaxDisclaimer` | The planning-aid-not-advice notice | custom | Required copy, not a nicety — PRD F4 and [#38](https://github.com/hbouwers/capexwise/issues/38). Persistent on every tax surface, not dismissible |
 
@@ -439,9 +506,10 @@ one line in `@theme`, which is why this is decided now rather than deferred agai
   the desktop value is not in question; what a form field does below 768px is a mobile decision the
   screen specs have to make, along with everything else the prototype's `min-width: 1240px` left
   undefined.
-- **`can(org, feature)` and the org switcher** —
-  [#29](https://github.com/hbouwers/capexwise/issues/29). `PlanGate` and `OrgSwitcher` are named
-  here and specified there.
+- ~~**`can(org, feature)` and the org switcher**~~ — settled by
+  [#29](https://github.com/hbouwers/capexwise/issues/29). `can()` is `src/lib/plan.ts` and gates
+  only the premium features, F7 and F8, because free and paid differ by capacity rather than by
+  feature (PRD §12). The switcher is in §4.
 - **Rent roll components.** PRD F1's monthly rent period and one-click Paid checkoff
   ([#48](https://github.com/hbouwers/capexwise/issues/48)) have no prototype equivalent at all —
   the prototype predates them. `RentRollTable`, `RentPeriodRow` and the checkoff belong to whoever
