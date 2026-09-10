@@ -453,9 +453,10 @@ jobs:
       # `drizzle/` in journal order, forward only, over a single connection the
       # runner opens itself — not the application's pool, because a migration
       # is one session doing DDL and the pooler is the wrong shape for it. The
-      # role behind this credential owns the tables; ADR-0007 says why the
-      # application logs in as the same role today, and what separating them
-      # costs (a Neon role and a Vercel variable, and nothing in this file).
+      # role behind this credential owns the tables, and it is deliberately not
+      # the application's: Vercel logs in as `capexwise_app`, which holds no
+      # grant on any domain table (ADR-0007, #81). Vercel pointed at the owner
+      # would not fail anywhere, which is why it is written down.
       #
       # Nothing here checks that the credential is present, deliberately. A
       # missing `PRODUCTION_DATABASE_URL` fails `migrationEnvSchema` and turns the

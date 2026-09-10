@@ -205,7 +205,7 @@ to start the server if a server variable carries the prefix. There are no public
 
 | Variable | Local | Preview | Production |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | `.env.local`, pointing at the compose database | Vercel project environment, Preview scope — a database separate from production's, settled in [#33](https://github.com/hbouwers/capexwise/issues/33) | Vercel project environment, Production scope, from the managed instance ([#32](https://github.com/hbouwers/capexwise/issues/32), [#33](https://github.com/hbouwers/capexwise/issues/33)) |
+| `DATABASE_URL` | `.env.local`, pointing at the compose database | Vercel project environment, Preview scope — a database separate from production's, settled in [#33](https://github.com/hbouwers/capexwise/issues/33) | Vercel project environment, Production scope: the managed instance's pooled endpoint, logged in as `capexwise_app` ([#33](https://github.com/hbouwers/capexwise/issues/33), [#81](https://github.com/hbouwers/capexwise/issues/81)) |
 | `APP_URL` | `http://localhost:3000` | **Per deployment.** A preview hostname is generated, so this cannot be set once at the project level ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
 | `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
@@ -240,11 +240,25 @@ those bite long before storage does, and neither is about how much data there is
   happens (#32).
 
 **Row-level security depends on which role `DATABASE_URL` logs in as**
-([ADR-0007](docs/adr/0007-database-roles.md)). The migration that turns it on grants its two roles
-to the role that runs it, and sign-in works only for a login that holds one of them — so on Neon
-the application's `DATABASE_URL` and CI's `PRODUCTION_DATABASE_URL` differ in host (pooled against
-direct) and never in user. Giving the application a login of its own is the hardening step that ADR
-describes: a Neon role and a Vercel variable, and no code.
+([ADR-0007](docs/adr/0007-database-roles.md)), so in production the application and CI log in as
+**different users, on purpose**. Vercel's `DATABASE_URL` names `capexwise_app` on the pooled
+endpoint: not the owner, no `BYPASSRLS`, and holding only the two roles the policies are written
+for, so the unscoped client gets `permission denied` on every domain table whatever Neon does with
+the owner. CI's `PRODUCTION_DATABASE_URL` names the owner on the direct endpoint, because migrations
+need DDL. Pointing Vercel at the owner would not fail loudly — the migration grants the owner the
+identity role as well, so sign-in keeps working — which is exactly why the difference is written
+down here.
+
+`capexwise_app` was created with SQL on the `production` branch rather than in the Neon console,
+which adds the roles it creates to Neon's own administrative group
+([#81](https://github.com/hbouwers/capexwise/issues/81) has the statements). Rotating its password is
+an `alter role` there, the Vercel variable, and a production redeploy: Vercel applies an
+environment change only to deployments built after it.
+
+Previews stay on the owner. The integration writes each preview branch's connection string itself,
+so a different user there would mean overriding it on every deployment, and a preview's unscoped
+client is then exactly as restricted as production's was before #81 — ESLint's rule on
+`@/db/client` is the guard.
 
 **Every environment needs its own `BETTER_AUTH_SECRET`.** It signs session cookies and encrypts the
 OAuth tokens stored in `accounts`, so sharing one across environments means a session forged in

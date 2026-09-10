@@ -28,7 +28,10 @@
  * `memberships` and `invitations` and holds no grant on any table inside the
  * boundary. A scoped handle switches to `capexwise_scoped` on top of this pool
  * for each transaction; this handle, used bare, never does. ADR-0007 is the
- * decision, and says what a login role of the application's own would add.
+ * decision. In production the login is `capexwise_app`, which is not the owner
+ * and holds nothing else, so this handle gets `permission denied` on any domain
+ * table there (#81). Locally it is the compose superuser, which reads anything,
+ * and ESLint's allowlist is the only thing in the way.
  */
 import "server-only";
 

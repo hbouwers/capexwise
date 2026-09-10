@@ -66,10 +66,10 @@ const { TEST_DATABASE_URL: url } = parseEnv(
  * A superuser skips row-level security outright, `FORCE` or no `FORCE`, so a
  * suite that ran the application as one would pass whether or not a single
  * policy existed — and the identity path would never once be read through the
- * policies that are supposed to let it in. This role is what a hardened
- * production login looks like (ADR-0007): not the owner, no `BYPASSRLS`, a member
- * of `capexwise_identity` for sign-in and able to become `capexwise_scoped` for
- * everything else. If Better Auth reaches for a table the identity role was not
+ * policies that are supposed to let it in. This role has the shape of
+ * production's `capexwise_app` login (ADR-0007, #81): not the owner, no
+ * `BYPASSRLS`, a member of `capexwise_identity` for sign-in and able to become
+ * `capexwise_scoped` for everything else. A change to one is a change to both. If Better Auth reaches for a table the identity role was not
  * granted, `src/server/auth.integration.test.ts` is where that surfaces.
  *
  * The password is the compose file's committed local credential, for the reason
