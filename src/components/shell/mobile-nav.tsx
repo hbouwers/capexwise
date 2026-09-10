@@ -1,11 +1,12 @@
 "use client";
 
-import { MenuIcon } from "lucide-react";
+import { MenuIcon, XIcon } from "lucide-react";
 import { useState, type MouseEvent, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetTitle,
   SheetTrigger,
@@ -44,6 +45,7 @@ export function MobileNav({ children }: { children: ReactNode }) {
 
       <SheetContent
         side="left"
+        showCloseButton={false}
         // No description: the title and the nav's own labels say everything a
         // description would, and Radix asks for one to be opted out of rather
         // than silently omitted.
@@ -69,7 +71,21 @@ export function MobileNav({ children }: { children: ReactNode }) {
         }}
       >
         <SheetTitle className="sr-only">Navigation</SheetTitle>
-        {children}
+
+        {/* The close button in a bar of its own, where the menu button was —
+            not the primitive's, which floats over the top-right corner and
+            lands on the org switcher's chevron. Same height and inset as the
+            mobile bar, so open and close are one spot under the thumb. */}
+        <div className="flex h-(--header-height) shrink-0 items-center px-5">
+          <SheetClose asChild>
+            <Button variant="ghost" size="icon" className="-ml-1.5">
+              <XIcon aria-hidden />
+              <span className="sr-only">Close navigation</span>
+            </Button>
+          </SheetClose>
+        </div>
+
+        <div className="min-h-0 flex-1">{children}</div>
       </SheetContent>
     </Sheet>
   );

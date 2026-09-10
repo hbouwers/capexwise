@@ -422,7 +422,12 @@ export const getOrgContext = cache(async (): Promise<OrgContext> => {
   if (!resolved) throw new NoOrganizationError(user.id);
 
   return {
-    user: { id: user.id, name: user.name, email: user.email },
+    // `?? ""` because the type is Better Auth's and the column is ours:
+    // `users.name` is nullable on purpose, and only the provider's OAuth path
+    // coerces a missing name to "". A row written any other way — a seed, a
+    // psql session — reaches here as null under a `string` type, and the
+    // shell's account menu called `.trim()` on it.
+    user: { id: user.id, name: user.name ?? "", email: user.email },
     org: resolved.org,
     role: resolved.role,
     db: forOrg(resolved.org.id),
