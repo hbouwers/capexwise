@@ -1,13 +1,13 @@
 # Data model
 
 **Status:** v1 — the schema to build against
-**Last updated:** 2026-09-08
+**Last updated:** 2026-09-10
 **Supersedes:** the sketch in [PRD](PRD.md) section 10
 
 This is the contract the migrations implement. **Section 2 is built**: `organizations` came with
 #17, `users`, `memberships` and `invitations` with #24, and `sessions`, `accounts`, `verifications`
-and `rate_limits` with the provider in #25. Everything from section 3 on is still prose, and
-row-level security is #28.
+and `rate_limits` with the provider in #25, and section 9's row-level security has covered it since
+#28. Everything from section 3 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -21,6 +21,7 @@ Decisions already made elsewhere are not re-argued here:
 | `org_id` on every domain table, leading every index; RLS as an independent second layer | [ADR-0003](adr/0003-multi-tenancy.md) |
 | Better Auth owns sign-in; organizations and memberships are ours | [ADR-0004](adr/0004-auth-provider.md) |
 | `uuid` keys from `uuidv7()`, integer cents, four date types | [ADR-0005](adr/0005-identifiers-money-dates.md) |
+| Which database role each code path runs as, and who bypasses row-level security | [ADR-0007](adr/0007-database-roles.md) |
 
 ---
 
@@ -117,13 +118,13 @@ authentication request.
 and a path, observed before anybody has identified themselves.
 
 The consequence has to be stated rather than left implied: **these four tables are outside the
-ADR-0003 protection scheme.** They are not covered by `db.forOrg()`, their RLS policies are not
-org policies, and the cross-org isolation test (#27) does not apply to them. What protects them
-instead is that nothing in application code reads them — Better Auth does, through its own
-connection path — and that no domain query has a reason to join to `users` except through
-`memberships`, which *is* org-scoped.
+ADR-0003 protection scheme.** They are not covered by `db.forOrg()`, they carry no row-level
+security and the scoped role holds no grant on them, and the cross-org isolation test (#27) names
+them only to say why it does not apply. What protects them instead is that nothing in application
+code reads them — Better Auth does, through its own connection path — and that no domain query has
+a reason to join to `users` except through `memberships`, which *is* org-scoped.
 
-`organizations` is its own boundary: the policy is `id = current_org_id`, not `org_id = ...`.
+`organizations` is its own boundary: the policy is `id = current_org_id()`, not `org_id = ...`.
 
 ```sql
 create type org_plan as enum ('free', 'paid', 'premium');
@@ -803,64 +804,85 @@ with no data change, which makes this the cheap direction to be wrong in.
 ## 9. Row-level security
 
 The pattern is identical on every org-scoped table, and ADR-0003 explains why each piece is
-load-bearing. Written once here so #28 has a template rather than a paraphrase.
+load-bearing. Written once here so every new table has a template rather than a paraphrase.
+[ADR-0007](adr/0007-database-roles.md) is the decision about which roles exist and which code runs
+as which; `drizzle/0006_row_level_security.sql` is where the first three tables got it.
 
 ```sql
+grant select, insert, update, delete on buildings to capexwise_scoped;
+
 alter table buildings enable row level security;
 alter table buildings force  row level security;   -- the owner is not exempt
 
 create policy buildings_org_isolation on buildings
   for all
-  using      (org_id = current_setting('app.current_org_id', true)::uuid)
-  with check (org_id = current_setting('app.current_org_id', true)::uuid);
+  to capexwise_scoped
+  using      (org_id = current_org_id())
+  with check (org_id = current_org_id());
 ```
 
+- `to capexwise_scoped` because that is the role every scoped transaction runs as: `db.forOrg()`
+  switches to it with `SET LOCAL ROLE` for the length of the transaction (#28). A policy with no
+  `to` applies to every role, the identity path's included, and the identity path has no org to
+  compare against.
+- The grant, because a policy says *which rows* and a grant says *whether at all*. A table the
+  scoped role holds no grant on is `permission denied`, which is the loud way to have forgotten it.
+  Grant only the commands the product needs; `organizations` gets `select` and `update` and nothing
+  else.
 - `FORCE` because Postgres exempts a table's owner from its own policies, and without it RLS is
-  enabled, reports itself as enabled, and does nothing.
+  enabled, reports itself as enabled, and does nothing for a connection that logged in as the
+  owner — which on Neon is the application's own login.
 - `WITH CHECK` as well as `USING`, or the policy stops reads from other orgs while still permitting
-  a write that *creates* a row in one.
-- `current_setting(..., true)` returns null when unset, so the policy filters everything out
-  rather than raising. Safe, but silent — which is why `db.forOrg()` asserts the setting took
+  a write that *creates* a row in one, or moves one there.
+- `current_org_id()` rather than `current_setting('app.current_org_id', true)::uuid` written out.
+  It is that expression with a `nullif` around the setting: a setting cleared by the end of its
+  transaction reads back as `''` rather than null, and `''::uuid` raises, so without it a scoped
+  role with no org would fail in two different ways depending on which pooled connection it got.
+  With it, the policy fails closed and silent — which is why `db.forOrg()` asserts the context took
   (#26).
-- `app.current_org_id` is set with `SET LOCAL` inside the transaction. Never session-level: under
-  transaction-mode pooling that setting outlives the request and is inherited by whoever gets the
-  connection next.
+- `app.current_org_id` is set with `SET LOCAL` inside the transaction, and so is the role. Never
+  session-level: under transaction-mode pooling that setting outlives the request and is inherited
+  by whoever gets the connection next.
+- **No `deleted_at is null` in the policy**, `organizations` included. The scoped role only ever
+  carries the id of an org `resolveOrgForUser()` has just found live, so the soft delete is enforced
+  before the context exists — and a `USING` clause that hid deleted orgs would refuse the soft
+  delete itself, an `UPDATE` through a scoped handle writing a row it could then not see. The purge
+  job 30 days later is maintenance, not a scoped request.
 
-**Tables with no policy, and why:**
+**Tables with no org policy, and why:**
 
 | Table | Reason |
 |---|---|
-| `users`, `sessions`, `accounts`, `verifications` | Above the tenancy boundary; read during sign-in, before an org context exists (§2) |
-| `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations and seeds |
-| `organizations` | Has a policy, but keyed on `id = current_org_id`, not `org_id` |
+| `users`, `sessions`, `accounts`, `verifications`, `rate_limits` | Above the tenancy boundary; read during sign-in, before an org context exists (§2). No row-level security, and no grant to the scoped role — so a scoped handle cannot read them at all, which is why a members list needs a policy on `users` of its own before it can show a name (#30) |
+| `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations and seeds — a deliberate `using (true)` policy for the scoped role when the tables arrive |
+| `organizations` | Has a policy, but keyed on `id = current_org_id()`, not `org_id` |
 
-**The query that establishes the context cannot be subject to the context, and it reads
-`memberships`.** `resolveOrgForUser()` in `src/server/org-context.ts` (#26) is what turns a session
-into an org: it joins `memberships` to `organizations` to decide which org the signed-in user may
-act in, and it necessarily runs *before* `app.current_org_id` is set, because setting it is what it
-exists to make possible. Give `memberships` the template policy above and give `organizations` the
-`id = current_org_id` one, and this query evaluates both against an unset GUC, matches nothing, and
-returns null — at which point every signed-in request raises `NoOrganizationError` and nobody can
-reach the product. It fails closed, which is the right direction to fail in, but it fails closed for
-everyone.
+**The identity path reads three tables without an org, and that is the whole of the bypass.**
+`resolveOrgForUser()` in `src/server/org-context.ts` (#26) turns a session into an org by joining
+`memberships` to `organizations`, and it necessarily runs *before* `app.current_org_id` is set,
+because setting it is what it exists to make possible. Better Auth's adapter reads the same tables
+at sign-in for the same reason, and `resolveActiveOrganization()` in `src/server/auth.ts` creates
+the account's first org there. None of that can be subject to the context.
 
-This is the same chicken-and-egg as §2's four identity tables, one table further in, and it is a
-decision #28 has to make before it enables anything rather than a detail it can settle afterwards.
-The shapes available: run this one read as a role the policies do not apply to; key the
-`memberships` policy on the *user* rather than the org, since "which orgs am I in" is a question
-about a person and the `memberships_user` index in §8 already exists to serve it; or set the GUC
-from the session's `active_org_id` before the join and accept that the join is then only confirming
-a value RLS already trusted — which is the option that quietly moves the boundary and should
-probably lose. Whichever wins, `organizations` has the same problem for the same reason.
+So the identity path runs as the login role, a member of `capexwise_identity`, whose policies admit
+every row of `organizations`, `memberships` and `invitations` — and which holds no policy and no
+grant on any table inside the boundary. That was the first of the three shapes #28 weighed. The other
+two lost: keying `memberships` on the user moves the bootstrap to a setting Better Auth cannot set,
+and seeding the setting from the session's `active_org_id` would make the membership join confirm a
+value RLS had already trusted. ADR-0007 has the longer version, and
+`src/server/cross-org-isolation.integration.test.ts` fails if the bypass grows a fourth table.
 
-**`organizations` needs more thought than the template, and #28 owns it.** A policy of
-`id = current_org_id` with a matching `WITH CHECK` cannot admit the row that creates an org: at
-signup there is no org context yet, and the check would require `current_org_id` to already equal an
-id that does not exist. Either the id is generated in the application and set before the insert, or
-org creation runs on a path the policy does not apply to — which is a decision about who is allowed
-to create an org, not a detail of the policy. The soft delete is the second half of the same
-question: `deleted_at is null` belongs in the `USING` clause, and then a purge job cannot see the
-rows it exists to remove. Both are why `organizations` did not get RLS in #17 along with the table.
+**Who may create an org is answered by the grants.** A policy of `id = current_org_id()` with a
+matching `WITH CHECK` cannot admit the row that creates an org, because there is no context until
+the org exists. So org creation happens on the identity path, at sign-in, and the scoped role holds
+no `INSERT` on `organizations` at all: a scoped handle is by definition already inside an org.
+
+**Who bypasses row-level security**, in full: the migration role, because DDL is not subject to it;
+the integration harness's own connection, the compose superuser, so that the isolation test can see
+what a scoped path hides; and the identity path, on the three tables above. A *data* migration over
+an org-owned table would be subject to `FORCE` and see no domain rows. The demo reset (#34) is the
+first job that has to write across orgs, and it decides how — with its own role, rather than by
+inheriting a bypass. ADR-0007 has the table.
 
 ### The per-table checklist
 
@@ -868,8 +890,10 @@ ADR-0003 promised four items per new table, and #23 puts them in the PR template
 
 1. `org_id uuid not null references organizations (id) on delete cascade`
 2. An index leading with `org_id`
-3. `enable` + `force` row level security, and the policy above
-4. A case in the cross-org isolation test (#27)
+3. A grant to `capexwise_scoped` for the commands the product needs, `enable` + `force` row level
+   security, and the policy above — and never a grant or a policy for `capexwise_identity`
+4. A case in the cross-org isolation test (#27). Naming the table in `ORG_OWNED` there is what makes
+   the registry check items 1 and 3, and runs the unfiltered-query probes over it
 
 ### What #27 has to cover
 
@@ -891,8 +915,6 @@ for by #48, because they are the ones a naive test misses:
 - **The encryption scheme for access codes** (#31). §3 fixes where the value lives, that it is
   `bytea`, and that `key_version` is per row. `pgcrypto` versus application-level envelope
   encryption is still open, and so is whether utility `account_ref` joins it.
-- **Pooling mode** (#33). Constrained by ADR-0003 to keep `SET LOCAL` transaction-scoped; not
-  chosen.
 - **The tax-year snapshot tables** (#44). §5's derived allocation depends on that freeze existing
   before F4 ships, which makes #44 a v1 blocker rather than a follow-on.
 - **Whether `buildings.region` should be constrained.** Left as free text; if F4 ever grows

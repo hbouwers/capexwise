@@ -7,7 +7,8 @@ planning, maintenance scheduling, vendor contacts and building operational facts
 
 **Status: the tenancy spine is in; no feature code yet.** The application signs in with Google,
 creates the account's org and owner membership, and protects its routes — #25. The schema through
-`docs/data-model.md` §2 is migrated. Everything the product is *for* — buildings, capital items,
+`docs/data-model.md` §2 is migrated, with row-level security on every table that carries an org —
+#28. Everything the product is *for* — buildings, capital items,
 the forecast, the tax planner — is still unwritten. Rules below that describe
 runtime behaviour describe what the code *will* do — they are the contract to build against, not
 a description of something already working. Anything already true is marked as such.
@@ -69,7 +70,9 @@ not a skeleton to pre-create.
 These are the ones that are expensive or impossible to fix later. Everything else is style.
 
 - **`org_id` on every domain table, leading every index.** One codebase serves a personal org, a
-  public demo org, and customer orgs. There is no second deployment to hide behind.
+  public demo org, and customer orgs. There is no second deployment to hide behind. And forced
+  row-level security with a policy for `capexwise_scoped` — the template is `docs/data-model.md` §9,
+  and the isolation test refuses a table without it.
 - **Org context is resolved server-side from the session. Never from the client.** Not a route
   param, not a header, not a request body. A client-supplied org id is ignored, not validated.
 - **Never import the raw database client.** Use `getOrgContext()` and the scoped `db.forOrg(orgId)`

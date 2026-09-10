@@ -80,6 +80,9 @@ scoped handle, which makes three implementation details load-bearing rather than
   the setting took effect, so a missing context is an exception at the boundary instead of a page
   that renders zero buildings.
 
+*[ADR-0007](0007-database-roles.md) is how #28 met the first of these — a role switch inside each
+scoped transaction, rather than a second login — and which code is allowed past the policies.*
+
 ## Alternatives considered
 
 **Database per tenant.** The strongest isolation available, and the honest reason it loses is

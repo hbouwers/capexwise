@@ -76,7 +76,9 @@ deployment.
   parameter, header or body
 - `getOrgContext()` returns a scoped `db.forOrg(orgId)`; importing the raw database client is
   blocked by an ESLint rule, so the scoping is enforced rather than merely encouraged
-- Postgres row-level security as an independent second layer
+- Postgres row-level security as an independent second layer: every scoped transaction runs as a
+  role the policies apply to, whatever the connection logged in as
+  ([ADR-0007](docs/adr/0007-database-roles.md))
 - A cross-org isolation integration test, extended per table
 
 **Sign-in is Google OAuth and nothing else, through Better Auth**
@@ -236,6 +238,13 @@ those bite long before storage does, and neither is about how much data there is
   branches are not deleted when their pull request closes. Branch creation then fails, and what
   fails with it is the preview, not anything loud. Confirm the integration's cleanup actually
   happens (#32).
+
+**Row-level security depends on which role `DATABASE_URL` logs in as**
+([ADR-0007](docs/adr/0007-database-roles.md)). The migration that turns it on grants its two roles
+to the role that runs it, and sign-in works only for a login that holds one of them — so on Neon
+the application's `DATABASE_URL` and CI's `PRODUCTION_DATABASE_URL` differ in host (pooled against
+direct) and never in user. Giving the application a login of its own is the hardening step that ADR
+describes: a Neon role and a Vercel variable, and no code.
 
 **Every environment needs its own `BETTER_AUTH_SECRET`.** It signs session cookies and encrypts the
 OAuth tokens stored in `accounts`, so sharing one across environments means a session forged in

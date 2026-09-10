@@ -36,6 +36,8 @@ for `git log`.
 - [ ] Migration SQL read before committing — it is forward-only, there is no `down`
 - [ ] New table added → `src/server/cross-org-isolation.integration.test.ts` extended to cover
       it: named in `ORG_OWNED`, seeded on both sides, and a probe for each path that reaches it
+- [ ] New org-owned table → `docs/data-model.md` §9's grant to `capexwise_scoped`, `enable` and
+      `force` row level security, and the policy — nothing for `capexwise_identity`
 - [ ] New environment variable → in `src/lib/env-schema.mts` _and_ `.env.example`, and no
       `NEXT_PUBLIC_` prefix on anything secret
 - [ ] Money handled as integer cents

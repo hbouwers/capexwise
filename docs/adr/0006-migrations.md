@@ -79,6 +79,10 @@ including the table owner. Migrations need a role that can run DDL; the applicat
 cannot. Keeping them separate from the start makes that split a second connection string later
 rather than a rewrite.
 
+*#28 met this with a role switch rather than a second login — every scoped transaction runs as a
+role the policies apply to, whatever it connected as — and left the second connection string as a
+hardening step. [ADR-0007](0007-database-roles.md) is that decision.*
+
 ## Alternatives considered
 
 **Migrate in the Vercel build — `"build": "db:migrate && next build"`.** The most commonly
