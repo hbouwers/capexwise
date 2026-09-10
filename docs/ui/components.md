@@ -156,6 +156,14 @@ Primitives used as-is beyond those: `Label`, `Textarea`, `Checkbox`, `Separator`
 prototype, but the rent checkoff and the Confirm action both need an undo affordance). That list
 plus the table above **is** the installed set; nothing else is added until a screen needs it.
 
+`Sheet` is the first primitive added under that rule, by the app shell
+([#29](https://github.com/hbouwers/capexwise/issues/29)): the rail becomes a drawer below `lg`, and
+a drawer is a modal dialog anchored to an edge — which is what `Sheet` is, on the same Radix
+`Dialog` the `Dialog` above uses. It got the `Dialog` treatment: `cn` from `@/lib/cn`, the
+`--surface-overlay` scrim in place of `bg-black/10` and a backdrop blur, `--border-modal` plus
+`--shadow-modal` in place of `shadow-lg`, and the title's `text-base` — which does not generate,
+because the type scale is cleared — moved to `text-md`.
+
 Three things that apply across all of them:
 
 - **Focus is one rule, not nineteen.** The installed primitives each carry
