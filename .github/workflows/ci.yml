@@ -387,6 +387,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # What scopes the credential, and the reason it is not a repository secret.
+    # A repository secret is readable by every run in the repository, and the
+    # workflow a run executes is the one from its own head commit — so a branch
+    # that adds a step echoing the value gets it printed on the pull request run,
+    # before anyone reviews the workflow change. The `if:` above governs where the
+    # credential is *used*; only an environment governs where it can be *read*.
+    # That is cheap insurance now and load-bearing at v0.5, when the repository
+    # and its retained logs go public.
+    #
+    # `PRODUCTION_DATABASE_URL` therefore lives in this environment rather than in
+    # Settings → Secrets and variables → Actions, and the environment carries a
+    # deployment branch rule for `main`. No other job can name it, because no
+    # other job has any business holding it.
+    environment: production
+
     # A lock on the production database, separate from the workflow-level group
     # because it is protecting a different thing. That group is keyed on the ref
     # and would serialise these anyway, but it cancels; this one queues.
@@ -404,11 +419,12 @@ jobs:
       cancel-in-progress: false
 
     env:
-      # `PRODUCTION_DATABASE_URL` in the repository's secrets, `DATABASE_URL` to
-      # the process, because that is the name `migrationEnvSchema` validates. The
-      # two names are kept apart on purpose: nothing is called `DATABASE_URL` at
-      # the repository level, so there is no ambient secret that a future job
-      # could pick up and point at production by accident.
+      # `PRODUCTION_DATABASE_URL` from the `production` environment above,
+      # `DATABASE_URL` to the process, because that is the name
+      # `migrationEnvSchema` validates. The two names are kept apart on purpose:
+      # nothing is called `DATABASE_URL` at the repository level, so there is no
+      # ambient secret that a future job could pick up and point at production by
+      # accident.
       #
       # This is the only real credential in this workflow. Every other value in
       # it — the Postgres password, the auth secret, the Google client — is a

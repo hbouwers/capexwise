@@ -247,8 +247,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 `npm run db:migrate` validates a strict subset — `DATABASE_URL` and nothing else — so the CI job
 that applies migrations on a push to `main` never needs an auth secret or a Stripe key to run one.
-That job reads the production string from a repository secret named `PRODUCTION_DATABASE_URL` rather
-than from the table above, because nothing in this table belongs to CI: these are the variables the
+That job reads the production string from a secret named `PRODUCTION_DATABASE_URL` rather than from
+the table above, because nothing in this table belongs to CI: these are the variables the
 *application* reads, and "Applying migrations" below is where the credential CI holds is described.
 
 #### The Google OAuth client
@@ -476,11 +476,24 @@ drift check and the integration suite — and then runs `npm run db:migrate` aga
 is the operational half of [ADR-0006](docs/adr/0006-migrations.md): migrations are applied by CI, on
 `main`, never in a build, never by the application at boot, never from a laptop.
 
-It takes the connection string from a repository secret named `PRODUCTION_DATABASE_URL`, and hands
-it to the runner as `DATABASE_URL`, which is the only variable `npm run db:migrate` validates. The
-two names are kept apart deliberately: there is no repository secret called `DATABASE_URL`, so no
-future job can pick one up and point at production by accident. This is the only real credential in
-the workflow.
+It takes the connection string from a secret named `PRODUCTION_DATABASE_URL`, and hands it to the
+runner as `DATABASE_URL`, which is the only variable `npm run db:migrate` validates. The two names
+are kept apart deliberately: there is no secret called `DATABASE_URL`, so no future job can pick one
+up and point at production by accident. This is the only real credential in the workflow.
+
+**The secret belongs to a GitHub environment named `production`, not to the repository**, and the
+job declares `environment: production` to reach it. The distinction is the difference between where
+the credential may be *used* and where it may be *read*. A repository secret — Settings → Secrets
+and variables → Actions — is readable by every run in the repository, and the workflow a run
+executes is the one from its own head commit, so a branch that adds a step echoing the value has it
+printed on the pull request run before anyone reviews the workflow change. An environment secret is
+readable only by a job that names the environment, and the environment carries a deployment branch
+rule for `main`. That is cheap while the repository is private and load-bearing at v0.5, when it and
+its retained logs go public.
+
+Setting it up, once: Settings → Environments → **New environment** named `production`, add
+`PRODUCTION_DATABASE_URL` under **Environment secrets**, add a deployment branch rule limiting it to
+`main`, and delete any repository-level copy of the same secret.
 
 **That secret holds Neon's direct endpoint, not the pooled one** — the host without `-pooler` in it.
 The two are different values for the same database and the split is deliberate: the pooled endpoint
