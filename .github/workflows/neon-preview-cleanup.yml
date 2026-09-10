@@ -1,0 +1,136 @@
+# Deletes a pull request's Neon branch when the pull request closes (#87).
+#
+# The Vercel-managed Neon integration creates `preview/<git branch>` for each
+# pull request's preview deployment. It deletes that branch only once Vercel
+# deletes the last deployment for the git branch. Vercel keeps preview
+# deployments for months, and always keeps the project's ten most recent, so
+# on a project this quiet the integration never deletes one. The free plan
+# allows ten branches, and the tenth preview fails to get a database without
+# any alert. So this job deletes the branch itself, as soon as the pull
+# request is merged or closed.
+#
+# Neon's own `delete-branch-action` is not used. It runs `neonctl branches
+# delete` and fails when the branch does not exist, which happens whenever a
+# pull request never got a preview or its branch was already deleted by hand.
+# A red run on every such pull request would teach everyone to ignore this
+# workflow. Two calls to the API do the same job, and treat a missing branch as
+# nothing to delete.
+name: Neon preview cleanup
+
+# `pull_request_target`, not `pull_request`, for Dependabot's sake. A
+# `pull_request` run that Dependabot triggers gets none of the repository's
+# secrets, and Dependabot closes its own pull requests whenever a newer bump
+# supersedes one, so those preview branches would never be deleted.
+#
+# `pull_request_target` runs the workflow as it is on `main`, with the base
+# repository's secrets. That is dangerous only for a job that checks out or
+# runs the pull request's code, and this one does neither: the only thing it
+# takes from the pull request is the branch name, passed as an environment
+# variable rather than pasted into the script. It also means a pull request
+# that edits this file does not run its edited version. The version on `main`
+# runs, which is why this file's first real run is the merge of the pull
+# request that adds it.
+on:
+  pull_request_target:
+    types: [closed]
+
+# The job calls Neon and nothing else, so it needs no GitHub token.
+permissions: {}
+
+jobs:
+  delete:
+    name: Delete the preview's Neon branch
+    # Pull requests from a fork get no preview deployment, and so no branch.
+    # Without this check, a fork whose branch has the same name as one of ours
+    # could delete our preview's branch. Dependabot's branches are in this
+    # repository, so it still passes.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # The API key can do anything to the Neon project, `main` included, so it
+    # lives where `PRODUCTION_DATABASE_URL` does, for the same reason `ci.yml`
+    # gives: in an environment whose deployment branch rule allows only
+    # `main`, not in a repository secret that any branch's workflow could print.
+    # A `pull_request_target` run is checked against the default branch, so the
+    # rule allows this job and nothing else.
+    #
+    # `deployment: false` stops this job appearing as a deployment on every pull
+    # request it closes. It still gets the environment's secrets.
+    environment:
+      name: neon-previews
+      deployment: false
+
+    steps:
+      - name: Delete the branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          # The `preview/` prefix is what keeps this away from `main`. Whatever
+          # the pull request's branch is called, the name this deletes is never
+          # production's branch.
+          BRANCH: preview/${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
+            echo "::error::Set NEON_API_KEY and NEON_PROJECT_ID in the neon-previews environment (README, Continuous integration)."
+            exit 1
+          fi
+
+          api="https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches"
+
+          # `search` matches partially, so `preview/feat/x` also finds
+          # `preview/feat/x-2`. The exact comparison below picks the right one.
+          # It also skips the project's default branch, a second guard on top of
+          # the prefix.
+          id=$(
+            curl -fsS --get \
+              -H "Authorization: Bearer $NEON_API_KEY" \
+              -H "Accept: application/json" \
+              --data-urlencode "search=$BRANCH" \
+              "$api" |
+              jq -r --arg name "$BRANCH" \
+                '[.branches[] | select(.name == $name and (.default | not)) | .id] | first // empty'
+          )
+
+          if [ -z "$id" ]; then
+            echo "No Neon branch named $BRANCH, so there is nothing to delete."
+            exit 0
+          fi
+
+          # Retried on 423 and on server errors, and on nothing else. Neon answers
+          # 423 while another operation on the project is still running, such as
+          # a compute starting or suspending, and expects the caller to try again.
+          # A 404 means the branch went some other way between the lookup and
+          # now, by hand or by the integration's own cleanup, which is the result
+          # this job wants. curl's own `--retry-all-errors` would retry that 404
+          # too, and then fail.
+          for _ in 1 2 3 4 5 6; do
+            status=$(
+              curl -sS -X DELETE \
+                -H "Authorization: Bearer $NEON_API_KEY" \
+                -H "Accept: application/json" \
+                -o /dev/null -w '%{http_code}' \
+                "$api/$id"
+            ) || status=000
+
+            case "$status" in
+              2??)
+                echo "Deleted $BRANCH."
+                exit 0
+                ;;
+              404)
+                echo "$BRANCH was already gone."
+                exit 0
+                ;;
+              423 | 5?? | 000) sleep 10 ;;
+              *)
+                echo "::error::Neon refused to delete $BRANCH, with HTTP $status."
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "::error::Neon was still busy after six attempts to delete $BRANCH."
+          exit 1
