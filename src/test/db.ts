@@ -60,13 +60,42 @@ const { TEST_DATABASE_URL: url } = parseEnv(
 );
 
 /**
- * The same string, exported, so a test can point a module that reads
- * `DATABASE_URL` at the test database rather than at the developer's own.
- * `src/server/auth.integration.test.ts` is why it exists: the provider builds
- * its handle from `@/server/env`, and without this it would run happily against
- * whatever `.env.local` names — and truncate it between tests.
+ * The role the application's pool logs in as under test, and deliberately not
+ * the superuser the harness itself connects as.
+ *
+ * A superuser skips row-level security outright, `FORCE` or no `FORCE`, so a
+ * suite that ran the application as one would pass whether or not a single
+ * policy existed — and the identity path would never once be read through the
+ * policies that are supposed to let it in. This role is what a hardened
+ * production login looks like (ADR-0007): not the owner, no `BYPASSRLS`, a member
+ * of `capexwise_identity` for sign-in and able to become `capexwise_scoped` for
+ * everything else. If Better Auth reaches for a table the identity role was not
+ * granted, `src/server/auth.integration.test.ts` is where that surfaces.
+ *
+ * The password is the compose file's committed local credential, for the reason
+ * that file gives: loopback only, and nothing behind it worth having.
  */
-export const testDatabaseUrl = url;
+const APPLICATION_ROLE = "capexwise_test_app";
+const APPLICATION_PASSWORD = "capexwise_local_dev";
+
+function asApplicationRole(connectionString: string): string {
+  const application = new URL(connectionString);
+  application.username = APPLICATION_ROLE;
+  application.password = APPLICATION_PASSWORD;
+
+  return application.toString();
+}
+
+/**
+ * The test database, as the application's login role. A test sets `DATABASE_URL`
+ * to this so that a module reading it — `@/server/auth`, `@/server/org-context` —
+ * reaches the disposable database rather than whatever `.env.local` names, and
+ * reaches it as the application rather than as the harness.
+ * `src/server/auth.integration.test.ts` is why the first half exists: without
+ * it the provider would run happily against the developer's own database, and
+ * the suite would truncate it between tests.
+ */
+export const applicationDatabaseUrl = asApplicationRole(url);
 
 /**
  * The connection string carries a password, so — as everywhere else that touches
@@ -124,8 +153,9 @@ if (!database.endsWith(REQUIRED_SUFFIX)) {
 }
 
 /**
- * Creates the test database if it is not there, then applies the committed
- * migrations to it. Runs once per Vitest run, from `global-setup.ts`.
+ * Creates the test database if it is not there, applies the committed
+ * migrations to it, and makes sure the application's login role exists. Runs
+ * once per Vitest run, from `global-setup.ts`.
  *
  * Migrating rather than dropping and recreating: the migrations are the schema,
  * the drift check (`npm run db:drift`) is what keeps them honest, and a suite
@@ -154,6 +184,31 @@ export async function ensureTestDatabase(): Promise<void> {
 
   try {
     await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
+
+    // After the migrations, because the two roles granted here are theirs.
+    // Roles belong to the server rather than the database, so this survives
+    // between runs and is created only once; the grants are re-applied every
+    // time, which is a notice rather than an error when nothing changed.
+    //
+    // The same two grants the migration gives the role that runs it, and for
+    // the same reasons — `drizzle/0006_row_level_security.sql` explains the
+    // INHERIT and SET on each.
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${APPLICATION_ROLE}') THEN
+          CREATE ROLE ${APPLICATION_ROLE}
+            LOGIN PASSWORD '${APPLICATION_PASSWORD}' NOBYPASSRLS;
+        END IF;
+      END
+      $$
+    `);
+    await client.query(
+      `GRANT capexwise_identity TO ${APPLICATION_ROLE} WITH INHERIT TRUE, SET FALSE`,
+    );
+    await client.query(
+      `GRANT capexwise_scoped TO ${APPLICATION_ROLE} WITH INHERIT FALSE, SET TRUE`,
+    );
   } finally {
     await client.end();
   }
@@ -224,8 +279,9 @@ export function testDb(): NodePgDatabase<typeof schema> {
  *
  * Reached from here rather than by importing `@/db/client` in the test, because
  * this file is on the ESLint allowlist and a test file is not — and it should
- * stay that way. Callers must set `DATABASE_URL` to `testDatabaseUrl` before the
- * first call, which is what points the pool at the disposable database.
+ * stay that way. Callers must set `DATABASE_URL` to `applicationDatabaseUrl`
+ * before the first call, which is what points the pool at the disposable
+ * database.
  */
 export const appDb = applicationDb;
 

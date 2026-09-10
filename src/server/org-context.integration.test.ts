@@ -36,14 +36,14 @@ import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import { memberships } from "@/db/schema";
-import { appDb, testDatabaseUrl, testDb } from "@/test/db";
+import { appDb, applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createMembership,
   createOrganization,
   createUser,
 } from "@/test/factories";
 
-process.env.DATABASE_URL = testDatabaseUrl;
+process.env.DATABASE_URL = applicationDatabaseUrl;
 process.env.APP_URL = "http://localhost:3000";
 process.env.BETTER_AUTH_SECRET = "integration-suite-secret-not-a-real-one";
 process.env.GOOGLE_CLIENT_ID = "integration-suite-client-id";

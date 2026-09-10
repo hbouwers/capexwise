@@ -16,7 +16,7 @@ export default async function setup(): Promise<void> {
     throw new Error(
       `Could not prepare the test database at ${testDatabaseTarget}.\n\n` +
         "The integration suite needs Postgres. Locally that is `npm run db:up`; " +
-        "in CI it is the service container in `.github/workflows/test.yml`. The " +
+        "in CI it is the service container in the `test` job in `.github/workflows/ci.yml`. The " +
         "unit suite needs none of this — `npm test` runs without a database.",
       { cause: error },
     );

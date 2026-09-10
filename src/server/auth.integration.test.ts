@@ -32,10 +32,10 @@ import {
   sessions,
   users,
 } from "@/db/schema";
-import { testDatabaseUrl, testDb } from "@/test/db";
+import { applicationDatabaseUrl, testDb } from "@/test/db";
 import { createMembership, createOrganization } from "@/test/factories";
 
-process.env.DATABASE_URL = testDatabaseUrl;
+process.env.DATABASE_URL = applicationDatabaseUrl;
 process.env.APP_URL = "http://localhost:3000";
 process.env.BETTER_AUTH_SECRET = "integration-suite-secret-not-a-real-one";
 process.env.GOOGLE_CLIENT_ID = "integration-suite-client-id";

@@ -72,7 +72,7 @@ import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import { sessions } from "@/db/schema";
-import { testDatabaseUrl, testDb } from "@/test/db";
+import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createInvitation,
   createMembership,
@@ -94,7 +94,7 @@ vi.mock("next/headers", () => ({
 
 const APP_URL = "http://localhost:3000";
 
-process.env.DATABASE_URL = testDatabaseUrl;
+process.env.DATABASE_URL = applicationDatabaseUrl;
 process.env.APP_URL = APP_URL;
 process.env.BETTER_AUTH_SECRET = "integration-suite-secret-not-a-real-one";
 process.env.GOOGLE_CLIENT_ID = "integration-suite-client-id";
