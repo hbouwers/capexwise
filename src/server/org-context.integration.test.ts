@@ -50,6 +50,8 @@ process.env.APP_URL = "http://localhost:3000";
 process.env.BETTER_AUTH_SECRET = "integration-suite-secret-not-a-real-one";
 process.env.GOOGLE_CLIENT_ID = "integration-suite-client-id";
 process.env.GOOGLE_CLIENT_SECRET = "integration-suite-client-secret";
+// Base64url of "integration-suite-not-a-real-key": a shape, not a secret.
+process.env.ACCESS_CODE_KEYS = "1:aW50ZWdyYXRpb24tc3VpdGUtbm90LWEtcmVhbC1rZXk";
 
 // Dynamic, and after the assignments above: a static import is hoisted, and the
 // pool would be built from `.env.local` before the first line of this file ran.

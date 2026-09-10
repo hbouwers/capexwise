@@ -155,8 +155,9 @@ styleguide is deliberately not behind sign-in; everything else is.
 
 **The copy is not enough on its own any more.** `.env.example` leaves the auth variables blank
 because a committed placeholder is a value somebody keeps, so filling them in is part of setup:
-generate a `BETTER_AUTH_SECRET`, and create a Google OAuth client. "Environment variables" below
-has both, and the server names whichever one is missing rather than starting without it.
+generate a `BETTER_AUTH_SECRET` and an `ACCESS_CODE_KEYS`, and create a Google OAuth client.
+"Environment variables" below has all three, and the server names whichever one is missing rather
+than starting without it.
 
 **`npm run dev` still does not need the database running** to serve the sign-in page. It does need
 it to sign in — that is the first thing in the application that writes a row.
@@ -209,6 +210,7 @@ to start the server if a server variable carries the prefix. There are no public
 | `APP_URL` | `http://localhost:3000` | **Per deployment.** A preview hostname is generated, so this cannot be set once at the project level ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
 | `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
+| `ACCESS_CODE_KEYS` | Generated once, per machine | Vercel project environment, Preview scope; its own value, never production's | Vercel project environment, Production scope, **Sensitive**, with a copy kept outside Vercel ([ADR-0008](docs/adr/0008-access-code-encryption.md)) |
 
 #### The database
 
@@ -217,8 +219,9 @@ marketplace integration so that the Vercel project and the database branches are
 (#33). Local development does not use it at all — that is the compose container, and the two never
 talk.
 
-One Neon project, with a branch per environment: `production` backs the live Vercel deployment, and
-preview deployments get their own branch. "Production" here means the deployment that holds real
+One Neon project, with a branch per environment: `main`, the project's default branch, backs the
+live Vercel deployment, and each preview deployment gets a branch named `preview/<git branch>`,
+created from `main` and so holding a copy of production's rows. "Production" here means the deployment that holds real
 data rather than the plan it runs on — through v0 and v0.5 that is the Vercel Hobby instance with
 the real portfolio in it, and at v1 the role moves to Cloud Run with [ADR-0002](docs/adr/0002-hosting.md)'s
 migration. The secret the migrate job reads follows the role, not the vendor, which is why it is
@@ -234,10 +237,12 @@ those bite long before storage does, and neither is about how much data there is
   anything that polls it steadily keeps the compute awake. Exhausting the budget suspends the compute
   **until the next billing period** — so the failure mode is the portfolio demo being dead when
   somebody clicks the link, which is the one thing v0.5 exists to avoid.
-- **The ten-branch cap.** A branch per preview deployment plus `production` reaches ten quickly if
-  branches are not deleted when their pull request closes. Branch creation then fails, and what
-  fails with it is the preview, not anything loud. Confirm the integration's cleanup actually
-  happens (#32).
+- **The ten-branch cap.** A branch per pull request plus `main` reaches ten quickly, and the
+  integration does not delete them when a pull request closes. It deletes a preview branch only
+  when Vercel deletes the last deployment for that git branch, and Vercel keeps preview deployments
+  for months and always keeps the project's last ten. Branch creation then fails, and what fails
+  with it is the preview, not anything loud. Until something deletes them on close (#32), delete
+  merged pull requests' branches in the Neon console.
 
 **Row-level security depends on which role `DATABASE_URL` logs in as**
 ([ADR-0007](docs/adr/0007-database-roles.md)), so in production the application and CI log in as
@@ -249,20 +254,21 @@ need DDL. Pointing Vercel at the owner would not fail loudly — the migration g
 identity role as well, so sign-in keeps working — which is exactly why the difference is written
 down here.
 
-`capexwise_app` was created with SQL on the `production` branch rather than in the Neon console,
+`capexwise_app` was created with SQL on the `main` branch rather than in the Neon console,
 which adds the roles it creates to Neon's own administrative group
 ([#81](https://github.com/hbouwers/capexwise/issues/81) has the statements).
 
 **The Neon integration does not supply production's `DATABASE_URL`.** It connects only as the owner
-and has no setting for the role, so its connection to the Vercel project covers Preview and
-Development and leaves Production unticked. Production's `DATABASE_URL` is an ordinary project
+and has no setting for the role, so its connection to the Vercel project covers Preview only.
+Production is unticked, and so is Development, because local development uses the compose
+database and never needs a Neon connection string on the machine. Production's `DATABASE_URL` is an ordinary project
 variable instead, Production scope only, marked Sensitive, built from the Neon console's Connect
 dialog with the role set to `capexwise_app` and pooling on. **Reconnecting the integration with
 Production ticked undoes this**: at best it clashes with the variable, at worst production is
 quietly back on the owner, and nothing would flag it.
 
 Sensitive means Vercel will not show the value again, so there is nothing to read back. Rotating the
-password is an `alter role` on the `production` branch, the full connection string typed into the
+password is an `alter role` on the `main` branch, the full connection string typed into the
 variable again, and a production redeploy: Vercel applies an environment change only to deployments
 built after it.
 
@@ -278,6 +284,23 @@ preview is valid in production. Generate one with:
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
+
+**Every environment needs its own `ACCESS_CODE_KEYS` too**, for a reason specific to Neon. The
+integration creates every preview branch from `main`, production's own branch, and a Neon branch
+holds its parent's rows. A preview deployment holding production's key would therefore reveal every production access code from a URL that exists for code review. With its own key it
+cannot open them. Version numbers restart in each environment, and preview's
+version 1 is a different key from production's. Generate one with:
+
+```bash
+node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Production's is the one secret here whose loss costs data rather than a sign-in. Vercel will not
+show a Sensitive value again, and every code sealed under a key that nobody holds is gone. So the
+value goes into the password manager as well as into Vercel, and a key retired by a rotation stays
+there for as long as any backup that needs it
+([#35](https://github.com/hbouwers/capexwise/issues/35)). [ADR-0008](docs/adr/0008-access-code-encryption.md)
+has the rotation.
 
 `npm run db:migrate` validates a strict subset — `DATABASE_URL` and nothing else — so the CI job
 that applies migrations on a push to `main` never needs an auth secret or a Stripe key to run one.
