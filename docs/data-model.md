@@ -352,7 +352,8 @@ create table building_utilities (
   unit_id            uuid references units (id) on delete restrict,  -- null = whole building
   kind               utility_kind not null,
   provider_name      text,
-  account_ref        text,              -- a stub, not a full account number
+  account_ref        text               -- the last four characters, never the account number
+                       check (char_length(account_ref) <= 4),
   paid_by            text not null default 'owner'
                        check (paid_by in ('owner', 'tenant')),
   avg_monthly_cents  bigint check (avg_monthly_cents >= 0),
@@ -379,9 +380,11 @@ create table building_access_codes (
   unit_id        uuid references units (id) on delete cascade,   -- null = building-level
   kind           access_code_kind not null,
   label          text,
-  secret         bytea not null,        -- ciphertext. never text, never logged (#31)
-  key_version    integer not null,      -- which key encrypted it; rotation needs this
-  last_rotated_at timestamptz,
+  secret         bytea not null         -- sealed, never text, never logged (ADR-0008)
+                   check (octet_length(secret) = 92),
+  key_version    integer not null       -- which key sealed it; rotation needs this
+                   check (key_version > 0),
+  last_rotated_at timestamptz,          -- when the code at the lock changed, not the key
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
@@ -394,12 +397,23 @@ than a migration.
 
 `secret` is `bytea` deliberately — a `text` column invites someone to write a plaintext value into
 it during a debug session, and it would work. **Nothing in this table is ever logged, including in
-an error message that serialises the row.** #31 chooses the encryption scheme; this document only
-fixes where the value lives and that it arrives encrypted.
+an error message that serialises the row.**
 
-Whether utility `account_ref` is also encrypted is left to #31, which already lists it as an open
-question. The stub is designed to be non-sensitive; if that turns out to be optimistic, it moves
-into this table's shape.
+[ADR-0008](adr/0008-access-code-encryption.md) is the scheme: AES-256-GCM in the application,
+through `src/lib/access-code-cipher.mts`, with the org's id bound into the tag and every code padded
+to one block before it is sealed. So every `secret` is exactly 92 bytes, and the `octet_length`
+check turns the debug-session plaintext above into a constraint violation instead of a stored row.
+The database never sees a code or a key, which is why the scheme is not `pgcrypto`. `key_version` is
+the version in `ACCESS_CODE_KEYS` that sealed the row, and the ADR has the rotation that re-seals
+rows onto a newer one. `last_rotated_at` is a fact about the lock, not the key, and a rotation does
+not touch it.
+
+The facts card's query never selects `secret`. A reveal opens one row in a server action and
+records that it happened, never what it showed (ADR-0008, `docs/ui/components.md` §9).
+
+Utility `account_ref` is **not** encrypted. It is a stub by design, and the check above keeps it
+one: four characters is the tail a utility prints on every bill, and a full account number is
+refused rather than stored. ADR-0008 says why that is the scope.
 
 ---
 
@@ -913,9 +927,6 @@ for by #48, because they are the ones a naive test misses:
 
 ## 10. Open questions this document does not close
 
-- **The encryption scheme for access codes** (#31). §3 fixes where the value lives, that it is
-  `bytea`, and that `key_version` is per row. `pgcrypto` versus application-level envelope
-  encryption is still open, and so is whether utility `account_ref` joins it.
 - **The tax-year snapshot tables** (#44). §5's derived allocation depends on that freeze existing
   before F4 ships, which makes #44 a v1 blocker rather than a follow-on.
 - **Whether `buildings.region` should be constrained.** Left as free text; if F4 ever grows
