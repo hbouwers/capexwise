@@ -191,7 +191,7 @@ before each test. It refuses to run against a database whose name does not end i
 | | |
 | --- | --- |
 | Stack | Next.js App Router + TypeScript + Postgres + Drizzle + Tailwind/shadcn. Rejected: a Next + .NET split, which doubles ceremony for a solo dev |
-| Hosting | Vercel now, Cloud Run as the escape hatch. **Vercel Hobby forbids commercial use, so Stripe going live forces the move** — the Dockerfile is maintained from commit one so that stays an afternoon |
+| Hosting | Vercel now, Cloud Run as the escape hatch. **Vercel Hobby forbids commercial use, so Stripe going live forces the move** — the Dockerfile is maintained from commit one so that stays an afternoon. **One production at every stage**, at `capexwise.com`; shutting the paid product down moves it back to Hobby ([ADR-0009](docs/adr/0009-one-production.md)). Rejected: a second, Hobby-only deployment for personal use and demos beside the paid one |
 | Zillow integration | **Not possible.** Their public APIs cover listing feeds, leads, Zestimates and public records only, never a landlord's own Rental Manager data. Manual entry in v1, which makes onboarding speed a first-class design problem (#39) |
 | Licence | All rights reserved. Public as a portfolio artifact, not open source. Reversible toward permissive; the other direction is not |
 | Demo city | **Indianapolis**, matching the PRD and the real portfolio. The prototype's Somerville, MA data is presentation only |

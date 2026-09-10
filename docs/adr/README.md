@@ -53,3 +53,4 @@ New decisions take the next number and are added here in the same pull request.
 | [0006](0006-migrations.md) | Migrations — forward-only, run outside the build | [#17](https://github.com/hbouwers/capexwise/issues/17) |
 | [0007](0007-database-roles.md) | Database roles — the scoped role, the identity path, and who bypasses RLS | [#28](https://github.com/hbouwers/capexwise/issues/28) |
 | [0008](0008-access-code-encryption.md) | Access codes — sealed in the application, keyed per environment | [#31](https://github.com/hbouwers/capexwise/issues/31) |
+| [0009](0009-one-production.md) | One production, and the way back to Hobby | [#86](https://github.com/hbouwers/capexwise/issues/86) |
