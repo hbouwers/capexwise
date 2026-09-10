@@ -188,8 +188,10 @@ export type OrgContext = {
  * `requireSession()` redirects because "not signed in" is a normal thing to be;
  * this is a signed-in account with nowhere to be, which today can only mean
  * something upstream broke. Rendering a friendly page for it would be inventing
- * a supported state. #29 owns the app shell and #30 owns removal, and whichever
- * arrives first is where this earns a route.
+ * a supported state. The app shell (#29) arrived first and deliberately did not
+ * take it: until something can remove a membership there is no way to reach the
+ * page to check it, so #30, which introduces removal, is where this earns a
+ * route.
  *
  * The message names the user id and nothing else. CLAUDE.md's rule is that logs
  * never carry PII, and an error message is a log the moment anything catches it.
@@ -276,6 +278,42 @@ export async function resolveOrgForUser(
   const { role, ...org } = row;
 
   return { org, role };
+}
+
+/** One entry in the org switcher: enough to name it and to ask for it. */
+export type OrgOption = { id: string; name: string };
+
+/**
+ * Every org the user may switch into — the query behind the org switcher, and
+ * the reason `memberships_user` is the one index in the schema that does not
+ * lead with `org_id`.
+ *
+ * The same identity-path read as `resolveOrgForUser()` above, for the same
+ * reason: "which orgs am I in" has to be answered before one of them is the
+ * context, so there is no org to scope it by. It is also the same join and the
+ * same `deleted_at is null` — the list and the resolution must agree about which
+ * orgs exist, or the switcher offers an org that `getOrgContext()` then refuses
+ * to open and the choice silently does nothing.
+ *
+ * Oldest membership first, which is the order the resolution falls back in: the
+ * account's own org leads, and the list is stable for as long as the
+ * memberships are.
+ *
+ * It takes a user id, like `resolveOrgForUser()` and for the same reason — it is
+ * the seam the database can be tested through. The id it is handed is the one
+ * `getOrgContext()` resolved from the session; there is no other caller.
+ */
+export async function listOrgsForUser(userId: string): Promise<OrgOption[]> {
+  return await unscopedDb()
+    .select({ id: organizations.id, name: organizations.name })
+    .from(memberships)
+    .innerJoin(organizations, eq(organizations.id, memberships.orgId))
+    .where(and(eq(memberships.userId, userId), isNull(organizations.deletedAt)))
+    // `id` breaks a tie between two memberships created in the same instant,
+    // which is what a seed or a transaction produces. Without it the order of
+    // the two is whatever the plan returns, and a menu that reorders itself
+    // between renders is the kind of bug nobody can reproduce on request.
+    .orderBy(asc(memberships.createdAt), asc(memberships.id));
 }
 
 /**
