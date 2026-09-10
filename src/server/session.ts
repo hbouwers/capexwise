@@ -42,8 +42,9 @@ import { getAuth } from "@/server/auth";
 export const SIGN_IN_PATH = "/sign-in";
 
 /**
- * Where a signed-in request lands: the application, wherever that turns out to
- * be. The app shell (#29) is what makes this more than the placeholder root.
+ * Where a signed-in request lands: the portfolio dashboard, inside the app
+ * shell (#29). An org switch lands here too, for the reason
+ * `switchOrganization()` gives.
  */
 export const AFTER_SIGN_IN_PATH = "/";
 
