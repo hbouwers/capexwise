@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { PlanGate } from "@/components/plan-gate";
+import { PremiumBadge } from "@/components/premium-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -922,15 +924,53 @@ export default function Styleguide() {
             </Card>
           </div>
         </Section>
+
+        <Section
+          id="plan-gate"
+          title="Plan gate"
+          note="The same premium panel for a free org and a premium one. PlanGate is server-only, so the locked side is not hiding the content — it was never rendered. No upgrade button yet: there is nothing for it to open until billing (v1). Both surfaces it will guard, F7 and F8, are v2, which is why this is the only place it renders today."
+        >
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {(["free", "premium"] as const).map((plan) => (
+              <div key={plan} className="flex flex-col gap-2">
+                <FieldLabel>{`plan: ${plan}`}</FieldLabel>
+                <div className="overflow-hidden rounded-lg border border-border-card bg-surface-card">
+                  <div className="flex flex-col gap-2 border-b border-border-section px-5.5 pt-4.5 pb-4">
+                    <div className="flex items-center gap-2.25">
+                      <PremiumBadge />
+                      <span className="text-md leading-none font-semibold text-text-primary">
+                        Advisor
+                      </span>
+                    </div>
+                    <p className="text-xs leading-normal text-text-muted">
+                      Reads equipment ages against this year&apos;s projected
+                      liability, and flags capital work worth pulling forward or
+                      pushing out.
+                    </p>
+                  </div>
+                  <PlanGate
+                    org={{ plan }}
+                    feature="advisor"
+                    teaser="Recommendations for this portfolio are waiting behind the gate."
+                  >
+                    <p className="px-5.5 py-6.5 text-sm leading-normal text-text-secondary">
+                      The recommendations render here, for a premium org only.
+                    </p>
+                  </PlanGate>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
       </div>
 
       <footer className="mt-16 border-t border-border-section pt-6">
         <p className="text-xs leading-normal text-text-tertiary">
-          Interactive primitives that need client state — Select, Tabs, Dialog,
-          DropdownMenu, Popover, Tooltip, Sonner — are installed and themed but
-          not rendered here; they land on this page with the app shell (#29) and
-          the screen specs (#12), which is also where the domain layer in
-          components.md §6 gets built.
+          Interactive primitives that need client state are installed and themed
+          but not rendered here. DropdownMenu and Sheet are rendered by the app
+          shell itself (#29); Select, Tabs, Dialog, Popover, Tooltip and Sonner
+          land with the screen specs (#12), which is also where the rest of the
+          domain layer in components.md §6 gets built.
         </p>
       </footer>
     </main>

@@ -264,7 +264,7 @@ These are the ones worth writing down, because each owns a rule.
 | `MaskedValue` | Access codes | custom | Masked by default. **Fixed-width mask, reveal is a server action** — §9 |
 | `FactRow` / `FactGroup` | Label-over-value pairs in the facts card | custom | Four groups: Access, Services, Utility accounts, Average bill |
 | `EmptyState` | **Not in the prototype** | custom | Title, one line, one action. Every list needs one; see §10 |
-| `PlanGate` | Wraps a premium surface | custom | Reads `can(org, feature)` from props, never from the client ([#29](https://github.com/hbouwers/capexwise/issues/29)) |
+| `PlanGate` | Wraps a premium surface | custom | Reads `can(org, feature)` from props, never from the client ([#29](https://github.com/hbouwers/capexwise/issues/29)). **Server-only**: a locked org's `children` are never rendered, so they are in neither the HTML nor the RSC payload. No upgrade button until billing gives it somewhere to go |
 | `PremiumBadge` | The `PREMIUM` pip | `Badge` | Cosmetic. `PlanGate` does the gating; this only labels it |
 | `TaxDisclaimer` | The planning-aid-not-advice notice | custom | Required copy, not a nicety — PRD F4 and [#38](https://github.com/hbouwers/capexwise/issues/38). Persistent on every tax surface, not dismissible |
 
@@ -506,9 +506,10 @@ one line in `@theme`, which is why this is decided now rather than deferred agai
   the desktop value is not in question; what a form field does below 768px is a mobile decision the
   screen specs have to make, along with everything else the prototype's `min-width: 1240px` left
   undefined.
-- **`can(org, feature)` and the org switcher** —
-  [#29](https://github.com/hbouwers/capexwise/issues/29). `PlanGate` and `OrgSwitcher` are named
-  here and specified there.
+- ~~**`can(org, feature)` and the org switcher**~~ — settled by
+  [#29](https://github.com/hbouwers/capexwise/issues/29). `can()` is `src/lib/plan.ts` and gates
+  only the premium features, F7 and F8, because free and paid differ by capacity rather than by
+  feature (PRD §12). The switcher is in §4.
 - **Rent roll components.** PRD F1's monthly rent period and one-click Paid checkoff
   ([#48](https://github.com/hbouwers/capexwise/issues/48)) have no prototype equivalent at all —
   the prototype predates them. `RentRollTable`, `RentPeriodRow` and the checkoff belong to whoever
