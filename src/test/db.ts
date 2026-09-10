@@ -4,9 +4,9 @@
  *
  * This is one of the files ESLint allows to import `pg` and the driver directly,
  * and the reason is not convenience. Tests have to be able to see what the
- * application cannot: #27's cross-org isolation test proves that a scoped handle
- * hides another org's rows, and a test that can only see through the scoped
- * handle cannot tell "correctly hidden" from "never inserted". So the harness
+ * application cannot: #27's cross-org isolation test proves that one org's paths
+ * cannot reach another org's rows, and a test that can only see through those
+ * paths cannot tell "correctly hidden" from "never inserted". So the harness
  * holds the unscoped connection and the tests assert against it. `eslint.config.mjs`
  * names this file for that reason.
  *
