@@ -1,7 +1,7 @@
 # ADR-0006: Migrations — forward-only, and run outside the build
 
-**Status:** Proposed — accepted on merge of the PR that adds it
-**Date:** 2026-09-08
+**Status:** Accepted
+**Date:** 2026-09-08 (accepted 2026-09-09, when the migrate job landed)
 **Decided by:** Holden
 
 ## Context

@@ -208,6 +208,35 @@ to start the server if a server variable carries the prefix. There are no public
 | `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
 
+#### The database
+
+Managed Postgres is **Neon**, on AWS `us-east-1` (Washington, D.C.), reached through the Vercel
+marketplace integration so that the Vercel project and the database branches are wired together
+(#33). Local development does not use it at all — that is the compose container, and the two never
+talk.
+
+One Neon project, with a branch per environment: `production` backs the live Vercel deployment, and
+preview deployments get their own branch. "Production" here means the deployment that holds real
+data rather than the plan it runs on — through v0 and v0.5 that is the Vercel Hobby instance with
+the real portfolio in it, and at v1 the role moves to Cloud Run with [ADR-0002](docs/adr/0002-hosting.md)'s
+migration. The secret the migrate job reads follows the role, not the vendor, which is why it is
+named `PRODUCTION_DATABASE_URL` and why that move is a change of value rather than a change to
+[`ci.yml`](.github/workflows/ci.yml).
+
+The free plan is 0.5 GB of storage, 100 CU-hours, 10 branches and 5 GB of egress per project per
+month, and the compute scales to zero after five minutes idle, which cannot be turned off. Two of
+those bite long before storage does, and neither is about how much data there is:
+
+- **CU-hours.** 100 is about 400 hours at 0.25 CU, against roughly 730 in a month, which is
+  comfortable while the compute sleeps between sessions. At v0.5 the demo is a public URL, and
+  anything that polls it steadily keeps the compute awake. Exhausting the budget suspends the compute
+  **until the next billing period** — so the failure mode is the portfolio demo being dead when
+  somebody clicks the link, which is the one thing v0.5 exists to avoid.
+- **The ten-branch cap.** A branch per preview deployment plus `production` reaches ten quickly if
+  branches are not deleted when their pull request closes. Branch creation then fails, and what
+  fails with it is the preview, not anything loud. Confirm the integration's cleanup actually
+  happens (#32).
+
 **Every environment needs its own `BETTER_AUTH_SECRET`.** It signs session cookies and encrypts the
 OAuth tokens stored in `accounts`, so sharing one across environments means a session forged in
 preview is valid in production. Generate one with:
@@ -218,6 +247,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 `npm run db:migrate` validates a strict subset — `DATABASE_URL` and nothing else — so the CI job
 that applies migrations on a push to `main` never needs an auth secret or a Stripe key to run one.
+That job reads the production string from a repository secret named `PRODUCTION_DATABASE_URL` rather
+than from the table above, because nothing in this table belongs to CI: these are the variables the
+*application* reads, and "Applying migrations" below is where the credential CI holds is described.
 
 #### The Google OAuth client
 
@@ -433,8 +465,44 @@ by what they cover — the same rule the test suites are split by.
 | Build and run the image | Docker | `docker build`, then start the container and check it serves a page and its stylesheet as a non-root user |
 
 Each job pays its own checkout and `npm ci`; with the npm cache warm that costs less than
-serialising them would. Nothing here needs a secret — the Postgres credential is the committed
+serialising them would. None of the four needs a secret — the Postgres credential is the committed
 local one, and the `DATABASE_URL` the container job passes points at nothing on purpose.
+
+### Applying migrations
+
+A fifth job, **Apply migrations to production**, is not part of that gate. It runs only on a push
+to `main`, waits for the two jobs that can tell a migration is wrong before it is applied — the
+drift check and the integration suite — and then runs `npm run db:migrate` against production. This
+is the operational half of [ADR-0006](docs/adr/0006-migrations.md): migrations are applied by CI, on
+`main`, never in a build, never by the application at boot, never from a laptop.
+
+It takes the connection string from a repository secret named `PRODUCTION_DATABASE_URL`, and hands
+it to the runner as `DATABASE_URL`, which is the only variable `npm run db:migrate` validates. The
+two names are kept apart deliberately: there is no repository secret called `DATABASE_URL`, so no
+future job can pick one up and point at production by accident. This is the only real credential in
+the workflow.
+
+**That secret holds Neon's direct endpoint, not the pooled one** — the host without `-pooler` in it.
+The two are different values for the same database and the split is deliberate: the pooled endpoint
+is pgbouncer in transaction mode, which lends a connection out for one transaction and then hands it
+to someone else. That is what the application wants and what migrations do not — DDL and the
+migrator's bookkeeping want a real session. So the application's `DATABASE_URL` in Vercel is the
+pooled endpoint, and this job's is the direct one.
+
+Transaction-mode pooling is also why `app.current_org_id` is applied with `SET LOCAL` inside a
+transaction rather than session-level, which
+[ADR-0003](docs/adr/0003-multi-tenancy.md) requires and
+[`org-context.ts`](src/server/org-context.ts) implements. A session-level setting would outlive the
+request and be inherited by whoever got that pooled connection next, which is a cross-tenant read.
+
+It has its own concurrency group, `migrate-production`, with `cancel-in-progress: false`, so two
+pushes migrate one after another rather than at once — and the workflow-level group cancels
+superseded runs on pull requests only, because a cancel on `main` would arrive part-way through
+someone's DDL.
+
+Nothing checks that the secret is present. A missing `PRODUCTION_DATABASE_URL` fails the migration
+runner's environment validation and turns the run red, which is the right outcome for a release that
+would otherwise have quietly migrated nothing.
 
 Vercel builds every pull request too, and that check is not this workflow. It is the deploy
 preview, it builds without `output: "standalone"` ([#68](https://github.com/hbouwers/capexwise/issues/68)),

@@ -83,7 +83,10 @@ At v0.5, then, create one ruleset on `main`:
 - Require a pull request before merging
 - Require status checks to pass: **Types, lint and schema**, **Production build**,
   **Unit, integration and end-to-end**, **Build and run the image** — the four jobs in
-  [`ci.yml`](.github/workflows/ci.yml), by their display names
+  [`ci.yml`](.github/workflows/ci.yml) that gate a merge, by their display names.
+  **Not "Apply migrations to production."** That job runs only on a push to `main`, so it never
+  reports a status on a pull request — and a required check that never reports is a pull request
+  that can never be merged
 - Require branches to be up to date before merging
 - Require linear history
 - Block force pushes and deletions
