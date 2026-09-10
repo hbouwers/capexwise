@@ -34,7 +34,8 @@ for `git log`.
 - [ ] `/code-review` run — required for anything touching code, skipped for markdown-only
 - [ ] UI change → run the branch locally; screenshots only if a still shows something running it does not
 - [ ] Migration SQL read before committing — it is forward-only, there is no `down`
-- [ ] New table added → the cross-org isolation test extended to cover it (#27)
+- [ ] New table added → `src/server/cross-org-isolation.integration.test.ts` extended to cover
+      it: named in `ORG_OWNED`, seeded on both sides, and a probe for each path that reaches it
 - [ ] New environment variable → in `src/lib/env-schema.mts` _and_ `.env.example`, and no
       `NEXT_PUBLIC_` prefix on anything secret
 - [ ] Money handled as integer cents

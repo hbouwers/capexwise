@@ -169,9 +169,11 @@ before each test. It refuses to run against a database whose name does not end i
 - **A test whose failure would not change what anyone does is not worth writing.** Prefer one test
   of a real regression — `src/lib/cn.test.ts` is a bug that actually shipped — to ten that restate
   the implementation.
-- **One cross-org isolation test, extended per table** (#27). Any migration that adds a table
-  extends it — this is on the PR checklist. `src/test/db.ts` holds an unscoped connection so that
-  test can see the rows a scoped handle hides; that is the only reason it exists.
+- **One cross-org isolation test, extended per table** (#27):
+  `src/server/cross-org-isolation.integration.test.ts`. Any migration that adds a table extends
+  it — this is on the PR checklist, and the test itself fails until the new table is named in it.
+  `src/test/db.ts` holds an unscoped connection so that test can see the rows a scoped path hides;
+  that is the only reason it exists.
 - **Factories take an `orgId` as a required first argument**, never an optional one with a default.
   A factory that can invent an org is a way to write a test that passes with tenancy broken.
 - All three suites run in CI on every PR, in `.github/workflows/ci.yml`, alongside typecheck,
