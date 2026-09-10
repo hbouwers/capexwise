@@ -188,26 +188,43 @@ async function tablesReachableBy(role: string): Promise<string[]> {
   return rows.map((row) => row.relname);
 }
 
-/** The `using` and `with check` of every policy that names `role`, by table. */
-async function policiesFor(
-  role: string,
-): Promise<Record<string, { cmd: string; qual: string; withCheck: string }>> {
+type Policy = { cmd: string; qual: string | null; withCheck: string | null };
+
+/**
+ * Every permissive policy that applies to `role`, grouped by table.
+ *
+ * A list per table rather than one policy each, because permissive policies
+ * are OR'd together: a second one on the same table widens what the first
+ * allowed, so a check that kept only one of them could be passed by the
+ * policy that isolates while the other one leaks. `public` counts as well as
+ * the role itself — a policy `to public` applies to everybody. Restrictive
+ * policies are left out; they can only narrow what the permissive ones allow.
+ */
+async function policiesFor(role: string): Promise<Record<string, Policy[]>> {
   const { rows } = await testDb().execute<{
     tablename: string;
     cmd: string;
-    qual: string;
-    with_check: string;
+    qual: string | null;
+    with_check: string | null;
   }>(sql`
     select tablename, cmd, qual, with_check from pg_policies
-    where schemaname = 'public' and ${role} = any (roles)
+    where schemaname = 'public'
+      and permissive = 'PERMISSIVE'
+      and (${role}::name = any (roles) or 'public' = any (roles))
+    order by tablename, policyname
   `);
 
-  return Object.fromEntries(
-    rows.map((row) => [
-      row.tablename,
-      { cmd: row.cmd, qual: row.qual, withCheck: row.with_check },
-    ]),
-  );
+  const byTable: Record<string, Policy[]> = {};
+
+  for (const row of rows) {
+    (byTable[row.tablename] ??= []).push({
+      cmd: row.cmd,
+      qual: row.qual,
+      withCheck: row.with_check,
+    });
+  }
+
+  return byTable;
 }
 
 /**
@@ -638,7 +655,9 @@ describe("the registry", () => {
     // Asserted against the policy's text rather than merely its existence: a
     // policy of `using (true)` exists, is enabled, and isolates nothing. Both
     // halves, because `using` alone stops B's rows being read while still
-    // letting a scoped handle write one.
+    // letting a scoped handle write one. And exactly one: a second permissive
+    // policy — `for insert ... with check (true)`, say — is OR'd with this one
+    // and opens whatever it allows, whatever this one says.
     const policies = await policiesFor(SCOPED_ROLE);
 
     for (const [table, column] of Object.entries(ORG_OWNED)) {
@@ -646,9 +665,10 @@ describe("the registry", () => {
 
       expect(
         policies[table],
-        `${table} has no policy for ${SCOPED_ROLE} keyed on ${column} — ` +
-          "the template is in docs/data-model.md §9.",
-      ).toEqual({ cmd: "ALL", qual: expected, withCheck: expected });
+        `${table} should have exactly one permissive policy for ` +
+          `${SCOPED_ROLE}, keyed on ${column} — the template is in ` +
+          "docs/data-model.md §9.",
+      ).toEqual([{ cmd: "ALL", qual: expected, withCheck: expected }]);
     }
   });
 
@@ -665,6 +685,28 @@ describe("the registry", () => {
       `${SCOPED_ROLE} holds privileges on these tables and no policy limits ` +
         "which rows it sees.",
     ).toEqual([]);
+  });
+
+  it("grants neither role a privilege row-level security does not govern", async () => {
+    // Policies filter rows for select, insert, update and delete, and for
+    // nothing else. `truncate` empties a table without consulting a single
+    // policy, so a scoped role holding it on `memberships` could delete every
+    // org's rows in one statement while every test above stayed green.
+    // `references` and `trigger` are the other two privileges a policy does
+    // not see, and neither role has any use for them.
+    for (const role of [SCOPED_ROLE, IDENTITY_ROLE]) {
+      const { rows } = await testDb().execute<{ relname: string }>(sql`
+        select relname from pg_class
+        where relnamespace = 'public'::regnamespace and relkind = 'r'
+          and has_table_privilege(${role}::name, oid, 'truncate, references, trigger')
+        order by relname
+      `);
+
+      expect(
+        rows.map((row) => row.relname),
+        `${role} holds truncate, references or trigger on these tables.`,
+      ).toEqual([]);
+    }
   });
 
   it("confines the identity path to the tables that establish the boundary", async () => {
