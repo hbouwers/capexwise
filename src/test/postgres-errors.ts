@@ -26,6 +26,14 @@ export const RESTRICT_VIOLATION = "23001";
 export const CHECK_VIOLATION = "23514";
 
 /**
+ * The role may not do this. Postgres uses the one code for two refusals that
+ * row-level security tests care about alike: `permission denied for table`,
+ * where the role holds no grant for the statement at all, and `new row violates
+ * row-level security policy`, where a policy's `with check` rejected the row.
+ */
+export const INSUFFICIENT_PRIVILEGE = "42501";
+
+/**
  * Postgres error codes reach us through however many layers Drizzle wraps them
  * in, and that depth is a detail of the ORM version rather than something a test
  * should assert on. Walking the `cause` chain keeps these tests about Postgres.

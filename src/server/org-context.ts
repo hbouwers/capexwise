@@ -12,7 +12,7 @@
  * );
  * ```
  *
- * ## The two layers, and which one exists today
+ * ## The two layers
  *
  * ADR-0003 defends the boundary twice, and the two are meant to fail
  * independently:
@@ -20,29 +20,43 @@
  * 1. **The `where` clause you write.** Visible, reviewable, and the thing a
  *    developer reasons about. `db.orgId` is the value it filters on, and it came
  *    from a `memberships` join rather than from the request.
- * 2. **Row-level security**, keyed on the `app.current_org_id` setting that
- *    `db.run()` applies inside every transaction. It catches the query where
- *    layer 1 was forgotten, which is the failure the ADR says is invisible in
- *    review because correct and incorrect code look identical.
+ * 2. **Row-level security** (#28). Inside every `db.run()` transaction the
+ *    connection *becomes* `capexwise_scoped` and carries `app.current_org_id`,
+ *    and the policies in `drizzle/0006_row_level_security.sql` hand that role
+ *    one org's rows and nothing else. It catches the query where layer 1 was
+ *    forgotten, which is the failure the ADR says is invisible in review because
+ *    correct and incorrect code look identical.
  *
- * **Layer 2 is not switched on yet.** #28 writes the policies, and until it
- * lands `db.run()` sets a setting no policy reads. That is worth stating plainly
- * rather than leaving to be discovered: today a query that omits its `org_id`
- * filter returns every org's rows, and the only thing standing between here and
- * that is the clause you write. The pipe is laid now so that #28 is a migration
- * rather than a migration plus a rewrite of every call site.
+ * Write the `where` clause anyway. RLS turns a forgotten filter from a breach
+ * into a query that quietly returns only this org's rows — which is the right
+ * answer for a read and a surprising one for an `update` that meant to touch one
+ * row and touched every row this org owns. Layer 2 is what makes the mistake
+ * safe, not what makes it correct.
  *
- * **One thing #28 cannot simply apply the template to, and it is in this file.**
- * `resolveOrgForUser()` below is the query that *establishes* the context, so it
- * necessarily runs before there is a setting to filter by — the same
- * chicken-and-egg `docs/data-model.md` §2 describes for `users` and `sessions`,
- * one table further in. It reads `memberships` and `organizations`, and §9
- * prescribes a policy for both. Apply those policies to the role this query runs
- * as and `current_setting` is null, both policies filter everything out, the
- * function returns `null`, and every signed-in request raises
- * `NoOrganizationError`. It fails closed, which is the right direction, but it
- * fails closed for everybody. #28 has to decide what this read path runs as
- * before it enables anything; the issue carries the detail.
+ * ## Why the role switch, and not just the setting
+ *
+ * A policy only constrains a role it applies to, and the role the application
+ * logs in as is not one of those: it is the compose superuser locally, and on
+ * Neon it owns the tables — both of which Postgres lets past row-level security,
+ * one always and the other unless `FORCE` names it. ADR-0003 answers that with
+ * "the application runs as a separate restricted role", and this is where it
+ * does: `SET LOCAL ROLE`, scoped to the same transaction as the setting, so a
+ * scoped query is subject to the policies whatever `DATABASE_URL` logged in as,
+ * and nothing about the switch survives the commit. ADR-0007 has the rest,
+ * including why this is a role switch rather than a second connection string.
+ *
+ * ## The query that has to run before there is an org
+ *
+ * `resolveOrgForUser()` below *establishes* the context, so it necessarily runs
+ * before there is a setting to filter by — the same chicken-and-egg
+ * `docs/data-model.md` §2 describes for `users` and `sessions`, one table further
+ * in. It therefore does not run through a scoped handle. It runs on the
+ * identity path, as the login role, which the migration makes a member of
+ * `capexwise_identity`; that role's policies admit every row of `memberships`,
+ * `organizations` and `invitations` and no other org-owned table, which is the
+ * whole of the bypass and the reason it is a narrow one. Better Auth reads the
+ * same three tables the same way, for the same reason. §9 and ADR-0007 record
+ * the two alternatives that lost.
  *
  * ## Why this file, and not a `where` clause everyone remembers
  *
@@ -84,16 +98,27 @@ import { memberships, organizations } from "@/db/schema";
 import { requireSession } from "@/server/session";
 
 /**
- * The Postgres run-time setting #28's policies compare against, spelled once.
+ * The Postgres run-time setting the policies compare against, spelled once here
+ * and once in SQL.
  *
- * `docs/data-model.md` §9 writes the policy template against this exact string,
- * and a policy that reads `app.current_org` while this sets `app.current_org_id`
- * would not error — `current_setting(..., true)` returns null for a setting that
- * was never set, and a policy comparing against null filters *everything* out.
- * The failure would be every page rendering zero rows, which is a long way from
- * the typo that caused it. One constant, imported by both sides.
+ * The SQL spelling is inside `current_org_id()`, in
+ * `drizzle/0006_row_level_security.sql`, which every policy calls. A mismatch
+ * between the two would not error — `current_setting(..., true)` returns null
+ * for a setting that was never set, and a policy comparing against null filters
+ * *everything* out. The failure would be every page rendering zero rows, which
+ * is a long way from the typo that caused it, so
+ * `org-context.integration.test.ts` reads the setting back through that function
+ * to tie the two together.
  */
 export const ORG_ID_SETTING = "app.current_org_id";
+
+/**
+ * The role every scoped transaction runs as — created, granted and given its
+ * policies by `drizzle/0006_row_level_security.sql`. Spelled here and in SQL,
+ * and tied together the same way as `ORG_ID_SETTING`: a test asserts that
+ * `current_user` inside `run()` is this.
+ */
+export const SCOPED_ROLE = "capexwise_scoped";
 
 /** The transaction handle `db.run()` hands its callback. */
 export type OrgScopedTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -118,12 +143,13 @@ export type OrgRole = (typeof memberships.$inferSelect)["role"];
  * A database handle that knows which org it is for.
  *
  * Every call to `run()` is one transaction, and that is not incidental: the
- * `app.current_org_id` setting has to be applied with `SET LOCAL` so that it
- * ends with the statement rather than with the connection. ADR-0003 is blunt
- * about why — under transaction-mode pooling a session-level setting outlives
- * the request and is inherited by whichever request gets that connection next,
- * which is the exact breach this layer exists to prevent. A transaction is what
- * gives `SET LOCAL` a scope to be local to.
+ * role and the `app.current_org_id` setting both have to be applied with `SET
+ * LOCAL` so that they end with the transaction rather than with the connection.
+ * ADR-0003 is blunt about why — under transaction-mode pooling a session-level
+ * setting outlives the request and is inherited by whichever request gets that
+ * connection next, which is the exact breach this layer exists to prevent. A
+ * transaction is what gives `SET LOCAL` a scope to be local to, and Neon's pooled
+ * endpoint, which Vercel serves through, is pgbouncer in exactly that mode.
  *
  * The cost is a `BEGIN`/`COMMIT` around single-statement reads. That is accepted
  * rather than optimised around, because the alternative — a fast path without
@@ -135,9 +161,9 @@ export type OrgScopedDb = {
   readonly orgId: string;
 
   /**
-   * Runs `work` in one transaction with `app.current_org_id` set to `orgId`.
-   * Whatever `work` returns is what this returns; a throw rolls the whole
-   * transaction back.
+   * Runs `work` in one transaction, as `capexwise_scoped`, with
+   * `app.current_org_id` set to `orgId`. Whatever `work` returns is what this
+   * returns; a throw rolls the whole transaction back.
    */
   run<T>(work: (tx: OrgScopedTx) => Promise<T>): Promise<T>;
 };
@@ -275,27 +301,41 @@ export function forOrg(orgId: string): OrgScopedDb {
         // `set_config(name, value, true)` is `SET LOCAL` in a form that takes
         // the value as a parameter — `SET LOCAL` itself does not, and building
         // the statement by interpolation would put an id into SQL text on every
-        // request. The `true` is the entire safety property of this line: pass
-        // `false` and the setting becomes session-level, survives the commit and
-        // is inherited by the next request handed this pooled connection.
-        // `org-context.integration.test.ts` is what holds that argument in
-        // place, because nothing else would notice it change.
-        const applied = await tx.execute<{ set_config: string | null }>(
-          sql`select set_config(${ORG_ID_SETTING}, ${orgId}, true)`,
+        // request. `role` is a setting like any other as far as `set_config` is
+        // concerned, and switching it is `SET LOCAL ROLE` with the same
+        // permission check. One statement for both, so the switch costs no
+        // round trip of its own.
+        //
+        // The `true` is the entire safety property of this line, twice over:
+        // pass `false` and the role and the org both become session-level,
+        // survive the commit and are inherited by the next request handed this
+        // pooled connection. `org-context.integration.test.ts` is what holds
+        // those arguments in place, because nothing else would notice them
+        // change.
+        const applied = await tx.execute<{
+          role: string | null;
+          org_id: string | null;
+        }>(
+          sql`select set_config('role', ${SCOPED_ROLE}, true) as role,
+                     set_config(${ORG_ID_SETTING}, ${orgId}, true) as org_id`,
         );
 
-        // ADR-0003 asks this helper to assert the setting took, and
+        // ADR-0003 asks this helper to assert the context took, and
         // `docs/data-model.md` §9 gives the reason: a policy comparing against
         // an unset setting filters everything out rather than raising, so the
         // symptom of a context that never applied is a page rendering zero
         // buildings. That is a terrible way to learn about it. `set_config`
         // returns what it set, so the check costs the comparison and nothing
-        // else.
-        if (applied.rows[0]?.set_config !== orgId) {
+        // else. A login role that may not become the scoped one never gets
+        // this far — the switch raises `permission denied to set role`.
+        const [row] = applied.rows;
+
+        if (row?.role !== SCOPED_ROLE || row.org_id !== orgId) {
           throw new Error(
-            `Failed to apply ${ORG_ID_SETTING} for the transaction. Every ` +
-              `row-level security policy compares against it, and an unset ` +
-              `setting filters silently rather than raising — so this stops ` +
+            `Failed to apply ${SCOPED_ROLE} and ${ORG_ID_SETTING} for the ` +
+              `transaction. Every row-level security policy is written for that ` +
+              `role and compares against that setting, and a context that did ` +
+              `not apply filters silently rather than raising — so this stops ` +
               `here instead of returning an empty result that looks like data.`,
           );
         }

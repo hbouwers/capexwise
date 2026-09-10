@@ -21,13 +21,14 @@
  * - **`getOrgContext()`**, where every domain query will start. It takes no
  *   arguments, so a route param or a body cannot reach it by construction; what
  *   can is the request's headers and the session they carry.
- *
- * What is *not* here is the case ADR-0003 worries about most: a domain query
- * that forgot its `org_id` filter. No domain table exists yet, and until #28's
- * policies do, nothing would stop that query — `src/server/org-context.ts` says
- * so plainly. #28 adds that case here, over every table in `ORG_OWNED`, by
- * running unfiltered reads and writes through `forOrg()` and asserting B's rows
- * stay out of reach.
+ * - **A domain query that forgot its `org_id` filter**, the case ADR-0003
+ *   worries about most because correct and incorrect code look identical. The
+ *   last block runs unfiltered reads, updates and deletes through a real scoped
+ *   handle over every table in `ORG_OWNED`, and nothing in that SQL says which
+ *   org it is for — so every one of B's rows it cannot reach is row-level
+ *   security (#28) keeping it out. The registry checks the same layer from the
+ *   catalog's side: every org-owned table forced, a scoped policy keyed on its
+ *   org column, and neither database role reaching a table it should not.
  *
  * ## How a probe is judged
  *
@@ -61,7 +62,10 @@
  *
  * 1. Name it in `ORG_OWNED`, with the column that says which org a row belongs
  *    to, or in `OUTSIDE_THE_BOUNDARY` with the reason it has none. The first test
- *    fails until one of them does.
+ *    fails until one of them does, and the row-level security tests in the
+ *    registry fail until an org-owned table is forced and has its policy —
+ *    `docs/data-model.md` §9 has the template. The unfiltered-query block at the
+ *    bottom then covers it without being told.
  * 2. Seed a row on each side in `seedTwoOrgs()`. The third test fails until both
  *    sides have one.
  * 3. Add a probe for each path that reads or writes it — a query in
@@ -79,6 +83,11 @@ import {
   createOrganization,
   createUser,
 } from "@/test/factories";
+import {
+  INSUFFICIENT_PRIVILEGE,
+  postgresErrorCode,
+  rejectsWith,
+} from "@/test/postgres-errors";
 
 /**
  * What `headers()` hands `getOrgContext()`. Next.js supplies it from the request
@@ -796,3 +805,117 @@ describe("getOrgContext", () => {
     expect(context.db.orgId).toBe(b.org.id);
   });
 });
+
+/**
+ * A scoped handle for the owner of `side`'s org, reached the way every domain
+ * query will reach one: a signed session, then `getOrgContext()`. Not
+ * `forOrg()`, which ESLint keeps out of this file for the reason
+ * `eslint.config.mjs` gives — and the real path is the one worth proving anyway.
+ */
+async function scopedHandleFor(side: Side) {
+  const caller = await signIn(side.owner.id);
+  request.headers = new Headers({ cookie: caller.cookie });
+
+  const { db } = await getOrgContext();
+
+  return db;
+}
+
+/**
+ * ADR-0003's worst case: a query that forgot its `org_id` filter. Nothing in the
+ * SQL below says which org it is for, so every row it cannot reach is one
+ * row-level security kept out of reach — which is the claim #28 exists to make
+ * true. Each statement runs as org A's owner, the most privileged role an org
+ * has, so a refusal is the database's and never the application's.
+ *
+ * Over every table in `ORG_OWNED`, so a table added there is covered here the
+ * day it lands.
+ */
+describe.each(Object.entries(ORG_OWNED))(
+  "%s, through a scoped handle with no org filter",
+  (table, column) => {
+    const target = sql.identifier(table);
+    const owner = sql.identifier(column);
+
+    it("reads only the scoped org's rows", async () => {
+      const { a } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+
+      const { rows } = await db.run((tx) =>
+        tx.execute<{ owner: string }>(
+          sql`select ${owner}::text as owner from ${target}`,
+        ),
+      );
+
+      // Every one of A's rows, not merely none of B's: a policy that filtered
+      // everything out would pass the second half on its own.
+      const owned = (await rowsOwnedBy(a.org.id))[table] ?? [];
+
+      expect(rows).toHaveLength(owned.length);
+      expect(rows.filter((row) => row.owner !== a.org.id)).toEqual([]);
+    });
+
+    it("updates only the scoped org's rows", async () => {
+      const { a, b } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+      const before = await rowsOwnedBy(b.org.id);
+
+      // A no-op assignment, so the rows `returning` reports are exactly the
+      // rows the update's scan could reach — which is the question. A real
+      // change would be caught by the snapshot below too, but a no-op leaves
+      // `updated_at` alone and the snapshot blind, so `returning` is the proof.
+      const { rows } = await db.run((tx) =>
+        tx.execute<{ owner: string }>(
+          sql`update ${target} set ${owner} = ${owner}
+              returning ${owner}::text as owner`,
+        ),
+      );
+
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.filter((row) => row.owner !== a.org.id)).toEqual([]);
+      expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    });
+
+    it("deletes only the scoped org's rows, or is refused outright", async () => {
+      const { a, b } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+      const before = await rowsOwnedBy(b.org.id);
+
+      // Two acceptable outcomes, and which one a table gets is the migration's
+      // decision rather than this test's: `organizations` has no DELETE grant
+      // for the scoped role — an org is soft-deleted, and the purge is not a
+      // request — so it is refused before any row is considered. The others
+      // may delete, and must delete only A's.
+      const outcome = await db
+        .run((tx) =>
+          tx.execute<{ owner: string }>(
+            sql`delete from ${target} returning ${owner}::text as owner`,
+          ),
+        )
+        .then(
+          ({ rows }) => rows.filter((row) => row.owner !== a.org.id),
+          (error: unknown) => postgresErrorCode(error),
+        );
+
+      expect([[], INSUFFICIENT_PRIVILEGE]).toContainEqual(outcome);
+      expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    });
+
+    it("cannot move one of its rows into another org", async () => {
+      // The write `with check` exists for. `using` alone would keep B's rows
+      // out of sight and still let a scoped handle hand one of its own to B —
+      // or, by the same clause, write a new row there.
+      const { a, b } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+      const before = await rowsOwnedBy(b.org.id);
+
+      await expect(
+        db.run((tx) =>
+          tx.execute(sql`update ${target} set ${owner} = ${b.org.id}`),
+        ),
+      ).rejects.toSatisfy(rejectsWith(INSUFFICIENT_PRIVILEGE));
+
+      expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    });
+  },
+);
