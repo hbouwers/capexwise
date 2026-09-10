@@ -18,9 +18,9 @@ protects against someone walking off with a drive. The copies this project actua
 logical ones, and disk encryption does nothing for them:
 
 - **A Neon preview branch**, created for every pull request. A Neon branch is a copy-on-write child
-  of its parent, rows included, and the Vercel integration's default parent is the project's
-  default branch, which here is `production`. The repository does not record whether #33 changed
-  that default. If it did not, every preview holds production's rows.
+  of its parent, rows included, and the Vercel integration creates each one from the project's
+  default branch. Here that is `main`, which is production's own branch, so every preview holds
+  production's rows.
 - **A dump or a backup restore** (#35).
 - **The Neon console's SQL editor**, open to whoever holds the account.
 - **A log line.** Drizzle 0.45's `DrizzleQueryError` has the message
@@ -69,11 +69,11 @@ secret, all at once.
 | Preview | Vercel, Preview scope, with its own value |
 | Production | Vercel, Production scope, marked Sensitive. **The master copy is in the password manager**, because Vercel will not show a Sensitive value again |
 
-Preview's key being its own is the point, not a formality. If a preview branch holds production's
-rows, a preview deployment holding production's key could reveal every production code from a URL
+Preview's key being its own is the point, not a formality. Every preview branch holds production's
+rows, so a preview deployment holding production's key could reveal every production code from a URL
 that exists for code review. With its own key, the reveal fails with the error that names this case.
-If previews branch from somewhere else, separate keys cost nothing, so the rule does not wait on the
-answer.
+If previews are ever branched from something else, separate keys still cost nothing, so the rule
+stays.
 Version numbers restart in every environment, so preview's version 1 and production's version 1 are
 different keys.
 
