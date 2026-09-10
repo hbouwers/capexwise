@@ -43,6 +43,13 @@
       "when": 1788983567117,
       "tag": "0005_provider_updated_at_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789047781707,
+      "tag": "0006_row_level_security",
+      "breakpoints": true
     }
   ]
 }
