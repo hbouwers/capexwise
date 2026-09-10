@@ -2,8 +2,8 @@
 # in one workflow rather than several, so a pull request shows one story instead
 # of a scoreboard.
 #
-# Four jobs, running in parallel, split by what they need rather than by what
-# they cover — the same rule the test suites are split by:
+# Four jobs gate a merge, running in parallel, split by what they need rather
+# than by what they cover — the same rule the test suites are split by:
 #
 #   checks      nothing        types, lint, formatting, migration drift
 #   build       nothing        `next build`
@@ -15,6 +15,12 @@
 # that is around twenty seconds, which is less than serialising them would cost.
 # Within a job the steps run cheapest first, so the fastest failure is the one
 # you see.
+#
+# A fifth job, `migrate`, is not part of that gate and does not run on a pull
+# request at all: on a push to `main` it applies the committed migrations to
+# production, which is ADR-0006's deploy step. It waits on two of the four, holds
+# the only real credential in this file, and is the only job here that touches
+# anything outside its own runner.
 #
 # This replaces the standalone `test.yml` and `container.yml`, which each said in
 # their own header that #22 would fold them in. Their job names are carried over
@@ -29,9 +35,17 @@ on:
 
 # One run per branch. A push that supersedes an in-flight run cancels it rather
 # than queueing behind it.
+#
+# On `main` it does not, and that exception is load-bearing rather than cautious:
+# the `migrate` job below applies migrations to production, and a cancel arrives
+# as a SIGKILL to whatever is running — which on an unlucky push is a connection
+# dropped part-way through a migration. Its own concurrency group cannot help,
+# because a cancellation here cancels the whole run and every job in it. So
+# superseding only applies to pull requests, where the worst a redundant run
+# costs is a runner minute.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -334,3 +348,119 @@ jobs:
           fi
 
           docker rm -f capexwise-ci
+
+  # The deploy step, and the operational half of ADR-0006: migrations are applied
+  # here, by CI, on a push to `main`. Never in `next build` — a preview build
+  # would migrate whichever database its environment pointed at, and a build is
+  # cached, skippable and concurrent, so "exactly once per release" is not a
+  # property it has. Never by the application at boot either, where a serverless
+  # cold start turns a failed migration into a 500 for a user instead of a red
+  # pipeline. And never from a laptop, which is the point of the credential living
+  # only here.
+  #
+  # It does not order itself against the Vercel deployment, and cannot: Vercel
+  # starts its build when the push lands, so the two overlap by construction.
+  # ADR-0006 makes the ordering not matter instead — every migration is
+  # compatible with the release already running, expand then contract, which is
+  # also the only thing that keeps instant rollback usable.
+  migrate:
+    name: Apply migrations to production
+    # Pushes to `main`, and nothing else. The workflow runs on every pull request
+    # too, where this must not: a branch is not a release, and a job that can
+    # write to production has no business running on code that has not been
+    # merged.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # The one job here that waits, and the one place in this workflow where wall
+    # clock is the wrong thing to optimise for. These two are exactly the jobs
+    # that can say a migration is wrong *before* it is applied: `db:drift` proves
+    # the committed SQL still describes the schema the code expects, and the
+    # integration suite applies every migration to an empty database and then
+    # checks the constraints, defaults and triggers that came out of it. ADR-0006
+    # is forward-only, so a migration applied in error is not undone by reverting
+    # the commit — which makes a few minutes of waiting the cheapest insurance in
+    # the file.
+    #
+    # `build` and `container` are deliberately not here. Neither says anything
+    # about the schema, and a broken image is a deploy that does not go out —
+    # which expand-then-contract already makes safe to be ahead of.
+    needs: [checks, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # What scopes the credential, and the reason it is not a repository secret.
+    # A repository secret is readable by every run in the repository, and the
+    # workflow a run executes is the one from its own head commit — so a branch
+    # that adds a step echoing the value gets it printed on the pull request run,
+    # before anyone reviews the workflow change. The `if:` above governs where the
+    # credential is *used*; only an environment governs where it can be *read*.
+    # That is cheap insurance now and load-bearing at v0.5, when the repository
+    # and its retained logs go public.
+    #
+    # `PRODUCTION_DATABASE_URL` therefore lives in this environment rather than in
+    # Settings → Secrets and variables → Actions, and the environment carries a
+    # deployment branch rule for `main`. No other job can name it, because no
+    # other job has any business holding it.
+    environment: production
+
+    # A lock on the production database, separate from the workflow-level group
+    # because it is protecting a different thing. That group is keyed on the ref
+    # and would serialise these anyway, but it cancels; this one queues.
+    # `cancel-in-progress: false` lets a run that has started applying SQL finish
+    # before the next one connects, which is the whole reason this job wants a
+    # group of its own. The name is a constant rather than an expression for the
+    # same reason: what is being protected is one database, not one branch.
+    #
+    # Two pushes in quick succession therefore migrate in order. A third arriving
+    # while the second is still pending displaces it, and that is correct here —
+    # migrations are forward-only and cumulative, so the newer commit's `drizzle/`
+    # contains everything the displaced one would have applied.
+    concurrency:
+      group: migrate-production
+      cancel-in-progress: false
+
+    env:
+      # `PRODUCTION_DATABASE_URL` from the `production` environment above,
+      # `DATABASE_URL` to the process, because that is the name
+      # `migrationEnvSchema` validates. The two names are kept apart on purpose:
+      # nothing is called `DATABASE_URL` at the repository level, so there is no
+      # ambient secret that a future job could pick up and point at production by
+      # accident.
+      #
+      # This is the only real credential in this workflow. Every other value in
+      # it — the Postgres password, the auth secret, the Google client — is a
+      # committed throwaway that guards nothing, and each says so where it is set.
+      #
+      # **It is Neon's direct endpoint, not the pooled one** — the host without
+      # `-pooler` in it. Neon's pooled endpoint is pgbouncer in transaction mode,
+      # which lends a connection out for the length of one transaction and then
+      # gives it to somebody else; the application wants that and migrations do
+      # not. DDL and the migrator's own bookkeeping want a real session. The
+      # application's `DATABASE_URL`, set in Vercel, is the pooled one, and the
+      # two are deliberately different values for the same database (#33).
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `drizzle/` in journal order, forward only, over a single connection the
+      # runner opens itself — not the application's pool, which is a shape
+      # decision now and a requirement once #28 turns on `FORCE ROW LEVEL
+      # SECURITY` and the migrating role stops being the application's.
+      #
+      # Nothing here checks that the credential is present, deliberately. A
+      # missing `PRODUCTION_DATABASE_URL` fails `migrationEnvSchema` and turns the
+      # run red, which is what a release that quietly migrated nothing deserves.
+      #
+      # The runner logs the host and database it connected to and never the
+      # connection string, which matters more here than anywhere else: this log is
+      # readable by anyone who can read the repository, and it is retained.
+      - name: Apply migrations
+        run: npm run db:migrate

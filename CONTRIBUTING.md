@@ -83,7 +83,12 @@ At v0.5, then, create one ruleset on `main`:
 - Require a pull request before merging
 - Require status checks to pass: **Types, lint and schema**, **Production build**,
   **Unit, integration and end-to-end**, **Build and run the image** — the four jobs in
-  [`ci.yml`](.github/workflows/ci.yml), by their display names
+  [`ci.yml`](.github/workflows/ci.yml) that gate a merge, by their display names.
+  **Not "Apply migrations to production."** That job's `if:` skips it on a pull request, which
+  reports a check run with conclusion `skipped`. GitHub counts a skipped check as satisfying a
+  required one, so listing it would not block a merge — it would be worse than that. A green tick
+  beside it would mean "did not run", which is indistinguishable at a glance from "migrations are
+  fine". A required check should assert something, and on a pull request this one asserts nothing
 - Require branches to be up to date before merging
 - Require linear history
 - Block force pushes and deletions
