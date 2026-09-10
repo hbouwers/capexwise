@@ -168,7 +168,9 @@ Two limits are worth stating plainly:
 **The hardening step, deliberately not taken here, and taken in #81.** The application has a
 login role of its own in production, `capexwise_app`: `LOGIN`, not the owner, no `BYPASSRLS`,
 granted `capexwise_identity` with `INHERIT` and `capexwise_scoped` with `SET` only — exactly what
-`capexwise_test_app` is. Vercel's production `DATABASE_URL` names it, on the pooled endpoint.
+`capexwise_test_app` is. Vercel's production `DATABASE_URL` names it, on the pooled endpoint, and is
+set by hand rather than by the Neon integration, which connects only as the owner; the integration
+supplies Preview and Development and nothing else.
 `PRODUCTION_DATABASE_URL` stays on the owner and the direct endpoint, because migrations need DDL.
 It was created with SQL rather than in the Neon console: the console adds the roles it creates to
 Neon's own administrative group, while a role created with SQL holds only what it is granted. No
