@@ -238,11 +238,12 @@ those bite long before storage does, and neither is about how much data there is
   **until the next billing period** — so the failure mode is the portfolio demo being dead when
   somebody clicks the link, which is the one thing v0.5 exists to avoid.
 - **The ten-branch cap.** A branch per pull request plus `main` reaches ten quickly, and the
-  integration does not delete them when a pull request closes. It deletes a preview branch only
-  when Vercel deletes the last deployment for that git branch, and Vercel keeps preview deployments
-  for months and always keeps the project's last ten. Branch creation then fails, and what fails
-  with it is the preview, not anything loud. Until something deletes them on close (#32), delete
-  merged pull requests' branches in the Neon console.
+  integration does not delete a branch when its pull request closes. It deletes a preview branch
+  only when Vercel deletes the last deployment for that git branch, and Vercel keeps preview
+  deployments for months and always keeps the project's ten most recent. When the cap is reached,
+  branch creation fails, and the preview fails with it, with no alert anywhere. So
+  [`neon-preview-cleanup.yml`](.github/workflows/neon-preview-cleanup.yml) deletes the branch when
+  its pull request closes. See "Continuous integration" below.
 
 **Row-level security depends on which role `DATABASE_URL` logs in as**
 ([ADR-0007](docs/adr/0007-database-roles.md)), so in production the application and CI log in as
@@ -578,8 +579,36 @@ Vercel builds every pull request too, and that check is not this workflow. It is
 preview, it builds without `output: "standalone"` ([#68](https://github.com/hbouwers/capexwise/issues/68)),
 and it goes away with the move to Cloud Run — which is exactly why the container job exists.
 
-[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) is the one other workflow, and it
-is not part of that gate — it reports to the Security tab. Code scanning needs GitHub Advanced
+### Deleting preview branches
+
+[`.github/workflows/neon-preview-cleanup.yml`](.github/workflows/neon-preview-cleanup.yml) runs
+when a pull request closes, merged or not, and deletes that pull request's Neon branch,
+`preview/<git branch>`. The Neon integration would otherwise leave the branch until Vercel expires
+the preview deployment, which is months away ([#87](https://github.com/hbouwers/capexwise/issues/87)).
+A pull request with no branch is a green run with nothing to delete. The workflow is not part of
+the merge gate, and it cannot be tested on the pull request that changes it: it runs from `main`,
+so the first run of any change to it is that pull request's own merge.
+
+**The Neon API key lives in a GitHub environment named `neon-previews`**, for the reason the
+`production` environment exists: an environment's secrets are readable only by jobs that name it,
+and only from `main`. The key can do anything to the Neon project, `main` included, so it is as
+sensitive as production's database credential. Setting it up, once:
+
+1. In Neon, create an API key. Make it scoped to this project if the console offers that, and name
+   it for this job.
+2. In GitHub, go to Settings → Environments → **New environment** and name it `neon-previews`.
+3. Add a deployment branch rule limiting it to `main`.
+4. Add `NEON_API_KEY` under **Environment secrets**.
+5. Add `NEON_PROJECT_ID` under **Environment variables**. It is the id on the Neon project's
+   Settings page. It is not secret, and it sits beside the key so that the whole setup is in one
+   place.
+
+Until both are set, the job fails on every closed pull request, naming them.
+
+### Code scanning
+
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) is not part of the merge gate
+either. It reports to the Security tab. Code scanning needs GitHub Advanced
 Security on a private repository and is free on a public one, so the job guards itself on
 repository visibility: it skips on every run today and starts analysing by itself on the commit
 that makes the repository public at v0.5. [`CONTRIBUTING.md`](./CONTRIBUTING.md) lists what else
