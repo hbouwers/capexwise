@@ -831,7 +831,8 @@ create policy buildings_org_isolation on buildings
   else.
 - `FORCE` because Postgres exempts a table's owner from its own policies, and without it RLS is
   enabled, reports itself as enabled, and does nothing for a connection that logged in as the
-  owner — which on Neon is the application's own login.
+  owner — which on Neon is what CI migrates as and what every preview deployment logs in as.
+  Production's application login is not the owner (#81); the rule does not depend on that.
 - `WITH CHECK` as well as `USING`, or the policy stops reads from other orgs while still permitting
   a write that *creates* a row in one, or moves one there.
 - `current_org_id()` rather than `current_setting('app.current_org_id', true)::uuid` written out.

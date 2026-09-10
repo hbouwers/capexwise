@@ -81,7 +81,8 @@ rather than a rewrite.
 
 *#28 met this with a role switch rather than a second login — every scoped transaction runs as a
 role the policies apply to, whatever it connected as — and left the second connection string as a
-hardening step. [ADR-0007](0007-database-roles.md) is that decision.*
+hardening step. [ADR-0007](0007-database-roles.md) is that decision, and #81 took the step: in
+production the application logs in as a role of its own and leaves the owner to this runner.*
 
 ## Alternatives considered
 

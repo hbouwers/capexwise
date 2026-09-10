@@ -5,12 +5,11 @@
  * It opens its own single connection rather than importing the application's
  * client, and that is deliberate on two counts. A migration run is one session
  * doing DDL serially, so a pool is the wrong shape for it — and the role that
- * owns the tables is not necessarily the role the application connects as.
- * Today it is the same role on Neon, and ADR-0007 says why that is safe with
- * row-level security on: every scoped transaction switches to `capexwise_scoped`
- * whatever it logged in as. Giving the application a login of its own is the
- * hardening step that ADR describes, and keeping this connection separate is
- * what makes it a change of connection string rather than a rewrite.
+ * owns the tables is not the role the application connects as. In production
+ * this logs in as the owner and the application as `capexwise_app`, a login
+ * with no grant on any domain table (ADR-0007, #81). Keeping this connection
+ * separate from the start is what made that a change of connection string
+ * rather than a rewrite.
  *
  * Forward-only. There is no `down`, by decision — see ADR-0006.
  *

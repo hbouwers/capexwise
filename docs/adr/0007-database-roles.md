@@ -61,9 +61,11 @@ Three kinds of code reach the database, and they need different things:
 - **The login role is a member of both, in different ways.** `SET` on `capexwise_scoped` without
   `INHERIT`, so it can become the scoped role but does not carry the scoped role's policies around;
   `INHERIT` on `capexwise_identity`, so the identity path's policies apply to it directly. The
-  migration grants both to the role that runs it, which is the login role in every environment
-  today. On Neon the second grant is what keeps sign-in working at all: an owner under `FORCE` with
-  no policy that applies to it sees no rows.
+  migration grants both to the role that runs it. When this was decided, that was the login role in
+  every environment, and on Neon the second grant was what kept sign-in working at all: an owner
+  under `FORCE` with no policy that applies to it sees no rows. Production has since given the
+  application a login of its own holding the same two memberships — the hardening step under
+  Consequences, taken in #81.
 - **`resolveOrgForUser()` runs on the identity path**, not through a scoped handle — the first of
   the three shapes #28 was asked to choose between. Its join is still the thing that decides which
   org a session may act in; the policy that lets it read `memberships` is the same one that lets
@@ -150,24 +152,31 @@ spelled once in TypeScript and once in SQL, and tests tie each pair together.
 
 Two limits are worth stating plainly:
 
-- **The unscoped client is only as restricted as the login role.** Until the hardening step, that
-  is the table owner on Neon. Under `FORCE` with no applicable policy, the owner reads no domain
-  rows — unless the provider has given it `BYPASSRLS`, in which case it reads all of them. ESLint's
-  rule on `@/db/client` is the guard there, as it was before this ADR.
+- **The unscoped client is only as restricted as the login role.** In production that is
+  `capexwise_app`, which holds no grant on any domain table, so the unscoped client there gets
+  `permission denied` rather than rows. Everywhere else the login is still past the policies: the
+  compose superuser in local development and the end-to-end suite, and the Neon owner in preview
+  deployments, which reads no domain rows under `FORCE` unless the provider has given it
+  `BYPASSRLS`, and then reads all of them. ESLint's rule on `@/db/client` is the guard in those
+  environments, as it was before this ADR. The integration suite runs as `capexwise_test_app`
+  precisely so that the restricted shape is the one under test.
 - **`RESET ROLE` inside a scoped transaction returns to the login role.** The role switch defends
   against a forgotten `where` clause, which is the failure ADR-0003 is about. It does not defend
   against code that deliberately undoes the switch. That is what ESLint's rules on `forOrg` and the
   raw client, and review, are for.
 
-**The hardening step, deliberately not taken here.** Give the application a login role of its
-own: `LOGIN`, not the owner, no `BYPASSRLS`, granted `capexwise_identity` with `INHERIT` and
-`capexwise_scoped` with `SET` only — exactly what `capexwise_test_app` is. Point Vercel's
-`DATABASE_URL` at it and leave `PRODUCTION_DATABASE_URL` on the owner. On Neon, create it with SQL
-rather than in the console: the console adds the roles it creates to Neon's own administrative
-group, while a role created with SQL holds only what it is granted. No code changes. After it, the
-unscoped client cannot read a domain table in any environment. It should land before the first
-paying customer, which is the deadline ADR-0003 set for this layer, and before the first domain
-table ships if that comes sooner.
+**The hardening step, deliberately not taken here, and taken in #81.** The application has a
+login role of its own in production, `capexwise_app`: `LOGIN`, not the owner, no `BYPASSRLS`,
+granted `capexwise_identity` with `INHERIT` and `capexwise_scoped` with `SET` only — exactly what
+`capexwise_test_app` is. Vercel's production `DATABASE_URL` names it, on the pooled endpoint, and is
+set by hand rather than by the Neon integration, which connects only as the owner; the integration
+supplies Preview and Development and nothing else.
+`PRODUCTION_DATABASE_URL` stays on the owner and the direct endpoint, because migrations need DDL.
+It was created with SQL rather than in the Neon console: the console adds the roles it creates to
+Neon's own administrative group, while a role created with SQL holds only what it is granted. No
+code changed. The deadline was the first paying customer, which ADR-0003 set for this layer, or the
+first domain table if that came sooner, and it landed before either. Previews stay on the owner,
+for the reason the README gives under "The database".
 
 **Roles are server-level, and no migration drops them.** Both are created only if absent, because
 the integration suite migrates a second database on the same server. A role that holds privileges

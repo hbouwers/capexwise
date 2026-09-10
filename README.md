@@ -205,7 +205,7 @@ to start the server if a server variable carries the prefix. There are no public
 
 | Variable | Local | Preview | Production |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | `.env.local`, pointing at the compose database | Vercel project environment, Preview scope — a database separate from production's, settled in [#33](https://github.com/hbouwers/capexwise/issues/33) | Vercel project environment, Production scope, from the managed instance ([#32](https://github.com/hbouwers/capexwise/issues/32), [#33](https://github.com/hbouwers/capexwise/issues/33)) |
+| `DATABASE_URL` | `.env.local`, pointing at the compose database | Written by the Neon integration for each preview deployment — a branch of its own, separate from production's, settled in [#33](https://github.com/hbouwers/capexwise/issues/33) | Vercel project environment, Production scope, **set by hand and Sensitive** — not the integration's: the managed instance's pooled endpoint, logged in as `capexwise_app` ([#33](https://github.com/hbouwers/capexwise/issues/33), [#81](https://github.com/hbouwers/capexwise/issues/81)) |
 | `APP_URL` | `http://localhost:3000` | **Per deployment.** A preview hostname is generated, so this cannot be set once at the project level ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
 | `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
@@ -240,11 +240,36 @@ those bite long before storage does, and neither is about how much data there is
   happens (#32).
 
 **Row-level security depends on which role `DATABASE_URL` logs in as**
-([ADR-0007](docs/adr/0007-database-roles.md)). The migration that turns it on grants its two roles
-to the role that runs it, and sign-in works only for a login that holds one of them — so on Neon
-the application's `DATABASE_URL` and CI's `PRODUCTION_DATABASE_URL` differ in host (pooled against
-direct) and never in user. Giving the application a login of its own is the hardening step that ADR
-describes: a Neon role and a Vercel variable, and no code.
+([ADR-0007](docs/adr/0007-database-roles.md)), so in production the application and CI log in as
+**different users, on purpose**. Vercel's `DATABASE_URL` names `capexwise_app` on the pooled
+endpoint: not the owner, no `BYPASSRLS`, and holding only the two roles the policies are written
+for, so the unscoped client gets `permission denied` on every domain table whatever Neon does with
+the owner. CI's `PRODUCTION_DATABASE_URL` names the owner on the direct endpoint, because migrations
+need DDL. Pointing Vercel at the owner would not fail loudly — the migration grants the owner the
+identity role as well, so sign-in keeps working — which is exactly why the difference is written
+down here.
+
+`capexwise_app` was created with SQL on the `production` branch rather than in the Neon console,
+which adds the roles it creates to Neon's own administrative group
+([#81](https://github.com/hbouwers/capexwise/issues/81) has the statements).
+
+**The Neon integration does not supply production's `DATABASE_URL`.** It connects only as the owner
+and has no setting for the role, so its connection to the Vercel project covers Preview and
+Development and leaves Production unticked. Production's `DATABASE_URL` is an ordinary project
+variable instead, Production scope only, marked Sensitive, built from the Neon console's Connect
+dialog with the role set to `capexwise_app` and pooling on. **Reconnecting the integration with
+Production ticked undoes this**: at best it clashes with the variable, at worst production is
+quietly back on the owner, and nothing would flag it.
+
+Sensitive means Vercel will not show the value again, so there is nothing to read back. Rotating the
+password is an `alter role` on the `production` branch, the full connection string typed into the
+variable again, and a production redeploy: Vercel applies an environment change only to deployments
+built after it.
+
+Previews stay on the owner. The integration writes each preview branch's connection string itself
+when the deployment is created, with no role setting to change, so a different user there would mean
+overriding it on every deployment. A preview's unscoped client is then exactly as restricted as
+production's was before #81 — ESLint's rule on `@/db/client` is the guard.
 
 **Every environment needs its own `BETTER_AUTH_SECRET`.** It signs session cookies and encrypts the
 OAuth tokens stored in `accounts`, so sharing one across environments means a session forged in
