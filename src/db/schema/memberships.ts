@@ -16,7 +16,9 @@ import { users } from "./users";
  * what. `docs/data-model.md` §2. Better Auth's `member` under our name, for the
  * reason §2 gives — a table called `member` in the middle of the security model
  * reads as something borrowed rather than something we own, and this is the
- * table every RLS policy in #28 will join against.
+ * table the identity path reads, before any org is the context, to decide which
+ * org a session may act in — which is why it is one of the three tables ADR-0007
+ * lets that path read in full.
  */
 
 /**

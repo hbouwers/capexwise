@@ -21,6 +21,14 @@
  * organization plugin's own endpoints, which scope by the membership of the
  * signed-in user. That is a claim worth checking rather than assuming, and #27's
  * cross-org isolation test is where it gets checked.
+ *
+ * **This handle is the identity path, and row-level security treats it as one.**
+ * It logs in as whatever `DATABASE_URL` names, and that role is a member of
+ * `capexwise_identity` — which reads every row of `organizations`,
+ * `memberships` and `invitations` and holds no grant on any table inside the
+ * boundary. A scoped handle switches to `capexwise_scoped` on top of this pool
+ * for each transaction; this handle, used bare, never does. ADR-0007 is the
+ * decision, and says what a login role of the application's own would add.
  */
 import "server-only";
 

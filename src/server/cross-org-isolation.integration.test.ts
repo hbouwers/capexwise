@@ -21,13 +21,14 @@
  * - **`getOrgContext()`**, where every domain query will start. It takes no
  *   arguments, so a route param or a body cannot reach it by construction; what
  *   can is the request's headers and the session they carry.
- *
- * What is *not* here is the case ADR-0003 worries about most: a domain query
- * that forgot its `org_id` filter. No domain table exists yet, and until #28's
- * policies do, nothing would stop that query — `src/server/org-context.ts` says
- * so plainly. #28 adds that case here, over every table in `ORG_OWNED`, by
- * running unfiltered reads and writes through `forOrg()` and asserting B's rows
- * stay out of reach.
+ * - **A domain query that forgot its `org_id` filter**, the case ADR-0003
+ *   worries about most because correct and incorrect code look identical. The
+ *   last block runs unfiltered reads, updates and deletes through a real scoped
+ *   handle over every table in `ORG_OWNED`, and nothing in that SQL says which
+ *   org it is for — so every one of B's rows it cannot reach is row-level
+ *   security (#28) keeping it out. The registry checks the same layer from the
+ *   catalog's side: every org-owned table forced, a scoped policy keyed on its
+ *   org column, and neither database role reaching a table it should not.
  *
  * ## How a probe is judged
  *
@@ -61,7 +62,10 @@
  *
  * 1. Name it in `ORG_OWNED`, with the column that says which org a row belongs
  *    to, or in `OUTSIDE_THE_BOUNDARY` with the reason it has none. The first test
- *    fails until one of them does.
+ *    fails until one of them does, and the row-level security tests in the
+ *    registry fail until an org-owned table is forced and has its policy —
+ *    `docs/data-model.md` §9 has the template. The unfiltered-query block at the
+ *    bottom then covers it without being told.
  * 2. Seed a row on each side in `seedTwoOrgs()`. The third test fails until both
  *    sides have one.
  * 3. Add a probe for each path that reads or writes it — a query in
@@ -72,13 +76,18 @@ import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import { sessions } from "@/db/schema";
-import { testDatabaseUrl, testDb } from "@/test/db";
+import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createInvitation,
   createMembership,
   createOrganization,
   createUser,
 } from "@/test/factories";
+import {
+  INSUFFICIENT_PRIVILEGE,
+  postgresErrorCode,
+  rejectsWith,
+} from "@/test/postgres-errors";
 
 /**
  * What `headers()` hands `getOrgContext()`. Next.js supplies it from the request
@@ -94,7 +103,7 @@ vi.mock("next/headers", () => ({
 
 const APP_URL = "http://localhost:3000";
 
-process.env.DATABASE_URL = testDatabaseUrl;
+process.env.DATABASE_URL = applicationDatabaseUrl;
 process.env.APP_URL = APP_URL;
 process.env.BETTER_AUTH_SECRET = "integration-suite-secret-not-a-real-one";
 process.env.GOOGLE_CLIENT_ID = "integration-suite-client-id";
@@ -135,6 +144,88 @@ const OUTSIDE_THE_BOUNDARY: Record<string, string> = {
   rate_limits:
     "Counters keyed by IP address and path, taken before anyone is identified (data-model §2).",
 };
+
+/**
+ * The only org-owned tables the identity path may read without an org context,
+ * and why each is on the list. ADR-0007 is the decision; the registry test below
+ * is what keeps the list from growing by accident.
+ *
+ * These are the tables that *establish* the boundary rather than sit inside it:
+ * deciding which org a session may act in means reading memberships before any
+ * of them is the context. A domain table never belongs here — a policy that
+ * admits the identity path to `buildings` would be a way to read every tenant's
+ * buildings with no org at all.
+ */
+const IDENTITY_PATH: Partial<Record<keyof typeof ORG_OWNED, string>> = {
+  organizations:
+    "Created at sign-in, before the account has an org, and read to resolve one.",
+  memberships:
+    "The join in resolveOrgForUser() that decides which org a session may act in.",
+  invitations:
+    "Better Auth's organization endpoints, which scope by the caller's membership and are probed below.",
+};
+
+/** The two database roles the migrations create — see `drizzle/0006`. */
+const SCOPED_ROLE = "capexwise_scoped";
+const IDENTITY_ROLE = "capexwise_identity";
+
+/**
+ * Every table in the schema that `role` holds any privilege on at all. A table
+ * a role cannot touch is `permission denied` for it, so this is the set of
+ * tables where a policy — or the lack of one — decides what it sees.
+ */
+async function tablesReachableBy(role: string): Promise<string[]> {
+  // By oid rather than by name: the planner is free to evaluate the privilege
+  // check before the schema filter, and a name built from another schema's
+  // table does not resolve in `public`.
+  const { rows } = await testDb().execute<{ relname: string }>(sql`
+    select relname from pg_class
+    where relnamespace = 'public'::regnamespace and relkind = 'r'
+      and has_table_privilege(${role}::name, oid, 'select, insert, update, delete')
+    order by relname
+  `);
+
+  return rows.map((row) => row.relname);
+}
+
+type Policy = { cmd: string; qual: string | null; withCheck: string | null };
+
+/**
+ * Every permissive policy that applies to `role`, grouped by table.
+ *
+ * A list per table rather than one policy each, because permissive policies
+ * are OR'd together: a second one on the same table widens what the first
+ * allowed, so a check that kept only one of them could be passed by the
+ * policy that isolates while the other one leaks. `public` counts as well as
+ * the role itself — a policy `to public` applies to everybody. Restrictive
+ * policies are left out; they can only narrow what the permissive ones allow.
+ */
+async function policiesFor(role: string): Promise<Record<string, Policy[]>> {
+  const { rows } = await testDb().execute<{
+    tablename: string;
+    cmd: string;
+    qual: string | null;
+    with_check: string | null;
+  }>(sql`
+    select tablename, cmd, qual, with_check from pg_policies
+    where schemaname = 'public'
+      and permissive = 'PERMISSIVE'
+      and (${role}::name = any (roles) or 'public' = any (roles))
+    order by tablename, policyname
+  `);
+
+  const byTable: Record<string, Policy[]> = {};
+
+  for (const row of rows) {
+    (byTable[row.tablename] ??= []).push({
+      cmd: row.cmd,
+      qual: row.qual,
+      withCheck: row.with_check,
+    });
+  }
+
+  return byTable;
+}
 
 /**
  * Every row an org owns, in every `ORG_OWNED` table, through the harness's own
@@ -532,6 +623,132 @@ describe("the registry", () => {
     ).toEqual([]);
   });
 
+  it("enables and forces row-level security on every org-owned table", async () => {
+    // Forced as well as enabled, and the second is the one that gets
+    // forgotten: without it the table's owner is exempt from its own policies,
+    // and the owner is exactly the role a Neon login is.
+    const { rows } = await testDb().execute<{
+      table: string;
+      enabled: boolean;
+      forced: boolean;
+    }>(sql`
+      select relname as table, relrowsecurity as enabled,
+             relforcerowsecurity as forced
+      from pg_class
+      where relnamespace = 'public'::regnamespace and relkind = 'r'
+    `);
+
+    const unprotected = Object.keys(ORG_OWNED).filter((table) => {
+      const row = rows.find((candidate) => candidate.table === table);
+      return !row?.enabled || !row.forced;
+    });
+
+    expect(
+      unprotected,
+      "These org-owned tables are missing `enable row level security` or " +
+        "`force row level security` — item 3 of the per-table checklist in " +
+        "docs/data-model.md §9.",
+    ).toEqual([]);
+  });
+
+  it("gives the scoped role a policy on every org-owned table, keyed on its org column", async () => {
+    // Asserted against the policy's text rather than merely its existence: a
+    // policy of `using (true)` exists, is enabled, and isolates nothing. Both
+    // halves, because `using` alone stops B's rows being read while still
+    // letting a scoped handle write one. And exactly one: a second permissive
+    // policy — `for insert ... with check (true)`, say — is OR'd with this one
+    // and opens whatever it allows, whatever this one says.
+    const policies = await policiesFor(SCOPED_ROLE);
+
+    for (const [table, column] of Object.entries(ORG_OWNED)) {
+      const expected = `(${column} = current_org_id())`;
+
+      expect(
+        policies[table],
+        `${table} should have exactly one permissive policy for ` +
+          `${SCOPED_ROLE}, keyed on ${column} — the template is in ` +
+          "docs/data-model.md §9.",
+      ).toEqual([{ cmd: "ALL", qual: expected, withCheck: expected }]);
+    }
+  });
+
+  it("gives the scoped role nothing on a table without a policy for it", async () => {
+    // The general form of the rule, rather than a list of tables to check: a
+    // grant with no policy behind it is every org's rows, so any table the
+    // scoped role can touch must be one the test above has already vetted. A
+    // table outside the boundary that the scoped role could read is the leak.
+    const reachable = await tablesReachableBy(SCOPED_ROLE);
+    const policed = Object.keys(await policiesFor(SCOPED_ROLE));
+
+    expect(
+      reachable.filter((table) => !policed.includes(table)),
+      `${SCOPED_ROLE} holds privileges on these tables and no policy limits ` +
+        "which rows it sees.",
+    ).toEqual([]);
+  });
+
+  it("grants neither role a privilege row-level security does not govern", async () => {
+    // Policies filter rows for select, insert, update and delete, and for
+    // nothing else. `truncate` empties a table without consulting a single
+    // policy, so a scoped role holding it on `memberships` could delete every
+    // org's rows in one statement while every test above stayed green.
+    // `references` and `trigger` are the other two privileges a policy does
+    // not see, and neither role has any use for them.
+    for (const role of [SCOPED_ROLE, IDENTITY_ROLE]) {
+      const { rows } = await testDb().execute<{ relname: string }>(sql`
+        select relname from pg_class
+        where relnamespace = 'public'::regnamespace and relkind = 'r'
+          and has_table_privilege(${role}::name, oid, 'truncate, references, trigger')
+        order by relname
+      `);
+
+      expect(
+        rows.map((row) => row.relname),
+        `${role} holds truncate, references or trigger on these tables.`,
+      ).toEqual([]);
+    }
+  });
+
+  it("confines the identity path to the tables that establish the boundary", async () => {
+    // ADR-0007's narrow bypass, held to its word. The identity path reads every
+    // row of the tables in IDENTITY_PATH, which is how sign-in works at all; it
+    // must hold no policy anywhere else, and no privilege on anything inside
+    // the boundary beyond them. A domain table the identity role could read is
+    // a table the unscoped client could read without an org.
+    expect(Object.keys(await policiesFor(IDENTITY_ROLE)).sort()).toEqual(
+      Object.keys(IDENTITY_PATH).sort(),
+    );
+
+    expect(
+      (await tablesReachableBy(IDENTITY_ROLE)).filter(
+        (table) =>
+          !Object.hasOwn(OUTSIDE_THE_BOUNDARY, table) &&
+          !Object.hasOwn(IDENTITY_PATH, table),
+      ),
+      `${IDENTITY_ROLE} holds privileges on these org-owned tables, which are ` +
+        "not on the identity path.",
+    ).toEqual([]);
+  });
+
+  it("lets neither role bypass row-level security", async () => {
+    // Either attribute would make every policy above decorative. The migration
+    // creates both roles without them; this is what notices if one is altered.
+    const { rows } = await testDb().execute<{
+      rolname: string;
+      rolsuper: boolean;
+      rolbypassrls: boolean;
+    }>(sql`
+      select rolname, rolsuper, rolbypassrls from pg_roles
+      where rolname in (${SCOPED_ROLE}, ${IDENTITY_ROLE})
+      order by rolname
+    `);
+
+    expect(rows).toEqual([
+      { rolname: IDENTITY_ROLE, rolsuper: false, rolbypassrls: false },
+      { rolname: SCOPED_ROLE, rolsuper: false, rolbypassrls: false },
+    ]);
+  });
+
   it("seeds every org-owned table on both sides", async () => {
     // Without a row on B's side, "B's rows are unchanged" is true of nothing
     // and every probe passes for that table without proving anything.
@@ -630,3 +847,117 @@ describe("getOrgContext", () => {
     expect(context.db.orgId).toBe(b.org.id);
   });
 });
+
+/**
+ * A scoped handle for the owner of `side`'s org, reached the way every domain
+ * query will reach one: a signed session, then `getOrgContext()`. Not
+ * `forOrg()`, which ESLint keeps out of this file for the reason
+ * `eslint.config.mjs` gives — and the real path is the one worth proving anyway.
+ */
+async function scopedHandleFor(side: Side) {
+  const caller = await signIn(side.owner.id);
+  request.headers = new Headers({ cookie: caller.cookie });
+
+  const { db } = await getOrgContext();
+
+  return db;
+}
+
+/**
+ * ADR-0003's worst case: a query that forgot its `org_id` filter. Nothing in the
+ * SQL below says which org it is for, so every row it cannot reach is one
+ * row-level security kept out of reach — which is the claim #28 exists to make
+ * true. Each statement runs as org A's owner, the most privileged role an org
+ * has, so a refusal is the database's and never the application's.
+ *
+ * Over every table in `ORG_OWNED`, so a table added there is covered here the
+ * day it lands.
+ */
+describe.each(Object.entries(ORG_OWNED))(
+  "%s, through a scoped handle with no org filter",
+  (table, column) => {
+    const target = sql.identifier(table);
+    const owner = sql.identifier(column);
+
+    it("reads only the scoped org's rows", async () => {
+      const { a } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+
+      const { rows } = await db.run((tx) =>
+        tx.execute<{ owner: string }>(
+          sql`select ${owner}::text as owner from ${target}`,
+        ),
+      );
+
+      // Every one of A's rows, not merely none of B's: a policy that filtered
+      // everything out would pass the second half on its own.
+      const owned = (await rowsOwnedBy(a.org.id))[table] ?? [];
+
+      expect(rows).toHaveLength(owned.length);
+      expect(rows.filter((row) => row.owner !== a.org.id)).toEqual([]);
+    });
+
+    it("updates only the scoped org's rows", async () => {
+      const { a, b } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+      const before = await rowsOwnedBy(b.org.id);
+
+      // A no-op assignment, so the rows `returning` reports are exactly the
+      // rows the update's scan could reach — which is the question. A real
+      // change would be caught by the snapshot below too, but a no-op leaves
+      // `updated_at` alone and the snapshot blind, so `returning` is the proof.
+      const { rows } = await db.run((tx) =>
+        tx.execute<{ owner: string }>(
+          sql`update ${target} set ${owner} = ${owner}
+              returning ${owner}::text as owner`,
+        ),
+      );
+
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.filter((row) => row.owner !== a.org.id)).toEqual([]);
+      expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    });
+
+    it("deletes only the scoped org's rows, or is refused outright", async () => {
+      const { a, b } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+      const before = await rowsOwnedBy(b.org.id);
+
+      // Two acceptable outcomes, and which one a table gets is the migration's
+      // decision rather than this test's: `organizations` has no DELETE grant
+      // for the scoped role — an org is soft-deleted, and the purge is not a
+      // request — so it is refused before any row is considered. The others
+      // may delete, and must delete only A's.
+      const outcome = await db
+        .run((tx) =>
+          tx.execute<{ owner: string }>(
+            sql`delete from ${target} returning ${owner}::text as owner`,
+          ),
+        )
+        .then(
+          ({ rows }) => rows.filter((row) => row.owner !== a.org.id),
+          (error: unknown) => postgresErrorCode(error),
+        );
+
+      expect([[], INSUFFICIENT_PRIVILEGE]).toContainEqual(outcome);
+      expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    });
+
+    it("cannot move one of its rows into another org", async () => {
+      // The write `with check` exists for. `using` alone would keep B's rows
+      // out of sight and still let a scoped handle hand one of its own to B —
+      // or, by the same clause, write a new row there.
+      const { a, b } = await seedTwoOrgs();
+      const db = await scopedHandleFor(a);
+      const before = await rowsOwnedBy(b.org.id);
+
+      await expect(
+        db.run((tx) =>
+          tx.execute(sql`update ${target} set ${owner} = ${b.org.id}`),
+        ),
+      ).rejects.toSatisfy(rejectsWith(INSUFFICIENT_PRIVILEGE));
+
+      expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    });
+  },
+);

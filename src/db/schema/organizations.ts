@@ -19,10 +19,12 @@ import {
  * This table came first because #17 needed a real migration to exercise the
  * pipeline with, and because everything else in the schema references it.
  *
- * Row-level security is deliberately not enabled here yet. #28 owns it, and
- * `organizations` is the one table the standard policy template does not fit —
- * `docs/data-model.md` §9 says why, and it is a question about who may create an
- * org rather than a detail of the policy.
+ * Row-level security is on for this table, and it is declared in
+ * `drizzle/0006_row_level_security.sql` rather than here: it comes with roles
+ * and grants the schema does not describe, and the hand-written file is the one
+ * place all of it reads together. The policy is keyed on `id` rather than
+ * `org_id`, and who may create an org is answered by who holds the grant —
+ * `docs/data-model.md` §9 has both.
  */
 
 /**

@@ -451,9 +451,11 @@ jobs:
         run: npm ci
 
       # `drizzle/` in journal order, forward only, over a single connection the
-      # runner opens itself — not the application's pool, which is a shape
-      # decision now and a requirement once #28 turns on `FORCE ROW LEVEL
-      # SECURITY` and the migrating role stops being the application's.
+      # runner opens itself — not the application's pool, because a migration
+      # is one session doing DDL and the pooler is the wrong shape for it. The
+      # role behind this credential owns the tables; ADR-0007 says why the
+      # application logs in as the same role today, and what separating them
+      # costs (a Neon role and a Vercel variable, and nothing in this file).
       #
       # Nothing here checks that the credential is present, deliberately. A
       # missing `PRODUCTION_DATABASE_URL` fails `migrationEnvSchema` and turns the

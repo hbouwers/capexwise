@@ -13,11 +13,13 @@
  * that are not ids at all, and none of them may change which rows it can see.
  *
  * **`SET LOCAL` is local.** `forOrg().run()` passes `true` as `set_config`'s
- * third argument. Pass `false` and every test that checks the setting *inside*
- * the transaction still passes, while the setting silently outlives the commit
- * and is inherited by whatever request is handed that pooled connection next —
- * which ADR-0003 names as the exact breach the layer exists to prevent. That
- * argument is the reason this file exists.
+ * third argument, for the org and for the role. Pass `false` and every test that
+ * checks them *inside* the transaction still passes, while both silently outlive
+ * the commit and are inherited by whatever request is handed that pooled
+ * connection next — which ADR-0003 names as the exact breach the layer exists to
+ * prevent. That argument is the reason this file exists, and #28 made it matter
+ * twice: a leaked role is a connection that stays `capexwise_scoped` after its
+ * request, and a leaked org is one that stays in somebody else's org.
  *
  * **`run()` is one transaction.** The point above depends on it entirely: `SET
  * LOCAL` outside a transaction block is a no-op with a warning.
@@ -36,14 +38,14 @@ import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import { memberships } from "@/db/schema";
-import { appDb, testDatabaseUrl, testDb } from "@/test/db";
+import { appDb, applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createMembership,
   createOrganization,
   createUser,
 } from "@/test/factories";
 
-process.env.DATABASE_URL = testDatabaseUrl;
+process.env.DATABASE_URL = applicationDatabaseUrl;
 process.env.APP_URL = "http://localhost:3000";
 process.env.BETTER_AUTH_SECRET = "integration-suite-secret-not-a-real-one";
 process.env.GOOGLE_CLIENT_ID = "integration-suite-client-id";
@@ -51,7 +53,7 @@ process.env.GOOGLE_CLIENT_SECRET = "integration-suite-client-secret";
 
 // Dynamic, and after the assignments above: a static import is hoisted, and the
 // pool would be built from `.env.local` before the first line of this file ran.
-const { ORG_ID_SETTING, forOrg, resolveOrgForUser } =
+const { ORG_ID_SETTING, SCOPED_ROLE, forOrg, resolveOrgForUser } =
   await import("@/server/org-context");
 
 /**
@@ -172,32 +174,49 @@ describe("resolveOrgForUser", () => {
 });
 
 describe("forOrg().run", () => {
-  it("sets app.current_org_id for the transaction", async () => {
+  it("runs as the scoped role, with the org the policies read", async () => {
     const org = await createOrganization();
 
-    const setting = await forOrg(org.id).run(async (tx) => {
-      const { rows } = await tx.execute<{ org_id: string | null }>(
-        sql`select ${CURRENT_ORG}`,
-      );
-
-      return rows[0]?.org_id;
-    });
-
-    expect(setting).toBe(org.id);
-  });
-
-  it("does not leak the setting to the next user of the pooled connection", async () => {
-    const org = await createOrganization();
-
+    // `current_org_id()` alongside the raw setting, because it is what every
+    // policy actually calls, and it spells the setting's name a second time in
+    // SQL. If the two spellings ever drift, this is the assertion that notices:
+    // the setting is applied and the policies read null.
     const inside = await forOrg(org.id).run(async (tx) => {
       const { rows } = await tx.execute<{
+        role: string;
         org_id: string | null;
-        pid: number;
-      }>(sql`select ${CURRENT_ORG}, pg_backend_pid() as pid`);
+        policy_org_id: string | null;
+      }>(
+        sql`select current_user as role, ${CURRENT_ORG},
+                   current_org_id()::text as policy_org_id`,
+      );
 
       return rows[0];
     });
 
+    expect(inside).toEqual({
+      role: SCOPED_ROLE,
+      org_id: org.id,
+      policy_org_id: org.id,
+    });
+  });
+
+  it("does not leak the role or the setting to the next user of the pooled connection", async () => {
+    const org = await createOrganization();
+
+    const inside = await forOrg(org.id).run(async (tx) => {
+      const { rows } = await tx.execute<{
+        role: string;
+        org_id: string | null;
+        pid: number;
+      }>(
+        sql`select current_user as role, ${CURRENT_ORG}, pg_backend_pid() as pid`,
+      );
+
+      return rows[0];
+    });
+
+    expect(inside?.role).toBe(SCOPED_ROLE);
     expect(inside?.org_id).toBe(org.id);
 
     // The next statement on the pool, standing in for the next request. The pid
@@ -207,16 +226,60 @@ describe("forOrg().run", () => {
     // was, and pass while proving nothing. Same backend, no setting, or the
     // assertion is not doing its job.
     const { rows } = await appDb().execute<{
+      role: string;
+      login: string;
       org_id: string | null;
       pid: number;
-    }>(sql`select ${CURRENT_ORG}, pg_backend_pid() as pid`);
+    }>(
+      sql`select current_user as role, session_user as login, ${CURRENT_ORG},
+                 pg_backend_pid() as pid`,
+    );
 
     expect(rows[0]?.pid).toBe(inside?.pid);
+    // Back to whatever the pool logged in as. A connection still acting as the
+    // scoped role would hand the next request the policies of an org it never
+    // resolved — and, worse, the identity path would lose the policies it needs
+    // to resolve one.
+    expect(rows[0]?.role).toBe(rows[0]?.login);
     // Postgres reports a setting cleared by the end of its transaction as the
     // empty string rather than null — it was set once in this session, so it
     // exists with no value. Either answer means the org context is gone; what
     // must never come back is the id.
     expect(rows[0]?.org_id ?? "").toBe("");
+  });
+
+  it("leaves the scoped role seeing nothing, rather than raising, on a connection an org has used", async () => {
+    const org = await createOrganization();
+    const user = await createUser();
+    await createMembership(org.id, user.id);
+
+    const pid = await forOrg(org.id).run(async (tx) => {
+      const { rows } = await tx.execute<{ pid: number }>(
+        sql`select pg_backend_pid() as pid`,
+      );
+
+      return rows[0]?.pid;
+    });
+
+    // The same connection, as the scoped role and with no org applied — what a
+    // future helper that switched the role and forgot the setting would do. The
+    // setting now reads back as '' rather than null, and `''::uuid` raises, so
+    // without the `nullif` in `current_org_id()` this is a type error here and
+    // an empty result on a fresh connection. It must be the empty result on
+    // both: fail closed, one way, whichever connection the pool hands out.
+    const after = await appDb().transaction(async (tx) => {
+      await tx.execute(sql`select set_config('role', ${SCOPED_ROLE}, true)`);
+
+      const { rows } = await tx.execute<{ visible: number; pid: number }>(
+        sql`select (select count(*)::int from memberships) as visible,
+                   pg_backend_pid() as pid`,
+      );
+
+      return rows[0];
+    });
+
+    expect(after?.pid).toBe(pid);
+    expect(after?.visible).toBe(0);
   });
 
   it("runs its callback in one transaction, and rolls back on a throw", async () => {

@@ -17,9 +17,9 @@ import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
  * cannot live inside a tenant. These rows are also read during sign-in, before
  * any org context exists to scope them by. The consequence is stated in §2 and
  * worth restating where the table is: `users` is outside the ADR-0003
- * protection scheme. It is not reachable through `db.forOrg()` (#26), it gets
- * no org policy in #28, and the cross-org isolation test (#27) does not apply
- * to it. What stands in for that is that no application query reads it except
+ * protection scheme. It is not reachable through `db.forOrg()` (#26) — the
+ * scoped role holds no grant on it (#28) — and the cross-org isolation test
+ * (#27) does not apply to it. What stands in for that is that no application query reads it except
  * through `memberships`, which is org-scoped.
  */
 export const users = pgTable("users", {
