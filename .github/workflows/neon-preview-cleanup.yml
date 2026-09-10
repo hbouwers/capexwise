@@ -99,14 +99,38 @@ jobs:
             exit 0
           fi
 
-          # Retried because Neon answers 423 while another operation on the
-          # project is still running, such as a compute starting or suspending,
-          # and expects the caller to try again.
-          curl -fsS -X DELETE \
-            --retry 5 --retry-all-errors --retry-delay 10 \
-            -H "Authorization: Bearer $NEON_API_KEY" \
-            -H "Accept: application/json" \
-            -o /dev/null \
-            "$api/$id"
+          # Retried on 423 and on server errors, and on nothing else. Neon answers
+          # 423 while another operation on the project is still running, such as
+          # a compute starting or suspending, and expects the caller to try again.
+          # A 404 means the branch went some other way between the lookup and
+          # now, by hand or by the integration's own cleanup, which is the result
+          # this job wants. curl's own `--retry-all-errors` would retry that 404
+          # too, and then fail.
+          for _ in 1 2 3 4 5 6; do
+            status=$(
+              curl -sS -X DELETE \
+                -H "Authorization: Bearer $NEON_API_KEY" \
+                -H "Accept: application/json" \
+                -o /dev/null -w '%{http_code}' \
+                "$api/$id"
+            ) || status=000
 
-          echo "Deleted $BRANCH."
+            case "$status" in
+              2??)
+                echo "Deleted $BRANCH."
+                exit 0
+                ;;
+              404)
+                echo "$BRANCH was already gone."
+                exit 0
+                ;;
+              423 | 5?? | 000) sleep 10 ;;
+              *)
+                echo "::error::Neon refused to delete $BRANCH, with HTTP $status."
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "::error::Neon was still busy after six attempts to delete $BRANCH."
+          exit 1
