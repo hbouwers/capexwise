@@ -58,6 +58,7 @@ eventually be world-readable.
 | `src/db/client.ts` | The raw database client. Importing it, or the `pg` driver, from anywhere outside the allowlist is an ESLint error |
 | `src/db/migrate.mts` | The migration runner. Forward-only, and it opens its own connection — [ADR-0006](docs/adr/0006-migrations.md) |
 | `src/lib/env-schema.mts` | The environment contract — the schema, and the parser that formats a failure without printing a value. `.mts` because the migration runner imports it and runs under plain Node |
+| `src/lib/access-code-cipher.mts` | Seals and opens access codes, and parses `ACCESS_CODE_KEYS` ([ADR-0008](docs/adr/0008-access-code-encryption.md)). Takes the keyring as an argument and reads no environment. `.mts` because `env-schema.mts` imports it |
 | `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
 | `drizzle/` | Generated migrations, committed. Read the SQL before committing it; there is no `down` |
 | `src/test/` | The integration harness — test database lifecycle and factories. Loaded by Vitest, never imported by application code |
@@ -84,8 +85,10 @@ These are the ones that are expensive or impossible to fix later. Everything els
   One `Money` type, one formatter.
 - **Identifiers are non-sequential** (UUIDv7 or ULID — #8). Sequential ids on a multi-tenant
   product leak portfolio size to anyone who can read a URL.
-- **Never log an access code, and never log PII.** Access codes are encrypted at rest and masked
-  by default (#31). Log that a reveal happened, never the value.
+- **Never log an access code, and never log PII.** Access codes are sealed in the application
+  before they reach the database, and masked by default ([ADR-0008](docs/adr/0008-access-code-encryption.md)).
+  `src/lib/access-code-cipher.mts` is the only code that holds one in plaintext. Log that a reveal
+  happened, never the value.
 - **A secret never carries a `NEXT_PUBLIC_` prefix.** The compiler inlines any variable with it
   into the client bundle as a literal, so the value is published to every browser and stays
   published in every cached build — removing the prefix afterwards un-publishes nothing.
@@ -202,6 +205,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Expense entry | **In v1** (PRD §12, question 5). Rent periods gave money-in; without money-out the F0 cash flow tile is half a number and the F4 Schedule E runs on assumptions. `transactions` was already fully specified in [data-model](docs/data-model.md) §6, so this cost no schema design — the migration ships with the feature. Still the largest single scope item in v1, and it adds a screen the prototype never drew (#12) |
 | Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
 | Default service lives | **National defaults, user-overridable** (PRD §12, question 4). The fix for regional variance is a per-org override, not a climate-zone question at signup — onboarding speed is already a first-class design problem (#39). Drives the `capital_item_types` seed (#34): one national default per item type, editable per org, with a visible `defaults_updated_at` |
+| Access-code encryption | **AES-256-GCM in the application**, bound to the org, keyed by a per-environment `ACCESS_CODE_KEYS` ([ADR-0008](docs/adr/0008-access-code-encryption.md)). Rejected: `pgcrypto`, which makes the code and the key bound parameters, and Drizzle prints every bound parameter of a failed query; envelope encryption, which buys nothing without a KMS and is the Cloud Run move. Utility `account_ref` stays a four-character stub and is not encrypted |
 | Portfolio forecasting | **In v1** (PRD §12, question 6). The dashboard rollup (F0) was already settled and in v1; the 10-year forecast and reserve projection get the same portfolio view in v1 rather than staying per-building until v1.1 |
 
 All six PRD open questions (#13) are now settled — see PRD §12.

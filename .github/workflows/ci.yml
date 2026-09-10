@@ -187,6 +187,11 @@ jobs:
       # weighed and declined. `e2e/smoke.spec.ts` says so at length.
       GOOGLE_CLIENT_ID: ci-only-not-a-real-client
       GOOGLE_CLIENT_SECRET: ci-only-not-a-real-secret
+      # Not a secret either, for the same reason as the auth secret. It is the
+      # base64url of "ci-only-not-a-secret-ci-only-not", because the keyring
+      # format wants 32 bytes rather than a readable name. Nothing here seals a
+      # code, so it only has to parse (ADR-0008).
+      ACCESS_CODE_KEYS: "1:Y2ktb25seS1ub3QtYS1zZWNyZXQtY2ktb25seS1ub3Q"
 
     steps:
       - uses: actions/checkout@v7
@@ -298,6 +303,7 @@ jobs:
             -e BETTER_AUTH_SECRET=ci-only-not-a-secret-ci-only-not-a-secret \
             -e GOOGLE_CLIENT_ID=ci-only-not-a-real-client \
             -e GOOGLE_CLIENT_SECRET=ci-only-not-a-real-secret \
+            -e ACCESS_CODE_KEYS=1:Y2ktb25seS1ub3QtYS1zZWNyZXQtY2ktb25seS1ub3Q \
             -p 127.0.0.1:3000:3000 capexwise-app:ci
 
           # `/sign-in` rather than `/`, because `/` is a protected route now

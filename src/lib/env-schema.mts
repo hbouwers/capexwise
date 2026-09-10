@@ -16,6 +16,10 @@
  */
 import { z } from "zod";
 
+// Relative, with the extension, for the reason `src/db/migrate.mts` gives: the
+// runner imports this file under plain Node, which resolves no `@/` alias.
+import { AccessCodeCipherError, parseKeyring } from "./access-code-cipher.mts";
+
 /**
  * The scheme, and that something follows it. Deliberately no more than that.
  *
@@ -94,6 +98,32 @@ export const serverEnvSchema = z.object({
    */
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
+
+  /**
+   * The keys that seal building access codes (ADR-0008): comma-separated
+   * `<version>:<key>` entries. The highest version seals, and every version
+   * listed can open. A rotation adds a version and removes the old one only
+   * once nothing sealed under it remains.
+   *
+   * Checked here and parsed where it is used, by the same `parseKeyring`, so
+   * the environment stays a record of strings and a malformed keyring stops the
+   * server at boot rather than failing the first reveal. Required before any
+   * table holds a code, so that the first building-facts deploy is not also
+   * the first time every environment needs a new secret.
+   *
+   * Every environment has its own keyring. Production's is also kept outside
+   * Vercel, because a Sensitive variable cannot be read back, and losing the
+   * key means losing every code sealed under it.
+   */
+  ACCESS_CODE_KEYS: z.string().superRefine((value, ctx) => {
+    try {
+      parseKeyring(value);
+    } catch (error) {
+      if (!(error instanceof AccessCodeCipherError)) throw error;
+
+      ctx.addIssue(error.message);
+    }
+  }),
 });
 
 /**

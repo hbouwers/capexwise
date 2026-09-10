@@ -155,8 +155,9 @@ styleguide is deliberately not behind sign-in; everything else is.
 
 **The copy is not enough on its own any more.** `.env.example` leaves the auth variables blank
 because a committed placeholder is a value somebody keeps, so filling them in is part of setup:
-generate a `BETTER_AUTH_SECRET`, and create a Google OAuth client. "Environment variables" below
-has both, and the server names whichever one is missing rather than starting without it.
+generate a `BETTER_AUTH_SECRET` and an `ACCESS_CODE_KEYS`, and create a Google OAuth client.
+"Environment variables" below has all three, and the server names whichever one is missing rather
+than starting without it.
 
 **`npm run dev` still does not need the database running** to serve the sign-in page. It does need
 it to sign in — that is the first thing in the application that writes a row.
@@ -209,6 +210,7 @@ to start the server if a server variable carries the prefix. There are no public
 | `APP_URL` | `http://localhost:3000` | **Per deployment.** A preview hostname is generated, so this cannot be set once at the project level ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
 | `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
+| `ACCESS_CODE_KEYS` | Generated once, per machine | Vercel project environment, Preview scope; its own value, never production's | Vercel project environment, Production scope, **Sensitive**, with a copy kept outside Vercel ([ADR-0008](docs/adr/0008-access-code-encryption.md)) |
 
 #### The database
 
@@ -278,6 +280,23 @@ preview is valid in production. Generate one with:
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
+
+**Every environment needs its own `ACCESS_CODE_KEYS` too**, for a reason specific to Neon. A
+preview branch is a copy of production, rows included, so a preview deployment that held
+production's key could reveal every production access code from a URL that exists for code review.
+With its own key it cannot open them. Version numbers restart in each environment, and preview's
+version 1 is a different key from production's. Generate one with:
+
+```bash
+node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Production's is the one secret here whose loss costs data rather than a sign-in. Vercel will not
+show a Sensitive value again, and every code sealed under a key that nobody holds is gone. So the
+value goes into the password manager as well as into Vercel, and a key retired by a rotation stays
+there for as long as any backup that needs it
+([#35](https://github.com/hbouwers/capexwise/issues/35)). [ADR-0008](docs/adr/0008-access-code-encryption.md)
+has the rotation.
 
 `npm run db:migrate` validates a strict subset — `DATABASE_URL` and nothing else — so the CI job
 that applies migrations on a push to `main` never needs an auth secret or a Stripe key to run one.

@@ -110,6 +110,11 @@ services:
       # the way to hand real values in.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-compose-only-not-a-real-client}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-compose-only-not-a-real-secret}
+      # Local-only, like the auth secret. It is the base64url of
+      # "compose-only-not-a-secret-compos", because a key has to be 32 bytes
+      # rather than a readable name. A code sealed through this container opens
+      # only here (ADR-0008).
+      ACCESS_CODE_KEYS: "1:Y29tcG9zZS1vbmx5LW5vdC1hLXNlY3JldC1jb21wb3M"
     ports:
       # 3001, not 3000, so this and `npm run dev` can both be up. Loopback-bound
       # for the same reason the database is.

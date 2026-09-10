@@ -23,12 +23,15 @@ import {
 
 const VALID = "postgresql://user:hunter2@localhost:5432/capexwise";
 
+/** 32 bytes in base64url, the shape of an `ACCESS_CODE_KEYS` key. */
+const KEY = "a".repeat(43);
+
 /**
  * A complete, valid server environment, with `overrides` applied on top.
  *
  * `serverEnvSchema` is not one variable and never was — every test below is
  * about one of them, and without this every one of them would also have to
- * restate the other four. The consequence worth naming: a variable added to the
+ * restate all the others. The consequence worth naming: a variable added to the
  * schema and not to this object turns every test in the file red at once, with a
  * message naming the variable. That is the intended failure, not an annoyance to
  * route around.
@@ -42,6 +45,7 @@ function serverEnv(
     BETTER_AUTH_SECRET: "x".repeat(32),
     GOOGLE_CLIENT_ID: "client-id.apps.googleusercontent.com",
     GOOGLE_CLIENT_SECRET: "client-secret",
+    ACCESS_CODE_KEYS: `1:${KEY}`,
     ...overrides,
   };
 }
@@ -178,6 +182,18 @@ describe("parseEnv", () => {
       ).toThrow(/GOOGLE_CLIENT_ID is not set[\s\S]*GOOGLE_CLIENT_SECRET/);
     });
 
+    it("rejects a malformed ACCESS_CODE_KEYS, saying which entry", () => {
+      // The keyring's own rules are tested with the cipher. This is that the
+      // schema runs them, so a bad keyring stops the server at boot rather than
+      // failing the first reveal after a deploy.
+      expect(() =>
+        parseEnv(
+          serverEnvSchema,
+          serverEnv({ ACCESS_CODE_KEYS: `2:${KEY.slice(1)},1:${KEY}` }),
+        ),
+      ).toThrow(/ACCESS_CODE_KEYS is invalid — it must be .* entry 1 of 2/);
+    });
+
     it("includes the hint it was given", () => {
       expect(() =>
         parseEnv(serverEnvSchema, {}, "Run `npm run db:up`."),
@@ -234,6 +250,27 @@ describe("parseEnv", () => {
 
         expect(message).toContain("BETTER_AUTH_SECRET");
         expect(message).not.toContain(secret.slice(0, 20));
+      }
+    });
+
+    it("does not leak an access-code key when the keyring is rejected", () => {
+      // The whole value is key material. The entry that fails is named by
+      // position; the one that parsed is not repeated either.
+      const good = "b".repeat(43);
+      const bad = "c".repeat(42);
+
+      try {
+        parseEnv(
+          serverEnvSchema,
+          serverEnv({ ACCESS_CODE_KEYS: `1:${good},2:${bad}` }),
+        );
+        expect.unreachable("a malformed ACCESS_CODE_KEYS should throw");
+      } catch (error) {
+        const { message } = error as Error;
+
+        expect(message).toContain("ACCESS_CODE_KEYS");
+        expect(message).not.toContain(good);
+        expect(message).not.toContain(bad);
       }
     });
   });
