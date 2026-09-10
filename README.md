@@ -281,10 +281,11 @@ preview is valid in production. Generate one with:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-**Every environment needs its own `ACCESS_CODE_KEYS` too**, for a reason specific to Neon. A
-preview branch is a copy of production, rows included, so a preview deployment that held
-production's key could reveal every production access code from a URL that exists for code review.
-With its own key it cannot open them. Version numbers restart in each environment, and preview's
+**Every environment needs its own `ACCESS_CODE_KEYS` too**, for a reason specific to Neon. The
+integration branches each preview from the project's default branch unless it is told otherwise,
+and a Neon branch holds its parent's rows. A preview deployment holding production's key could then
+reveal every production access code from a URL that exists for code review. With its own key it
+cannot open them. Version numbers restart in each environment, and preview's
 version 1 is a different key from production's. Generate one with:
 
 ```bash

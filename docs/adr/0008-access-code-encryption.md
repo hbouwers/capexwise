@@ -17,8 +17,10 @@ joins it.
 protects against someone walking off with a drive. The copies this project actually makes are
 logical ones, and disk encryption does nothing for them:
 
-- **A Neon preview branch** is created for every pull request, and it is a copy of production, rows
-  included (#33).
+- **A Neon preview branch**, created for every pull request. A Neon branch is a copy-on-write child
+  of its parent, rows included, and the Vercel integration's default parent is the project's
+  default branch, which here is `production`. The repository does not record whether #33 changed
+  that default. If it did not, every preview holds production's rows.
 - **A dump or a backup restore** (#35).
 - **The Neon console's SQL editor**, open to whoever holds the account.
 - **A log line.** Drizzle 0.45's `DrizzleQueryError` has the message
@@ -67,9 +69,11 @@ secret, all at once.
 | Preview | Vercel, Preview scope, with its own value |
 | Production | Vercel, Production scope, marked Sensitive. **The master copy is in the password manager**, because Vercel will not show a Sensitive value again |
 
-Preview's key being its own is the point, not a formality. A preview branch holds production's rows,
-so a preview deployment holding production's key could reveal every production code from a URL that
-exists for code review. With its own key, the reveal fails with the error that names this case.
+Preview's key being its own is the point, not a formality. If a preview branch holds production's
+rows, a preview deployment holding production's key could reveal every production code from a URL
+that exists for code review. With its own key, the reveal fails with the error that names this case.
+If previews branch from somewhere else, separate keys cost nothing, so the rule does not wait on the
+answer.
 Version numbers restart in every environment, so preview's version 1 and production's version 1 are
 different keys.
 
@@ -84,8 +88,10 @@ changes.
    so the job needs no way around row-level security. It ships with the table, so that rotating
    after a leak is an operation rather than a development task.
 3. Confirm nothing is left under *n*, using the same job's per-org count. **Not with a count in the
-   Neon console**: the owner is subject to `FORCE` and has no policy on this table, so it counts
-   zero rows whatever is there ([ADR-0007](0007-database-roles.md)).
+   Neon console.** The owner is subject to `FORCE` and has no policy on this table, so its count is
+   zero unless Neon has given it `BYPASSRLS`, and then it is everything. That is the provider detail
+   [ADR-0007](0007-database-roles.md) declined to depend on, and a zero from the console cannot say
+   which of the two it is.
 4. Remove *n* from the keyring and redeploy. Keep *n* in the password manager until the last backup
    holding rows sealed under it has expired (#35).
 
