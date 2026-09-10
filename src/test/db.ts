@@ -18,7 +18,7 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
 
-import { closeDb } from "@/db/client";
+import { closeDb, db as applicationDb } from "@/db/client";
 import * as schema from "@/db/schema";
 import { parseEnv, testEnvSchema } from "@/lib/env-schema.mts";
 
@@ -207,6 +207,27 @@ export function testDb(): NodePgDatabase<typeof schema> {
 
   return open.db;
 }
+
+/**
+ * The **application's** pooled handle — the one `@/db/client` builds and
+ * `@/server/org-context` runs its transactions through. Not `testDb()`, which is
+ * this file's own separate connection.
+ *
+ * It exists for one test and the distinction is the whole point of that test.
+ * `forOrg().run()` sets `app.current_org_id` with `SET LOCAL`, and the claim
+ * worth checking is that the setting is gone once the transaction commits — that
+ * the *next request* handed the same pooled connection does not inherit it,
+ * which ADR-0003 calls the exact breach the layer exists to prevent. Asking that
+ * question through `testDb()` would answer a different one, because a separate
+ * connection never had the setting to begin with and would report "unset" no
+ * matter what `forOrg()` did.
+ *
+ * Reached from here rather than by importing `@/db/client` in the test, because
+ * this file is on the ESLint allowlist and a test file is not — and it should
+ * stay that way. Callers must set `DATABASE_URL` to `testDatabaseUrl` before the
+ * first call, which is what points the pool at the disposable database.
+ */
+export const appDb = applicationDb;
 
 /**
  * Empties every table, called before each test. The tables are discovered rather
