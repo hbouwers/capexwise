@@ -32,7 +32,7 @@ eventually be world-readable.
 | `docs/data-model.md` | Schema, indexes, deletion behaviour, RLS policy template. The contract for the first migration |
 | `docs/ui/tokens.md` | Design tokens — colour, type, radius, states. The contract for the Tailwind theme |
 | `docs/ui/components.md` | Component inventory — names, layers, shadcn mapping. The contract the screen specs reference |
-| `docs/ui/screens/` | One markdown spec per screen — **not written yet**, see #12 |
+| `docs/ui/screens/` | One markdown spec per screen and modal, and a README of the rules they all share — widths, tables below `md`, building-or-unit scope, states. The contract a screen is built against |
 | `docs/ui/reference/rental-manager.html` | The design prototype. Visual source of truth |
 | `CONTRIBUTING.md` | Branch, commit and PR conventions, and the protection to enable at v0.5 |
 
