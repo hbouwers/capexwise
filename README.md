@@ -446,10 +446,11 @@ value's per-environment home is recorded.
 **The container does not run migrations**, at boot or otherwise. They run in CI on a push to
 `main`, for the reasons in [ADR-0006](docs/adr/0006-migrations.md).
 
-Three things about the image are worth knowing before changing it. It is built from
-`output: "standalone"`, so it ships the server and the modules Next traced as reachable rather than
-all of `node_modules` — a dependency loaded by a path that cannot be traced statically works under
-`npm start` and is missing here, which is why CI starts the container instead of only building it.
+Three things about the image are worth knowing before changing it. It is the one build with
+`output: "standalone"` — the Dockerfile turns it on, and every other build leaves it off — so it
+ships the server and the modules Next traced as reachable rather than all of `node_modules`. A
+dependency loaded by a path that cannot be traced statically works under `npm start` and is missing
+here, which is why CI starts the container instead of only building it.
 It runs as the unprivileged `node` user. And its base image is pinned by digest as well as by tag,
 so a build that passed last week and fails today has changed for a reason visible in the diff.
 
@@ -500,7 +501,7 @@ tests and what deliberately does not — is in [CLAUDE.md](./CLAUDE.md) under "T
 | --- | --- |
 | `npm run dev` | Development server |
 | `npm run build` | Production build |
-| `npm start` | Serve a production build |
+| `npm start` | Serve the production build `npm run build` wrote. Not the image's, which is standalone and runs as `node server.js` |
 | `npm test` | Unit tests. Needs nothing |
 | `npm run test:watch` | Unit tests, left running |
 | `npm run test:integration` | Database-backed tests. Needs `npm run db:up` |
@@ -618,7 +619,8 @@ runner's environment validation and turns the run red, which is the right outcom
 would otherwise have quietly migrated nothing.
 
 Vercel builds every pull request too, and that check is not this workflow. It is the deploy
-preview, it builds without `output: "standalone"` ([#68](https://github.com/hbouwers/capexwise/issues/68)),
+preview, it builds without `output: "standalone"` like every build but the image's
+([#68](https://github.com/hbouwers/capexwise/issues/68), [#70](https://github.com/hbouwers/capexwise/issues/70)),
 and it goes away with the move to Cloud Run — which is exactly why the container job exists.
 
 ### Deleting preview branches

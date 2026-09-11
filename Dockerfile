@@ -53,16 +53,19 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# `output: "standalone"` in next.config.ts is what makes this stage useful: it
-# writes a self-contained server plus only the node_modules it traced as reachable
-# — 40MB against the 646MB a full install weighs, so the runner below copies an
-# order of magnitude less than it otherwise would.
+# `BUILD_STANDALONE=1` turns on `output: "standalone"` in next.config.ts, and that
+# is what makes this stage useful: it writes a self-contained server plus only the
+# node_modules it traced as reachable — 40MB against the 646MB a full install
+# weighs, so the runner below copies an order of magnitude less than it otherwise
+# would. It is set on this one command rather than as an `ENV`, because this is the
+# only build that wants it; every other build is a plain one that `next start` can
+# serve (#70), and next.config.ts says why Vercel's cannot be standalone either.
 #
 # The build needs network access, because `next/font/google` downloads the IBM Plex
 # files at build time to self-host them. It does not need DATABASE_URL — nothing in
 # the application connects to the database yet, and when it does, ADR-0006 keeps
 # that out of the build.
-RUN npm run build
+RUN BUILD_STANDALONE=1 npm run build
 
 
 # --- runner -----------------------------------------------------------------

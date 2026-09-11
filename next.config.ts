@@ -1,23 +1,27 @@
 import type { NextConfig } from "next";
 
 /**
- * Vercel builds its own output and runs its own post-build step over `.next`.
- * `output: "standalone"` changes what that step finds, and on Next 16.3.4 the
- * combination fails: the build itself succeeds — compile, typecheck and static
- * generation all pass — and then Vercel's `onBuildComplete` throws
- * `ENOENT ... .next/next-server.js.nft.json` and the deployment errors.
+ * `output: "standalone"` is for the container image and nothing else, so the
+ * image asks for it — the Dockerfile's builder stage sets `BUILD_STANDALONE=1`
+ * — and every other build is a plain one. It used to be the other way round,
+ * on unless Vercel was building, and both of the builds that were not the
+ * image had a reason to object:
  *
- * This is not reproducible with `next build` alone. Locally the file is written
- * in both modes; the breakage lives in Vercel's builder layer, which is the
- * layer that cannot be exercised from here. So the setting is scoped to the
- * builds that actually want it rather than left on and reasoned about.
+ * - **Vercel** builds its own output and runs its own post-build step over
+ *   `.next`. On Next 16.3.4, standalone makes that step throw `ENOENT ...
+ *   .next/next-server.js.nft.json` after an otherwise clean build (#67). It is
+ *   not reproducible with `next build` alone; the breakage lives in Vercel's
+ *   builder layer, which cannot be exercised from here.
+ * - **`next start`** refuses to serve standalone output — it warns and says to
+ *   run `.next/standalone/server.js` instead — so `npm start` after a local
+ *   build was relying on behaviour Next documents as unsupported (#70).
  *
- * `VERCEL` is set in every Vercel build environment. The container build does
- * not set it — the Dockerfile runs `npm run build` inside the image — so the
- * image still gets `.next/standalone`, which is the whole reason the setting
- * exists.
+ * Exactly `"1"`, not any value. A typo in the Dockerfile then builds without
+ * standalone, and the runner stage fails loudly on a `.next/standalone` that
+ * is not there, rather than a stray `BUILD_STANDALONE=0` somewhere turning it
+ * on.
  */
-const isVercelBuild = Boolean(process.env.VERCEL);
+const isStandaloneBuild = process.env.BUILD_STANDALONE === "1";
 
 const nextConfig: NextConfig = {
   // `next dev` otherwise appends a managed block to CLAUDE.md on every run.
@@ -35,8 +39,8 @@ const nextConfig: NextConfig = {
   // at runtime and present in `npm start`, which is why CI starts the container
   // rather than only building it.
   //
-  // Off on Vercel, for the reason above the file.
-  output: isVercelBuild ? undefined : "standalone",
+  // Only when the image asks, for the reasons above the file.
+  output: isStandaloneBuild ? "standalone" : undefined,
 };
 
 export default nextConfig;

@@ -7,15 +7,15 @@ import { defineConfig, devices } from "@playwright/test";
  * that does not load — and every assertion that does not need a browser belongs
  * in the Vitest suite, which is two orders of magnitude faster.
  *
- * The server is `next dev`, not a production build, and that is worth naming
- * because it is the compromise here. `output: "standalone"` is on for every
- * build that is not Vercel's (see `next.config.ts`), and `next start` refuses to
- * serve standalone output — serving it properly means running
- * `.next/standalone/server.js` with `.next/static` copied in beside it, which is
- * what the Dockerfile does and what the container workflow already exercises on
- * every pull request. Duplicating that here would test the packaging twice and
- * the pages not at all. So: the container workflow proves the production
- * artefact boots and serves, and this proves the pages render.
+ * The server is `next dev`, not a production build. That used to be forced —
+ * every build but Vercel's was standalone, and `next start` refuses to serve
+ * standalone output — and since #70 it is a choice: only the image is built
+ * standalone now, so `npm run build && npm start` would work here. It stays
+ * `next dev` because a build first costs the better part of a minute on every
+ * run, locally and on the CI job that is already the pipeline's long pole, to
+ * re-prove what the container workflow proves on every pull request: that the
+ * production artefact boots and serves its stylesheet. So: the container
+ * workflow proves the artefact, and this proves the pages render.
  *
  * The dev server runs `src/instrumentation.ts` like any other, so it needs every
  * variable in `src/lib/env-schema.mts` to be present and well-formed before it
