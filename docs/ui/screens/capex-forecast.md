@@ -1,0 +1,167 @@
+# CapEx forecast
+
+| | |
+| --- | --- |
+| Route | `/forecast` |
+| Release | v0, portfolio view included ([PRD §12](../../PRD.md), question 6) |
+| PRD | F3 |
+| Prototype | the `isCapex` block |
+
+Every tracked item aged forward to its replacement year, ten years out, against the reserve that
+has to pay for it.
+
+---
+
+## Page header
+
+| | |
+| --- | --- |
+| Title | `CapEx forecast` |
+| Subtitle | `Ten-year capital plan, aged from equipment records` — as built |
+| Actions | A building `Select` — `All buildings`, then each — in `?building=` |
+
+---
+
+## Layout
+
+```
+┌ Ten-year capital plan: three figures, YearBarChart ────────────────────┐
+├ {year} — items ───────────────────────────────┬ rail (336px) ─────────┤
+│ DataTable                                     │ Reserve projection    │
+└───────────────────────────────────────────────┴───────────────────────┘
+```
+
+---
+
+## Regions
+
+### Ten-year capital plan
+
+A full-width `Card`: heading `Ten-year capital plan`, one line of description, three figures, the
+chart, and a caption.
+
+Description: `Every tracked item, aged forward to its expected replacement year.`
+
+| Figure | Content |
+| --- | --- |
+| **10-year total** | Replacement cost of everything due this year through nine years out, past-due items included |
+| **Reserve needed / mo** | The smallest level monthly contribution that keeps the reserve from going below zero in any of the ten years, from today's balance |
+| **Contributing / mo** | The org's stated monthly contribution |
+
+The last two need the reserve, which nothing stores yet — a [gap](README.md#gaps-these-specs-found).
+Until it exists, the second figure is level funding — the total over 120 months, labelled `to fund
+the next ten years evenly` as on [the building page](building-detail.md#summary) — and the third is
+not rendered. The "needed" rule is forecast-module logic, proposed here.
+
+**`YearBarChart`**: ten bars, this year through nine years out. Each bar is the year's replacement
+cost, and **this year's bar includes every replacement already past due**, which is what makes it
+the same set as the dashboard's End of life tile.
+
+- **Each bar is a `<button aria-pressed>`** selecting its year into `?year=`. Its accessible name is
+  the whole bar in words: `2028: $47,100, 7 items, 3 estimated, reserve short`.
+- **Fill is binary, and the binary means something.** A year in which the projected reserve goes
+  below zero is `--meter-warn`; every other year is `--surface-fill-strong`; the selected year is
+  `--accent`. The prototype's binary is "over $30,000", which means nothing on a single building and
+  something different on every portfolio. A shortfall year is F3's own requirement — "surfacing the
+  years where the reserve goes negative". Until the reserve exists, no year is marked.
+- **Each bar stacks audited cost below estimated cost.** The estimated segment takes the
+  [tokens §10](../tokens.md) treatment — card fill, dashed `--border-estimated` — so the share of
+  each year that rests on guesses is visible without a second chart.
+- **The axis is labelled**: zero and the tallest bar's value in compact `Money`, and the year under
+  each bar. Each bar's own compact total sits above it.
+- **A legend in words** beneath: `Reserve runs short` beside a swatch, and `Estimated install year`
+  beside a dashed one. The legend is text, so neither encoding is colour alone.
+
+The caption carries [the estimate sentence](README.md#figures-built-on-estimates):
+`{e} of {n} items have estimated install years.` With one building selected it links to that
+building's equipment filtered to estimated; across the portfolio it names each building with its
+count, each a link.
+
+### The selected year
+
+The main column. Heading `{year} — {total} across {n} items`, and a `DataTable`:
+
+| Column | Priority | Content |
+| --- | --- | --- |
+| Item | `primary` | Label, as a link to its building's page; note line is the building, with `ScopeLabel` |
+| Why this year | `fold` | `15 yr life · installed 2011 · estimated` — the arithmetic that put it here |
+| Cost | `figure` | `Money` |
+| Tag | `fold` | `StatusBadge` |
+| — | `detail` | `What if?` menu — below |
+
+Sorted by cost, largest first.
+
+**Tags are derived, and only four exist:** **Overdue** (replacement year before this year), **Due**
+(this year), **Big ticket** (a later year, at or above the big-ticket threshold in
+[portfolio.md](portfolio.md#your-buildings)), and **Planned** (everything else). The prototype's
+Quoted, Flagged and Discretionary each describe a record the product does not have — a quote, a flag,
+a project that is not a replacement — and are left out until something produces them.
+
+When the forecast module widens an estimated item's range, as PRD F2 asks, the note gives it:
+`estimated · 2027–2030`. The bar stays at the point estimate.
+
+**`What if?`** is PRD F3's sensitivity: `Defer 1 year`, `Defer 2 years`, `Defer 3 years`. Choosing
+one adds it to `?defer={itemId}:{years}`, and the chart, the figures and the reserve projection
+recompute on the server with the item moved. A bar above the chart says what is being shown —
+`Showing 1 change: Roof, Sumner St → 2030` — with `Clear`. Nothing is saved: this answers "what if",
+and deciding to defer is a different act with nowhere to be stored yet — a
+[gap](README.md#gaps-these-specs-found), and the one the tax planner's timing levers need too.
+
+### Reserve projection
+
+The rail. A `Card` headed `Reserve projection`, projecting the org's reserve forward to its lowest
+point in the ten years.
+
+| Line | Content |
+| --- | --- |
+| **Balance** | The reserve today, and `as of {date}` beneath |
+| **Contributions to {year}** | `DeltaValue`, positive |
+| **Replacements through {year}** | `DeltaValue`, negative |
+| **Lowest point, {year}** | `DeltaValue`, under a rule — the shortfall when negative, and `--status-danger` then |
+
+Then one sentence stating what makes that year the low point — `2028 is the low point: the Sumner
+roof and the Rowan Court furnace land that year.` — its two largest items, by name. `Update reserve`
+opens a `Modal` with the balance, its as-of date and the monthly contribution.
+
+The prototype's sentence goes on to recommend pulling the roof into 2027. That is advice, which is
+F8's to give with its inputs shown, and it is dropped here. The prototype's `See the tax effect →`
+link returns with F4, to `/tax?year={year}`.
+
+**The reserve is the org's, not a building's** — the lean in the
+[gaps](README.md#gaps-these-specs-found), because a small landlord keeps one reserve account rather
+than one per building. So with a building selected, the rail says so rather than inventing a share:
+`The reserve is held across the portfolio. Choose All buildings to see its projection.`
+
+---
+
+## Changes from the prototype
+
+- **The chart's binary is "reserve runs short"**, not "over $30k", and bars split audited from
+  estimated.
+- **Three of seven tags are dropped** until a record backs them.
+- **The advice sentence is dropped**; the factual half stays.
+- **Sensitivity is new** — PRD F3 lists it and the prototype does not draw it.
+- **A building filter is new.** The prototype's forecast is portfolio-only.
+
+---
+
+## Narrow viewports
+
+- **Below `lg`** the reserve projection follows the year's items.
+- **Below `sm`** the chart keeps all ten bars — about 24px each at 320px — drops the totals above
+  them, and labels years `'26` rather than `2026`. The selected year's total is in the heading
+  directly below, so nothing is lost but repetition.
+- The three figures stack into label-and-figure rows below `sm`. They are not `StatTile`s — each is
+  the chart beneath it summed, so there is nowhere for one to link.
+
+---
+
+## States
+
+| State | What renders |
+| --- | --- |
+| **No capital items** | One `EmptyState` in place of the whole page body: `Nothing to forecast yet` / `The forecast is built from equipment. Add it to a building and each replacement lands here.` / `Go to your buildings` |
+| **A year with nothing due** | The bar is empty and still selectable; the table reads `Nothing is due in {year}.` |
+| **No reserve entered** | The rail's `EmptyState`: `Add your reserve` / `Enter what you have set aside and what you add each month, and this shows the years it runs short.` / `Update reserve` |
+| **A deferral naming an item that no longer exists** | Dropped from the URL on render, silently — it changed nothing to show |
+| **Loading** | The figures, a ten-bar skeleton, six rows, the rail card |
