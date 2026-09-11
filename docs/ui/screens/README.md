@@ -223,16 +223,17 @@ archive, from the record's edit form, and it says what stays attached.
 
 Writing the screens against the schema turned up things the screens need and nothing yet stores.
 Each is named in the spec that needs it; they are collected here so none of them is discovered by
-a migration.
+a migration. Each has an issue, and the issue is where it gets settled — the lean here is where the
+specs left it.
 
-| Gap | Needed by | Lean |
-| --- | --- | --- |
-| **The reserve** — a balance, its as-of date, a monthly contribution | [Forecast](capex-forecast.md), the rail's `SidebarStat`; F3 is v0 | One per org, not per building: a small landlord keeps one reserve account. A building shows its *need*, which is computable today |
-| **Task confirmation** — booked with the assignee, or not yet | [Maintenance](maintenance.md#scheduled)'s Status column; PRD F5 | `tasks.confirmed_on date`, null while awaiting |
-| **Assigning to yourself or a member** — `assignee_contact_id` names only contacts | [Task modal](modal-task-detail.md#the-form); PRD §5's small groups | A nullable `assignee_user_id` beside it, at most one of the two set |
-| **A contact's rate** — `$75 / hr`, `Bid basis` | [Contacts](contacts.md#the-contact-modal), the task modal's rail, the quote wizard | `contacts.rate_note text` |
-| **A planned year and a planned classification** for work not yet done | [Tax planner](tax-planner.md#repair-or-improvement)'s decisions and levers, saving a forecast deferral, F8's `Apply to plan` | Nullable `planned_year` and `planned_classification` on `capital_items`. v1, and it blocks F4's decisions card |
-| **A past month when a unit was vacant** — periods open on the unit's *current* status, so back-filling a month it stood empty opens one that should not exist | [Rent roll](building-detail.md#units--rent) | An unmarked period can be removed as `Not rented this month`: it is derived, and an unopened period is not an unpaid one |
+| Gap | Issue | Needed by | Lean |
+| --- | --- | --- | --- |
+| **The reserve** — a balance, its as-of date, a monthly contribution | [#92](https://github.com/hbouwers/capexwise/issues/92) | [Forecast](capex-forecast.md), the rail's `SidebarStat`; F3 is v0 | One per org, not per building: a small landlord keeps one reserve account. A building shows its *need*, which is computable today |
+| **Task confirmation** — booked with the assignee, or not yet | [#93](https://github.com/hbouwers/capexwise/issues/93) | [Maintenance](maintenance.md#scheduled)'s Status column; PRD F5 | `tasks.confirmed_on date`, null while awaiting |
+| **Assigning to yourself or a member** — `assignee_contact_id` names only contacts | [#94](https://github.com/hbouwers/capexwise/issues/94) | [Task modal](modal-task-detail.md#the-form); PRD §5's small groups | A nullable `assignee_user_id` beside it, at most one of the two set |
+| **A contact's rate** — `$75 / hr`, `Bid basis` | [#95](https://github.com/hbouwers/capexwise/issues/95) | [Contacts](contacts.md#the-contact-modal), the task modal's rail, the quote wizard | `contacts.rate_note text` |
+| **A planned year and a planned classification** for work not yet done | [#96](https://github.com/hbouwers/capexwise/issues/96) | [Tax planner](tax-planner.md#repair-or-improvement)'s decisions and levers, saving a forecast deferral, F8's `Apply to plan` | Nullable `planned_year` and `planned_classification` on `capital_items`. v1, and it blocks F4's decisions card |
+| **A past month whose occupancy differs from today's** — periods open on the unit's *current* status, so back-filling a month a unit stood empty opens one that should not exist, and a month it was let, while vacant now, opens none | [#97](https://github.com/hbouwers/capexwise/issues/97) | [Rent roll](building-detail.md#units--rent) | A marker on the period that the unit stood empty, left out of both halves of every total. Not a deleted row: periods open on first view ([data-model §4](../../data-model.md)), so the next view would reopen it |
 
 And the rules a screen needs in order to display a figure, proposed here and owned by the module
 that computes them — each wants a unit test before it is trusted:
