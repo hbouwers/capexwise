@@ -19,6 +19,7 @@ import {
   parseEnv,
   serverEnvSchema,
   testEnvSchema,
+  withPreviewAppUrl,
 } from "@/lib/env-schema.mts";
 
 const VALID = "postgresql://user:hunter2@localhost:5432/capexwise";
@@ -273,6 +274,85 @@ describe("parseEnv", () => {
         expect(message).not.toContain(bad);
       }
     });
+  });
+});
+
+describe("withPreviewAppUrl", () => {
+  const BRANCH = "capexwise-git-feat-x-holdens-projects.vercel.app";
+
+  it("derives APP_URL on a preview from the branch hostname", () => {
+    const source = withPreviewAppUrl(
+      serverEnv({
+        APP_URL: undefined,
+        VERCEL_ENV: "preview",
+        VERCEL_BRANCH_URL: BRANCH,
+      }),
+    );
+
+    expect(parseEnv(serverEnvSchema, source).APP_URL).toBe(`https://${BRANCH}`);
+  });
+
+  it("treats a blank APP_URL on a preview as unset", () => {
+    // The same rule `parseEnv` applies: a dashboard that saved an empty value
+    // did not set one.
+    const source = withPreviewAppUrl({
+      APP_URL: "  ",
+      VERCEL_ENV: "preview",
+      VERCEL_BRANCH_URL: BRANCH,
+    });
+
+    expect(source.APP_URL).toBe(`https://${BRANCH}`);
+  });
+
+  it("leaves an APP_URL that is set alone, even on a preview", () => {
+    const source = withPreviewAppUrl({
+      APP_URL: "https://preview.example.com",
+      VERCEL_ENV: "preview",
+      VERCEL_BRANCH_URL: BRANCH,
+    });
+
+    expect(source.APP_URL).toBe("https://preview.example.com");
+  });
+
+  it("never derives one in production", () => {
+    // The regression worth a test. Production answers on `capexwise.com`, not
+    // on a `vercel.app` hostname, so a derived value there would send every
+    // OAuth callback to the wrong host — and an unset APP_URL has to stay a
+    // boot failure naming the variable.
+    const source = withPreviewAppUrl(
+      serverEnv({
+        APP_URL: undefined,
+        VERCEL_ENV: "production",
+        VERCEL_BRANCH_URL: BRANCH,
+      }),
+    );
+
+    expect(() => parseEnv(serverEnvSchema, source)).toThrow(
+      /APP_URL is not set/,
+    );
+  });
+
+  it("never derives one off Vercel", () => {
+    // Locally, in CI and in the container there is no VERCEL_ENV at all.
+    const source = withPreviewAppUrl(
+      serverEnv({ APP_URL: undefined, VERCEL_BRANCH_URL: BRANCH }),
+    );
+
+    expect(() => parseEnv(serverEnvSchema, source)).toThrow(
+      /APP_URL is not set/,
+    );
+  });
+
+  it("leaves APP_URL unset on a preview with no branch hostname", () => {
+    // A deployment made from the CLI rather than from git has none. Unset is a
+    // boot failure naming APP_URL, which is the right outcome.
+    const source = withPreviewAppUrl(
+      serverEnv({ APP_URL: undefined, VERCEL_ENV: "preview" }),
+    );
+
+    expect(() => parseEnv(serverEnvSchema, source)).toThrow(
+      /APP_URL is not set/,
+    );
   });
 });
 

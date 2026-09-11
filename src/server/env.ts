@@ -26,7 +26,11 @@
  */
 import "server-only";
 
-import { parseEnv, serverEnvSchema } from "@/lib/env-schema.mts";
+import {
+  parseEnv,
+  serverEnvSchema,
+  withPreviewAppUrl,
+} from "@/lib/env-schema.mts";
 import type { z } from "zod";
 
 type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -34,7 +38,7 @@ type ServerEnv = z.infer<typeof serverEnvSchema>;
 let parsed: ServerEnv | undefined;
 
 export function env(): ServerEnv {
-  parsed ??= parseEnv(serverEnvSchema, process.env);
+  parsed ??= parseEnv(serverEnvSchema, withPreviewAppUrl(process.env));
 
   return parsed;
 }

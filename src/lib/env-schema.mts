@@ -61,10 +61,10 @@ export const serverEnvSchema = z.object({
    *
    * Deliberately ours and required rather than Better Auth's own
    * `BETTER_AUTH_URL` picked up from the ambient environment: one name, checked
-   * at boot, named in the failure. Preview deployments have generated hostnames
-   * and so need it set per deployment, which is #32's job and is written down
-   * in `.env.example` rather than papered over with a `VERCEL_URL` fallback
-   * here — a fallback would make the wrong value a silent 302 to the wrong host.
+   * at boot, named in the failure. The one place it is derived rather than set
+   * is a Vercel preview, whose hostname is generated per branch —
+   * `withPreviewAppUrl` below, which says why that is safe there and nowhere
+   * else.
    */
   APP_URL: z
     .string()
@@ -124,7 +124,51 @@ export const serverEnvSchema = z.object({
       ctx.addIssue(error.message);
     }
   }),
+
+  /**
+   * Which Vercel environment this is. Vercel sets it on every deployment, and
+   * nothing sets it anywhere else — locally, in CI and in the container it is
+   * absent, which is why it is optional.
+   *
+   * Read for one thing: a preview cannot complete Google sign-in (#32), so the
+   * sign-in page says so instead of sending the reader to Google's
+   * `redirect_uri_mismatch`. Google matches redirect URIs exactly, and every
+   * preview branch has a new hostname to match.
+   */
+  VERCEL_ENV: z.enum(["production", "preview", "development"]).optional(),
 });
+
+/**
+ * Fills in `APP_URL` on a Vercel preview deployment, and nowhere else.
+ *
+ * A preview's hostname is generated per git branch, so there is no value to set
+ * once in the project's Preview scope, and Vercel does not interpolate one
+ * variable into another. `VERCEL_BRANCH_URL` is that branch's own hostname —
+ * the one the pull request links to — and Vercel sets it on every deployment
+ * made from git. On a preview, then, the derived value is the right one by
+ * construction rather than a guess.
+ *
+ * Anywhere else a fallback would be exactly the failure the schema exists to
+ * prevent. Production, the container and a laptop each answer on an origin only
+ * the operator knows, and deriving one there would turn a missing value into a
+ * silent redirect to the wrong host. So it is scoped to `VERCEL_ENV=preview`,
+ * and an `APP_URL` that is set always wins.
+ *
+ * It reads `VERCEL_BRANCH_URL` from the source and adds nothing to the parsed
+ * environment: the hostname is an input to `APP_URL`, not a value anything else
+ * should be reading.
+ */
+export function withPreviewAppUrl(
+  source: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  if (source.VERCEL_ENV?.trim() !== "preview") return source;
+  if (source.APP_URL?.trim()) return source;
+
+  const host = source.VERCEL_BRANCH_URL?.trim();
+  if (!host) return source;
+
+  return { ...source, APP_URL: `https://${host}` };
+}
 
 /**
  * What `npm run db:migrate` needs, which is a strict subset. The runner does not
