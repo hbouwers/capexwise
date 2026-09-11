@@ -207,7 +207,7 @@ to start the server if a server variable carries the prefix. There are no public
 | Variable | Local | Preview | Production |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | `.env.local`, pointing at the compose database | Written by the Neon integration for each preview deployment — a branch of its own, separate from production's, settled in [#33](https://github.com/hbouwers/capexwise/issues/33) | Vercel project environment, Production scope, **set by hand and Sensitive** — not the integration's: the managed instance's pooled endpoint, logged in as `capexwise_app` ([#33](https://github.com/hbouwers/capexwise/issues/33), [#81](https://github.com/hbouwers/capexwise/issues/81)) |
-| `APP_URL` | `http://localhost:3000` | **Per deployment.** A preview hostname is generated, so this cannot be set once at the project level ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
+| `APP_URL` | `http://localhost:3000` | **Leave it unset.** A preview's hostname is generated per branch, so the server derives it from Vercel's `VERCEL_BRANCH_URL`, on a preview only ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
 | `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
 | `ACCESS_CODE_KEYS` | Generated once, per machine | Vercel project environment, Preview scope; its own value, never production's | Vercel project environment, Production scope, **Sensitive**, with a copy kept outside Vercel ([ADR-0008](docs/adr/0008-access-code-encryption.md)) |
@@ -321,7 +321,8 @@ application will not start without a client. Creating one, in the Google Cloud c
 3. **Authorised redirect URIs:** one per environment, each of them that environment's `APP_URL`
    plus `/api/auth/callback/google`. For local development that is
    `http://localhost:3000/api/auth/callback/google` — and `http://localhost:3001/...` as well if
-   you sign in through `npm run docker:up`.
+   you sign in through `npm run docker:up`. Previews get none: Google matches redirect URIs
+   exactly, so sign-in is off on them ("Deployments" below).
 4. Copy the client id and secret into `.env.local`.
 
 No scopes beyond the default profile and email are requested, and none should be: the product has
@@ -508,6 +509,47 @@ tests and what deliberately does not — is in [CLAUDE.md](./CLAUDE.md) under "T
 | `npm run format` | Prettier, writing in place |
 | `npm run format:check` | Prettier, checking only — what CI asks |
 | `npm run typecheck` | Generate route types, then `tsc --noEmit` |
+
+## Deployments
+
+One Vercel project, `capexwise`, connected to this repository, with two kinds of deployment.
+
+**Production is `main`, at `https://capexwise.com`.** Every merge deploys it. There is one
+production at every stage, holding every org, and [ADR-0009](docs/adr/0009-one-production.md) is
+why. `capexwise.vercel.app` redirects to it.
+
+**It runs on Vercel Hobby, and Hobby forbids commercial use.** Vercel counts any deployment used
+for someone's financial gain as commercial, including one that asks its visitors for payment. So the
+first paying customer forces production onto Vercel Pro or Cloud Run, whichever
+[ADR-0002](docs/adr/0002-hosting.md)'s trigger picks then. That is why the container is built and
+started on every pull request. ADR-0009 covers moving back to Hobby if the paid product closes.
+
+**Every pull request gets a preview**, at a `capexwise-git-<branch>-…vercel.app` address that
+Vercel's bot posts on the pull request. A preview has:
+
+- **Vercel Authentication in front of it.** Only members of the Vercel team can open it. Leave
+  that setting on: a preview runs unmerged code, Dependabot's included.
+- **Its own Neon branch**, `preview/<git branch>`, created when the preview is and deleted when the
+  pull request closes. "The database" above has the details, and
+  [#85](https://github.com/hbouwers/capexwise/issues/85) is why that branch should stop starting
+  as a copy of production's rows.
+- **Its own secrets**, the Preview-scoped values in the table above.
+- **No sign-in.** Google matches redirect URIs exactly, and every branch has a new hostname, so a
+  preview's callback is never on the list. The sign-in page says so instead of offering a button.
+  What a preview does prove is that Vercel's build succeeds, and that the server boots with
+  Preview's configuration and serves the sign-in page and `/styleguide`. To review signed-in pages,
+  run the branch locally. Better Auth's `oAuthProxy` plugin would make preview sign-in work, but
+  it needs a secret shared by Preview and Production that can create a production session. Preview
+  runs unmerged code, so that secret would not stay private.
+
+A preview's `APP_URL` is derived from `VERCEL_BRANCH_URL`, and only there. Vercel sets that
+variable on every deployment made from git, as long as the project's **Automatically expose System
+Environment Variables** setting is on. That is the default. `APP_URL` is left unset in the Preview
+scope: a value set there wins over the derived one, for every preview at once.
+
+**No variable reaches the browser.** There are no `NEXT_PUBLIC_` variables, and Next only inlines
+the ones code refers to. So a variable in the Vercel dashboard is not published by existing there.
+`src/lib/env-schema.mts` refuses to start a server whose schema gives a server variable the prefix.
 
 ## Continuous integration
 

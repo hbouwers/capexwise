@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { GoogleMark } from "@/components/google-mark";
 import { signInWithGoogle } from "@/server/actions/auth";
+import { env } from "@/server/env";
 import { AFTER_SIGN_IN_PATH, getSession } from "@/server/session";
 import { redirect } from "next/navigation";
 
@@ -39,6 +40,12 @@ export default async function SignInPage({
   // ours to render verbatim. One banner covers all of them.
   const failed = (await searchParams).error !== undefined;
 
+  // A preview cannot finish a Google round trip: Google matches redirect URIs
+  // exactly, and every preview branch has a hostname nobody registered (#32).
+  // The button would lead to Google's `redirect_uri_mismatch` page, so it is
+  // replaced by a line saying where signed-in pages can be seen instead.
+  const preview = env().VERCEL_ENV === "preview";
+
   return (
     <main className="flex flex-1 items-center justify-center bg-surface-page p-8">
       <div className="w-full max-w-sm">
@@ -61,19 +68,29 @@ export default async function SignInPage({
             </p>
           ) : null}
 
-          {/* A form and a submit button, not an onClick. It is a real POST, so
-              it works before hydration and without JavaScript, and the action
-              runs on the server where the OAuth state cookie has to be set. */}
-          <form action={signInWithGoogle}>
-            <Button type="submit" variant="outline" className="w-full">
-              <GoogleMark />
-              Continue with Google
-            </Button>
-          </form>
+          {preview ? (
+            <p className="rounded-md bg-tint-neutral px-3 py-2 text-xs leading-normal text-status-neutral">
+              Sign-in is off on preview deployments. To see the signed-in pages,
+              run this branch locally.
+            </p>
+          ) : (
+            <>
+              {/* A form and a submit button, not an onClick. It is a real POST,
+                  so it works before hydration and without JavaScript, and the
+                  action runs on the server where the OAuth state cookie has to
+                  be set. */}
+              <form action={signInWithGoogle}>
+                <Button type="submit" variant="outline" className="w-full">
+                  <GoogleMark />
+                  Continue with Google
+                </Button>
+              </form>
 
-          <p className="mt-4 text-xs leading-normal text-text-muted">
-            Signing in creates an account if you do not have one.
-          </p>
+              <p className="mt-4 text-xs leading-normal text-text-muted">
+                Signing in creates an account if you do not have one.
+              </p>
+            </>
+          )}
         </div>
       </div>
     </main>
