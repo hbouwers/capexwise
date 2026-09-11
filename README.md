@@ -259,6 +259,11 @@ down here.
 which adds the roles it creates to Neon's own administrative group
 ([#81](https://github.com/hbouwers/capexwise/issues/81) has the statements).
 
+A third login, `capexwise_backup`, is the nightly backup's, and was created the same way. It holds
+`capexwise_reader`: every row of every table, and no write privilege anywhere
+([ADR-0010](docs/adr/0010-backups.md)). It connects on the direct endpoint, and only from the
+backup workflow ("Backups" below).
+
 **The Neon integration does not supply production's `DATABASE_URL`.** It connects only as the owner
 and has no setting for the role, so its connection to the Vercel project covers Preview only.
 Production is unticked, and so is Development, because local development uses the compose
@@ -299,8 +304,8 @@ node -e "console.log('1:' + require('crypto').randomBytes(32).toString('base64ur
 Production's is the one secret here whose loss costs data rather than a sign-in. Vercel will not
 show a Sensitive value again, and every code sealed under a key that nobody holds is gone. So the
 value goes into the password manager as well as into Vercel, and a key retired by a rotation stays
-there for as long as any backup that needs it
-([#35](https://github.com/hbouwers/capexwise/issues/35)). [ADR-0008](docs/adr/0008-access-code-encryption.md)
+there for as long as any backup that needs it: 90 days after the rotation, the life of a nightly
+dump ([ADR-0010](docs/adr/0010-backups.md)). [ADR-0008](docs/adr/0008-access-code-encryption.md)
 has the rotation.
 
 `npm run db:migrate` validates a strict subset — `DATABASE_URL` and nothing else — so the CI job
@@ -400,6 +405,7 @@ migration that drops anything.
 | `npm run db:generate` | Generate a migration from the schema. Takes `-- --name a_description` |
 | `npm run db:migrate` | Apply committed migrations. Needs `DATABASE_URL` |
 | `npm run db:drift` | Fail if the schema is ahead of the committed migrations |
+| `npm run db:backup` | Dump a database, restore it into a scratch one, and compare. Takes `-- <file>`. What the nightly backup runs |
 | `npm run db:studio` | Drizzle Studio, a browser UI over the data |
 
 The demo seed is [#34](https://github.com/hbouwers/capexwise/issues/34), so `db:migrate` leaves a
@@ -648,6 +654,23 @@ sensitive as production's database credential. Setting it up, once:
    place.
 
 Until both are set, the job fails on every closed pull request, naming them.
+
+### Backups
+
+[`.github/workflows/backup.yml`](.github/workflows/backup.yml) runs every night at 08:17 UTC, and
+by hand from the Actions tab. It dumps production as `capexwise_backup` and restores the dump into
+an empty Postgres on the runner. Then it compares the two, table by table, row security included,
+and only then encrypts the dump with `age` and uploads it to an S3-compatible bucket, where it is
+kept for 90 days. A dump that does not restore and match is never uploaded, so every backup has been
+restored once. The run's summary says how long that took.
+
+It is not part of the merge gate, and like the preview cleanup it cannot run on a pull request: its
+credentials are in a GitHub environment named `backups`, with a deployment branch rule for `main`.
+That is a separate environment from `production`, so this job cannot read the migration credential,
+and the migration job cannot read this one. Setting it up, restoring from it, and the quarterly
+drill that proves the decryption key still works are in
+[`docs/runbooks/backup-and-restore.md`](docs/runbooks/backup-and-restore.md).
+[ADR-0010](docs/adr/0010-backups.md) is why it is built this way.
 
 ### Code scanning
 

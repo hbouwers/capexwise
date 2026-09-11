@@ -31,6 +31,8 @@ import prettier from "eslint-config-prettier/flat";
  *   src/server/auth.ts         the auth provider (#25)
  *   src/db/migrate.mts         the migration runner, which predates any org
  *                              context and opens its own connection
+ *   src/db/backup.mts          the nightly backup (#35), which reads every
+ *                              org at once, as a role that can write none
  *   src/test/db.ts             the integration harness (#21)
  *   src/server/org-context.integration.test.ts
  *                              the only test that calls `forOrg()` directly,
@@ -68,6 +70,7 @@ const UNSCOPED_DB_ALLOWED = [
   "src/db/client.ts",
   "src/server/auth.ts",
   "src/db/migrate.mts",
+  "src/db/backup.mts",
   "src/test/db.ts",
 ];
 
