@@ -83,6 +83,10 @@ Three kinds of code reach the database, and they need different things:
 | The integration harness (`src/test/db.ts`) | It is the compose superuser, so that #27's test can tell a hidden row from one never written | It exists only under Vitest; the application under test logs in as `capexwise_test_app`, which is not |
 | The identity path, on three tables | It has to read memberships before any of them is the context | Three tables wide, and `src/server/cross-org-isolation.integration.test.ts` fails if a fourth appears |
 
+*Later:* [ADR-0010](0010-backups.md) adds a third NOLOGIN role, `capexwise_reader`, for the nightly
+backup. It is not a row on this table, because it bypasses nothing. It reads every row through a
+`for select` policy on each table that says it may, and it holds no write privilege anywhere.
+
 A **data** migration that touches an org-owned table is the case this leaves open. The owner is
 subject to `FORCE`, so on a login that is neither superuser nor `BYPASSRLS` it would see the three
 identity-path tables and nothing of a domain table — an `UPDATE` that silently matches zero rows.

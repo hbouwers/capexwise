@@ -728,7 +728,7 @@ references that are informational.** A `set null` that would lose a fact is a `r
 
 | When this is deleted | What happens |
 |---|---|
-| **Organization** | Two-phase. `deleted_at` is set and access stops immediately; a purge job hard-deletes after **30 days**, cascading through every domain table. ADR-0003 notes that restoring one org is a selective export rather than a database restore, which is exactly why the window exists. Export (#45) should be offered at the point of deletion |
+| **Organization** | Two-phase. `deleted_at` is set and access stops immediately; a purge job hard-deletes after **30 days**, cascading through every domain table. ADR-0003 notes that restoring one org is a selective export rather than a database restore, which is exactly why the window exists. Export (#45) should be offered at the point of deletion. The purged rows stay in the nightly backups until those expire, 90 days later ([ADR-0010](adr/0010-backups.md)), so an org is gone from every copy 120 days after it is deleted |
 | **User** | The `users` row survives as long as anything references it — `invitations.inviter_id` is `restrict`, and #42's audit log will be too. Account deletion revokes memberships and clears sessions; it does not erase authorship |
 | **Membership (revoked)** | Hard delete of the row. Nothing is orphaned: tasks are assigned to contacts, not users. Blocked if it would leave the org with no owner |
 | **Building** | `restrict` from units, capital items, tasks, rent periods, transactions. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
@@ -824,6 +824,7 @@ as which; `drizzle/0006_row_level_security.sql` is where the first three tables 
 
 ```sql
 grant select, insert, update, delete on buildings to capexwise_scoped;
+grant select on buildings to capexwise_reader;
 
 alter table buildings enable row level security;
 alter table buildings force  row level security;   -- the owner is not exempt
@@ -833,6 +834,11 @@ create policy buildings_org_isolation on buildings
   to capexwise_scoped
   using      (org_id = current_org_id())
   with check (org_id = current_org_id());
+
+create policy buildings_backup_read on buildings
+  for select
+  to capexwise_reader
+  using (true);
 ```
 
 - `to capexwise_scoped` because that is the role every scoped transaction runs as: `db.forOrg()`
@@ -858,6 +864,12 @@ create policy buildings_org_isolation on buildings
 - `app.current_org_id` is set with `SET LOCAL` inside the transaction, and so is the role. Never
   session-level: under transaction-mode pooling that setting outlives the request and is inherited
   by whoever gets the connection next.
+- The `capexwise_reader` lines are the nightly backup's ([ADR-0010](adr/0010-backups.md),
+  `drizzle/0007_backup_reader.sql`). The backup reads through the policies, because nothing it can
+  log in as on Neon is allowed past them. So a table with row level security and no read policy for
+  it is dumped empty and restores empty, and the restore drill cannot tell, because it counts both
+  sides as the reader. Every table gets the grant, the ones outside the boundary included. Every
+  table with row level security gets the policy as well, and it is read-only.
 - **No `deleted_at is null` in the policy**, `organizations` included. The scoped role only ever
   carries the id of an org `resolveOrgForUser()` has just found live, so the soft delete is enforced
   before the context exists — and a `USING` clause that hid deleted orgs would refuse the soft
@@ -894,7 +906,9 @@ no `INSERT` on `organizations` at all: a scoped handle is by definition already 
 
 **Who bypasses row-level security**, in full: the migration role, because DDL is not subject to it;
 the integration harness's own connection, the compose superuser, so that the isolation test can see
-what a scoped path hides; and the identity path, on the three tables above. A *data* migration over
+what a scoped path hides; and the identity path, on the three tables above. The backup's reader
+does not bypass anything. It reads every org's rows because every table has a policy saying it may,
+and it can write none. A *data* migration over
 an org-owned table would be subject to `FORCE` and see no domain rows. The demo reset (#34) is the
 first job that has to write across orgs, and it decides how — with its own role, rather than by
 inheriting a bypass. ADR-0007 has the table.
@@ -906,9 +920,12 @@ ADR-0003 promised four items per new table, and #23 puts them in the PR template
 1. `org_id uuid not null references organizations (id) on delete cascade`
 2. An index leading with `org_id`
 3. A grant to `capexwise_scoped` for the commands the product needs, `enable` + `force` row level
-   security, and the policy above — and never a grant or a policy for `capexwise_identity`
+   security, and the policy above — and never a grant or a policy for `capexwise_identity`. Plus
+   `select` and the read policy for `capexwise_reader`, which a table outside the boundary needs the
+   grant half of too
 4. A case in the cross-org isolation test (#27). Naming the table in `ORG_OWNED` there is what makes
-   the registry check items 1 and 3, and runs the unfiltered-query probes over it
+   the registry check items 1 and 3, and runs the unfiltered-query probes over it. The reader's
+   half of item 3 is checked on every table whether it is named there or not
 
 ### What #27 has to cover
 
