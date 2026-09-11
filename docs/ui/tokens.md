@@ -667,8 +667,10 @@ the installed version added or changed:
   Windows in front of it.
 - **Component-level density** (#11). The design is denser than shadcn's defaults; which components
   get overridden and by how much is the component inventory's job, not a token's.
-- **Mobile.** Nothing here is viewport-dependent, which is deliberate — but the type scale has not
-  been looked at below 375px and #12 may need a step or two to respond.
+- ~~**Mobile.**~~ Settled by #12 without a token change: the type scale does not respond to width.
+  What does respond — tables, tiles, modals, form fields — is component layout, in
+  [`screens/README.md`](screens/README.md#rules-every-screen-shares). The one size that moves is a
+  form field's, to 16px below `md`, and it moves onto a step already in the scale.
 - **Motion.** The prototype has no transitions or animations at all. That is not evidence of a
   decision; #11 should set a duration and easing pair and a `prefers-reduced-motion` rule.
 - **Chart thresholds** (PRD F3). The token names exist; the numbers behind good/warn/bad are forecast

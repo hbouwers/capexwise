@@ -257,19 +257,20 @@ These are the ones worth writing down, because each owns a rule.
 | `StatTile` | Label / figure / sub-line | `Card` | Supports the split value (a big `3` with an inline "overdue"). Every tile links to the surface that owns the number — a PRD F0 requirement, so the link is required, not optional |
 | `ConfidenceBadge` | `ESTIMATED` / `AUDITED` | `Badge` | The six-property swap in [tokens §10](tokens.md). **The word is the primary signal**; the dashed border reinforces it |
 | `StatusBadge` | Tinted label | `Badge` | Foreground and tint always come from the same status pair. Five variants; see §9 for why seven labels collapse to five |
-| `PriorityPill` | High / Medium / Low | `StatusBadge` | An alias, not a component. Medium changes colour — §9 |
+| `PriorityPill` | High / Normal / Low | `StatusBadge` | An alias, not a component. The words are the `task_priority` enum's; High takes the overdue pair, Normal and Low the neutral pair ([maintenance.md](screens/maintenance.md#changes-from-the-prototype)) |
 | `TradeChip` | One trade tag | `Badge` | Filter chips and display chips are the same chip in two states |
 | `LifeBar` | Age against expected life | `Meter` | Thresholds 60 / 85 / 100 % → Healthy, Watch, Due soon, Past life. **Always paired with the percentage in text** |
 | `Meter` | A single-value bar | `Progress` | Track `--meter-track`, top-only radius on chart bars. Length is the encoding; colour is redundant ([tokens §11](tokens.md)) |
 | `MaskedValue` | Access codes | custom | Masked by default. **Fixed-width mask, reveal is a server action** — §9 |
+| `ScopeLabel` | `Shared`, or a unit's label | custom | **Not in the prototype**, which predates units. Scope is written, never only coloured, and a single-unit building renders none — [screens/README](screens/README.md#building-or-unit) |
 | `FactRow` / `FactGroup` | Label-over-value pairs in the facts card | custom | Four groups: Access, Services, Utility accounts, Average bill |
 | `EmptyState` | **Not in the prototype** | custom | Title, one line, one action. Every list needs one; see §10 |
 | `PlanGate` | Wraps a premium surface | custom | Reads `can(org, feature)` from props, never from the client ([#29](https://github.com/hbouwers/capexwise/issues/29)). **Server-only**: a locked org's `children` are never rendered, so they are in neither the HTML nor the RSC payload. No upgrade button until billing gives it somewhere to go |
 | `PremiumBadge` | The `PREMIUM` pip | `Badge` | Cosmetic. `PlanGate` does the gating; this only labels it |
 | `TaxDisclaimer` | The planning-aid-not-advice notice | custom | Required copy, not a nicety — PRD F4 and [#38](https://github.com/hbouwers/capexwise/issues/38). Persistent on every tax surface, not dismissible |
 
-`EmptyState` and `OrgSwitcher` are the only two components in this document that cannot be
-extracted, because the prototype has neither. That is a property of prototypes, not of the design.
+`EmptyState`, `OrgSwitcher` and `ScopeLabel` are the only components in this document that cannot
+be extracted, because the prototype has none of them. That is a property of prototypes, not of the design.
 
 ---
 
@@ -304,6 +305,15 @@ there:
 - The row is the click target where a row is clickable — and then it is a `<tr>` containing a
   `<button>` or `<a>`, not a `<div onClick>`. See §9.
 - Header cells are `FieldLabel`.
+- **Every column has a priority** — `primary`, `figure`, `control`, `fold` or `detail` — and below
+  `md` only the first three render, with folded values appended to the primary cell's note line. The
+  table stays a table at every width: no sideways scroll, no reflow into cards.
+  [screens/README](screens/README.md#tables-below-md) has the rule, and each screen spec lists its
+  columns' priorities.
+
+A ninth table, the **rent roll**, is specified in
+[building-detail.md](screens/building-detail.md#units--rent): unit, expected, received, and the Paid
+control.
 
 ### Charts and figures
 
@@ -320,7 +330,7 @@ there:
 
 | Component | Notes |
 | --- | --- |
-| `BuildingCard` | Photo, name, meta, flag chip, three-stat footer, `LifeBar`. The **flag** is a computed summary string in the prototype ("4 past life", "healthy", "furnace 2028") — it needs a stated rule, or it is untestable. Proposed: worst-severity item count, else the nearest big-ticket year, else "healthy" |
+| `BuildingCard` | Photo, name, meta, flag chip, three-stat footer, `LifeBar`. The **flag** is a computed summary string in the prototype ("4 past life", "healthy", "furnace 2028") — it needs a stated rule, or it is untestable. The rule is in [portfolio.md](screens/portfolio.md#your-buildings), and the photo waits for [#40](https://github.com/hbouwers/capexwise/issues/40) |
 | `ContactCard` | Name, company, rating, trade chips, phone/email, rate + last used |
 | `DecisionRow` | Repair-vs-improvement row on the tax screen, with its saving |
 | `AdviceCard` | F8 recommendation: title, why, capex/tax pair, confidence note, apply action. **Must show its inputs** — PRD F8 |
@@ -369,7 +379,7 @@ is therefore either presentational or interactive; none is connected.
 
 | Category | Meaning | Members |
 | --- | --- | --- |
-| **Presentational** | Props only. No state, no effects, renders on the server. | `Numeric`, `Money`, `DateValue`, `DeltaValue`, `FieldLabel`, `StatTile`, `ConfidenceBadge`, `StatusBadge`, `PriorityPill`, `TradeChip`, `LifeBar`, `Meter`, `FactRow`, `FactGroup`, `SeasonalStrip`, `RunwayList`, `IncomeStatement`, `TimingLeverList`, `ContactCard`, `BuildingCard`, `EmptyState`, `PremiumBadge`, `TaxDisclaimer`, `PageHeader`, `NavGroup` |
+| **Presentational** | Props only. No state, no effects, renders on the server. | `Numeric`, `Money`, `DateValue`, `DeltaValue`, `FieldLabel`, `StatTile`, `ConfidenceBadge`, `StatusBadge`, `PriorityPill`, `TradeChip`, `ScopeLabel`, `LifeBar`, `Meter`, `FactRow`, `FactGroup`, `SeasonalStrip`, `RunwayList`, `IncomeStatement`, `TimingLeverList`, `ContactCard`, `BuildingCard`, `EmptyState`, `PremiumBadge`, `TaxDisclaimer`, `PageHeader`, `NavGroup` |
 | **Interactive** (`"use client"`) | Local UI state only — open, selected, revealed, filtered. | `Sidebar`/`NavItem` (active route), `OrgSwitcher`, `Modal` and all three modals, `QuoteWizard`, `SegmentedControl`, `Tabs`, `YearBarChart` (selection), `TradeChip` filter row, `DataTable` where rows are clickable or contain controls, `CatalogGroup`, `DecisionRow`, `MaskedValue` |
 | **Server-mutating** | Interactive, and calls a server action. | `MaskedValue` (reveal), `DecisionRow` (classification), `LifeBar`'s Confirm action, rent checkoff, task checkoff, `AdviceCard`'s apply |
 
@@ -496,24 +506,21 @@ one line in `@theme`, which is why this is decided now rather than deferred agai
 
 ## 13. What this does not settle
 
-- **Per-screen composition and copy** — [#12](https://github.com/hbouwers/capexwise/issues/12).
-  Which components each screen uses, in what order, with what strings, and what happens to each on
-  a narrow viewport. Nothing here is responsive yet; the prototype is desktop-only at a hard
-  `min-width: 1240px`, and that constraint is #12's to replace.
-- **Input font size on a narrow viewport** —
-  [#12](https://github.com/hbouwers/capexwise/issues/12). §5 puts the input at `text-sm`, which is
-  13px, and iOS Safari zooms the page when a focused input is under 16px. The design is 12.5px, so
-  the desktop value is not in question; what a form field does below 768px is a mobile decision the
-  screen specs have to make, along with everything else the prototype's `min-width: 1240px` left
-  undefined.
+- ~~**Per-screen composition and copy**~~ — settled by
+  [#12](https://github.com/hbouwers/capexwise/issues/12) in [`screens/`](screens/README.md), which
+  replaces the prototype's `min-width: 1240px` with a 320px floor.
+- ~~**Input font size on a narrow viewport**~~ — settled by
+  [#12](https://github.com/hbouwers/capexwise/issues/12). `Input`, `Select` and `Textarea` are
+  `text-lg` (16px) below `md`, where iOS Safari would otherwise zoom on focus, and §5's `text-sm`
+  from `md` up ([screens/README](screens/README.md#form-fields)).
 - ~~**`can(org, feature)` and the org switcher**~~ — settled by
   [#29](https://github.com/hbouwers/capexwise/issues/29). `can()` is `src/lib/plan.ts` and gates
   only the premium features, F7 and F8, because free and paid differ by capacity rather than by
   feature (PRD §12). The switcher is in §4.
-- **Rent roll components.** PRD F1's monthly rent period and one-click Paid checkoff
-  ([#48](https://github.com/hbouwers/capexwise/issues/48)) have no prototype equivalent at all —
-  the prototype predates them. `RentRollTable`, `RentPeriodRow` and the checkoff belong to whoever
-  builds F1, following the `DataTable` conventions in §7.
+- ~~**Rent roll components**~~ — specified by
+  [#12](https://github.com/hbouwers/capexwise/issues/12) in
+  [building-detail.md](screens/building-detail.md#units--rent): a `DataTable` following §7, its
+  four row states, and the Paid control with Other amount beside it.
 - **Chart thresholds** — PRD F3. `LifeBar`'s 60/85/100 come from the prototype and are plausible;
   the reserve meter's are forecast logic.
 - **Print** — [#45](https://github.com/hbouwers/capexwise/issues/45). No component has been looked
