@@ -82,6 +82,11 @@ Calling the v0 figure "cash flow" would put a number labelled net on a page that
 two when the column is at least 36rem wide (`@xl:grid-cols-2` on an `@container` main column — see
 [README](README.md#widths) for why it is not a viewport breakpoint). Sorted by label, then address.
 
+**Archived and sold buildings are not in this grid**, because they are not in the portfolio's
+figures. They follow it in a section of their own — `Archived`, or `Archived and sold` when any are
+sold — as the same card with the status as its flag, so each stays one click from the edit form
+that restores it. The spec was silent on where they go; #105 settled it.
+
 Each card is one `<a>` to `/buildings/{id}` — there is nothing else interactive inside it, which is
 what makes a whole-card link legitimate.
 

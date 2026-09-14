@@ -37,3 +37,23 @@ export function compareUnitLabels(a: string, b: string): number {
 export function unitCount(n: number): string {
   return n === 1 ? "1 unit" : `${n} units`;
 }
+
+type Address = {
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  region: string;
+  postalCode: string;
+};
+
+/** `Indianapolis, IN 46204`. */
+export function cityLine(address: Address): string {
+  return `${address.city}, ${address.region} ${address.postalCode}`;
+}
+
+/** `412 N Delaware St, Rear, Indianapolis, IN 46204` — the address on one line. */
+export function fullAddress(address: Address): string {
+  return [address.addressLine1, address.addressLine2, cityLine(address)]
+    .filter(Boolean)
+    .join(", ");
+}

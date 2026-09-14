@@ -43,11 +43,13 @@ const NAV = [
 /**
  * Whether `href` is the section `pathname` is in. The root matches only
  * itself — every path starts with `/`, so a prefix test would light Portfolio
- * up on every screen.
+ * up on every screen — and a building's pages, which are reached from its card
+ * on the portfolio and have no nav entry of their own
+ * (`docs/ui/screens/building-detail.md`).
  */
 function isCurrent(pathname: string, href: string) {
   return href === "/"
-    ? pathname === "/"
+    ? pathname === "/" || pathname.startsWith("/buildings/")
     : pathname === href || pathname.startsWith(`${href}/`);
 }
 
