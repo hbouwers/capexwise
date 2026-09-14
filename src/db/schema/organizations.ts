@@ -1,6 +1,9 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  check,
+  date,
   pgEnum,
   pgTable,
   text,
@@ -63,6 +66,30 @@ export const organizations = pgTable(
     metadata: text("metadata"),
     plan: orgPlan("plan").notNull().default("free"),
     isDemo: boolean("is_demo").notNull().default(false),
+    // The capital reserve F3 projects forward (#92). One per org rather than
+    // one per building, because a small landlord keeps one reserve account;
+    // a building's page shows its ten-year *need* instead. Columns rather than
+    // a table because nothing reads the history of the balance — the forecast
+    // wants today's figure and the date it was true.
+    //
+    // All three null means no reserve has been entered, which is the forecast
+    // rail's empty state; the `all_or_none` check below keeps a half-entered
+    // reserve from being a fourth state for every reader to handle.
+    //
+    // `mode: "number"` because a JavaScript number holds integer cents exactly
+    // up to 2^53, about $90 trillion, and a `bigint` can neither be mixed into
+    // number arithmetic nor serialised to JSON — so it would be converted at
+    // every boundary, and each conversion is a place to get it wrong.
+    reserveBalanceCents: bigint("reserve_balance_cents", { mode: "number" }),
+    // A `date`, not a timestamp: "as of 3 September" has no clock time and no
+    // timezone (ADR-0005). What the balance was, not when it was typed. Read
+    // back as a `YYYY-MM-DD` string, Drizzle's default: a JavaScript `Date`
+    // would give it a midnight in some timezone, and move it a day in others.
+    reserveAsOf: date("reserve_as_of"),
+    reserveMonthlyContributionCents: bigint(
+      "reserve_monthly_contribution_cents",
+      { mode: "number" },
+    ),
     // Soft delete, one of only two in the schema. Access stops when this is
     // set; a purge job hard-deletes 30 days later (§7).
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -84,5 +111,19 @@ export const organizations = pgTable(
     uniqueIndex("organizations_one_demo")
       .on(table.isDemo)
       .where(sql`is_demo`),
+    // The reserve is entered as one thing, in one modal. A balance with no
+    // date cannot be projected from, and a contribution with no balance has
+    // nothing to add to. A contribution of zero is a real answer and passes.
+    check(
+      "organizations_reserve_all_or_none",
+      sql`num_nulls(${table.reserveBalanceCents}, ${table.reserveAsOf}, ${table.reserveMonthlyContributionCents}) IN (0, 3)`,
+    ),
+    // Money set aside cannot be less than none, and a negative contribution
+    // is a withdrawal, which is a replacement the forecast already counts.
+    // The projection goes negative; what is stored does not.
+    check(
+      "organizations_reserve_not_negative",
+      sql`${table.reserveBalanceCents} >= 0 AND ${table.reserveMonthlyContributionCents} >= 0`,
+    ),
   ],
 );

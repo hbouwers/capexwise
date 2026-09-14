@@ -228,7 +228,7 @@ specs left it.
 
 | Gap | Issue | Needed by | Lean |
 | --- | --- | --- | --- |
-| **The reserve** — a balance, its as-of date, a monthly contribution | [#92](https://github.com/hbouwers/capexwise/issues/92) | [Forecast](capex-forecast.md), the rail's `SidebarStat`; F3 is v0 | One per org, not per building: a small landlord keeps one reserve account. A building shows its *need*, which is computable today |
+| ~~**The reserve** — a balance, its as-of date, a monthly contribution~~ | [#92](https://github.com/hbouwers/capexwise/issues/92) | [Forecast](capex-forecast.md), the rail's `SidebarStat`; F3 is v0 | **Settled:** one per org, three columns on `organizations` ([data-model §2](../../data-model.md)), entered whole or not at all. A building shows its *need* |
 | **Task confirmation** — booked with the assignee, or not yet | [#93](https://github.com/hbouwers/capexwise/issues/93) | [Maintenance](maintenance.md#scheduled)'s Status column; PRD F5 | `tasks.confirmed_on date`, null while awaiting |
 | **Assigning to yourself or a member** — `assignee_contact_id` names only contacts | [#94](https://github.com/hbouwers/capexwise/issues/94) | [Task modal](modal-task-detail.md#the-form); PRD §5's small groups | A nullable `assignee_user_id` beside it, at most one of the two set |
 | **A contact's rate** — `$75 / hr`, `Bid basis` | [#95](https://github.com/hbouwers/capexwise/issues/95) | [Contacts](contacts.md#the-contact-modal), the task modal's rail, the quote wizard | `contacts.rate_note text` |
