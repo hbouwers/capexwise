@@ -9,6 +9,7 @@ import {
   firstOfMonth,
   formatDate,
   isCalendarDate,
+  isTimeZone,
   todayIn,
   yearOf,
 } from "@/lib/dates";
@@ -102,5 +103,28 @@ describe("formatDate", () => {
 
   it("refuses something that is not a date", () => {
     expect(() => formatDate("2026-09-14T00:00:00Z")).toThrow(RangeError);
+  });
+});
+
+describe("isTimeZone", () => {
+  it.each([INDY, "America/New_York", "UTC", "Pacific/Kiritimati"])(
+    "accepts %s",
+    (name) => {
+      expect(isTimeZone(name)).toBe(true);
+    },
+  );
+
+  it.each(["America/Nowhere", "", "  ", "Indianapolis", "+05:00:00:00"])(
+    "refuses %j",
+    (name) => {
+      expect(isTimeZone(name)).toBe(false);
+    },
+  );
+
+  it("agrees with todayIn about what it accepts", () => {
+    // The point of asking Intl rather than a list: a name this passes is a
+    // name the building's clock can be read in.
+    expect(() => todayIn("US/Eastern")).not.toThrow();
+    expect(isTimeZone("US/Eastern")).toBe(true);
   });
 });

@@ -78,6 +78,7 @@ import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import { organizations, sessions } from "@/db/schema";
+import { buildingFields } from "@/lib/building-form";
 import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createBuilding,
@@ -141,6 +142,10 @@ process.env.ACCESS_CODE_KEYS = "1:aW50ZWdyYXRpb24tc3VpdGUtbm90LWEtcmVhbC1rZXk";
 const { getAuth } = await import("@/server/auth");
 const { getOrgContext } = await import("@/server/org-context");
 const { switchOrganization } = await import("@/server/actions/organizations");
+// A namespace rather than names: `createBuilding` is also the factory's.
+const buildingActions = await import("@/server/actions/buildings");
+const { getBuilding, listBuildings } =
+  await import("@/server/queries/buildings");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1091,6 +1096,144 @@ describe("switchOrganization", () => {
     }
 
     expect(await activeOrgOf(caller.sessionId)).toBe(a.org.id);
+  });
+});
+
+/**
+ * The building form's paths — `src/server/queries/buildings.ts` and
+ * `src/server/actions/buildings.ts` — driven the way a page and a form drive
+ * them: a signed session, then the function, with nothing naming an org. Every
+ * id they are handed is B's where the probe is about B, and each is checked the
+ * same way as the switcher: B's rows unchanged, and none of B's identifiers in
+ * what came back.
+ */
+describe("the building paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  /** The edit form for `side`'s building, prefilled as the page prefills it. */
+  function formFor(side: Side) {
+    return buildingFields(side.building, [side.unit]);
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  it("lists only the caller's buildings", async () => {
+    const { a } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const listed = await listBuildings();
+
+    expect(listed.map((building) => building.id)).toEqual([a.building.id]);
+    expect(listed[0]?.unitCount).toBe(1);
+  });
+
+  it("reads the caller's building, and not the other org's by its id", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const mine = await getBuilding(a.building.id);
+    expect(mine?.units.map((unit) => unit.id)).toEqual([a.unit.id]);
+
+    expect(await getBuilding(b.building.id)).toBeNull();
+  });
+
+  it("edits the caller's building, and leaves the other org's alone", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await buildingActions.updateBuilding(a.building.id, {
+      ...formFor(a),
+      label: "Renamed duplex",
+    });
+
+    expect(result).toEqual({ ok: true, buildingId: a.building.id });
+    expect((await getBuilding(a.building.id))?.building.label).toBe(
+      "Renamed duplex",
+    );
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses to edit the other org's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await buildingActions.updateBuilding(b.building.id, {
+      ...formFor(b),
+      label: "Renamed duplex",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses the other org's unit smuggled into the caller's building", async () => {
+    // The id is a lookup into A's building's own units. B's unit is not one,
+    // so the save is refused whole — A's building is not half-edited either.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const theirs = await rowsOwnedBy(b.org.id);
+    const mine = await rowsOwnedBy(a.org.id);
+
+    const form = formFor(a);
+    const result = await buildingActions.updateBuilding(a.building.id, {
+      ...form,
+      label: "Renamed duplex",
+      units: [...form.units, { ...form.units[0]!, id: b.unit.id, label: "B" }],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
+    expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
+  });
+
+  it("archives and restores only the caller's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    expect(await buildingActions.archiveBuilding(b.building.id)).toEqual({
+      ok: false,
+    });
+    expect(await buildingActions.restoreBuilding(b.building.id)).toEqual({
+      ok: false,
+    });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: the same calls work at home.
+    expect(await buildingActions.archiveBuilding(a.building.id)).toEqual({
+      ok: true,
+    });
+    expect(await buildingActions.restoreBuilding(a.building.id)).toEqual({
+      ok: true,
+    });
+  });
+
+  it("creates in the caller's org, whatever org the submission names", async () => {
+    // An extra `orgId` is not a field the form has, and it is dropped with
+    // the rest of what the schema does not describe — ignored, not validated.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await buildingActions.createBuilding({
+      ...formFor(a),
+      units: [{ ...formFor(a).units[0]!, id: null }],
+      orgId: b.org.id,
+    });
+
+    expect(result.ok).toBe(true);
+    expect((await rowsOwnedBy(a.org.id)).buildings).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });
 
