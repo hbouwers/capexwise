@@ -11,6 +11,7 @@
 import "server-only";
 
 import { and, asc, eq, sql } from "drizzle-orm";
+import { cache } from "react";
 import { z } from "zod";
 
 import { buildings, units } from "@/db/schema";
@@ -116,9 +117,10 @@ const buildingIdSchema = z.uuid();
  * render the same 404 for all three (`docs/ui/screens/README.md`), so a URL
  * cannot be used to learn whether an id exists anywhere.
  *
- * `unknown`, because the id comes from a URL.
+ * `unknown`, because the id comes from a URL. Memoised per request, like
+ * `getOrgContext()`, so a page's title and its body read the building once.
  */
-export async function getBuilding(
+export const getBuilding = cache(async function getBuilding(
   buildingId: unknown,
 ): Promise<BuildingDetail | null> {
   const { db } = await getOrgContext();
@@ -152,4 +154,4 @@ export async function getBuilding(
 
     return { building, units: rows };
   });
-}
+});
