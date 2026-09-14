@@ -69,9 +69,9 @@ A row of `StatusBadge`s, then three `StatTile`s.
 nothing but a region further down the same page, so they link to it.
 
 **Ten-year need replaces the prototype's "Reserve".** The prototype shows each building holding its
-own reserve balance, and nothing in the schema stores a reserve at all — see the
-[gaps](README.md#gaps-these-specs-found). A building's *need* is computable from its capital items
-today and is the figure a per-building page can stand behind; the balance it is measured against
+own reserve balance, and the reserve is the org's, not a building's
+([data-model §2](../../data-model.md), #92). A building's *need* is computable from its capital
+items and is the figure a per-building page can stand behind; the balance it is measured against
 belongs to the forecast. Level funding is a simplification the forecast module owns and can
 replace; the sub-line states it so the figure is not read as more.
 

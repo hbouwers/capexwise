@@ -48,10 +48,14 @@ Description: `Every tracked item, aged forward to its expected replacement year.
 | **Reserve needed / mo** | The smallest level monthly contribution that keeps the reserve from going below zero in any of the ten years, from today's balance |
 | **Contributing / mo** | The org's stated monthly contribution |
 
-The last two need the reserve, which nothing stores yet — a [gap](README.md#gaps-these-specs-found).
-Until it exists, the second figure is level funding — the total over 120 months, labelled `to fund
-the next ten years evenly` as on [the building page](building-detail.md#summary) — and the third is
-not rendered. The "needed" rule is forecast-module logic, proposed here.
+The last two need the org's reserve, three columns on `organizations`
+([data-model §2](../../data-model.md), #92). Until one is entered, the second figure is level
+funding — the total over 120 months, labelled `to fund the next ten years evenly` as on
+[the building page](building-detail.md#summary) — and the third is not rendered. The "needed" rule
+is forecast-module logic, proposed here. Two things its tests have to pin down, because the
+reserve is kept by the month and replacements are known only by the year: when in its year a
+replacement is paid for, and whether the months since the balance's as-of date count as
+contributed.
 
 **`YearBarChart`**: ten bars, this year through nine years out. Each bar is the year's replacement
 cost, and **this year's bar includes every replacement already past due**, which is what makes it
@@ -63,7 +67,7 @@ the same set as the dashboard's End of life tile.
   below zero is `--meter-warn`; every other year is `--surface-fill-strong`; the selected year is
   `--accent`. The prototype's binary is "over $30,000", which means nothing on a single building and
   something different on every portfolio. A shortfall year is F3's own requirement — "surfacing the
-  years where the reserve goes negative". Until the reserve exists, no year is marked.
+  years where the reserve goes negative". Until a reserve is entered, no year is marked.
 - **Each bar stacks audited cost below estimated cost.** The estimated segment takes the
   [tokens §10](../tokens.md) treatment — card fill, dashed `--border-estimated` — so the share of
   each year that rests on guesses is visible without a second chart.
@@ -121,15 +125,17 @@ point in the ten years.
 
 Then one sentence stating what makes that year the low point — `2028 is the low point: the Sumner
 roof and the Rowan Court furnace land that year.` — its two largest items, by name. `Update reserve`
-opens a `Modal` with the balance, its as-of date and the monthly contribution.
+opens a `Modal` with the balance, its as-of date and the monthly contribution. All three are
+required and saved together, because the schema stores a reserve whole or not at all; the date
+defaults to today and cannot be later than today, and a contribution of `$0` is accepted.
 
 The prototype's sentence goes on to recommend pulling the roof into 2027. That is advice, which is
 F8's to give with its inputs shown, and it is dropped here. The prototype's `See the tax effect →`
 link returns with F4, to `/tax?year={year}`.
 
-**The reserve is the org's, not a building's** — the lean in the
-[gaps](README.md#gaps-these-specs-found), because a small landlord keeps one reserve account rather
-than one per building. So with a building selected, the rail says so rather than inventing a share:
+**The reserve is the org's, not a building's**, settled by #92, because a small landlord keeps one
+reserve account rather than one per building. So with a building selected, the rail says so rather
+than inventing a share:
 `The reserve is held across the portfolio. Choose All buildings to see its projection.`
 
 ---
