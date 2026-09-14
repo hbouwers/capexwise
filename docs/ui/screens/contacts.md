@@ -124,6 +124,6 @@ Contacts are other people's personal data — names, phones, emails. None of it 
 | **No trade in use** | No filter row either: a row holding only `All` filters nothing |
 | **Filtered to nothing** | Only reachable by URL, since empty trades have no chip: `No contacts tagged {trade}` and `Show all`. A `?trade=` that is not a trade at all filters nothing |
 | **The contact does not exist or is not this org's** | The task modal's rule: the page renders without the modal, with a line at the top of the page body — `That contact wasn't found.` |
-| **Unsaved changes on close** | Also the task modal's: `Cancel`, `×`, Escape and the scrim ask `Discard your changes?` in the footer. Unchanged, they close at once |
+| **Unsaved changes on close** | Also the task modal's: `Cancel`, `×`, Escape and the scrim ask `Discard your changes?` in the footer. Unchanged, they close at once. Archive and restore close the modal too, so with the form changed the archive question says the changes won't be saved, and restore asks before it acts |
 | **Save failed** | The modal stays open with everything typed, and the footer says what did not save |
 | **Loading** | The chip row and six card skeletons |
