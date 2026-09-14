@@ -18,7 +18,14 @@
  * an org would misrepresent the schema. `createMembership` is the one that joins
  * them, and it takes an `orgId` first like every domain factory does.
  */
-import { invitations, memberships, organizations, users } from "@/db/schema";
+import {
+  buildings,
+  invitations,
+  memberships,
+  organizations,
+  units,
+  users,
+} from "@/db/schema";
 
 import { testDb } from "./db";
 
@@ -30,6 +37,10 @@ type Membership = typeof memberships.$inferSelect;
 type MembershipInput = typeof memberships.$inferInsert;
 type Invitation = typeof invitations.$inferSelect;
 type InvitationInput = typeof invitations.$inferInsert;
+type Building = typeof buildings.$inferSelect;
+type BuildingInput = typeof buildings.$inferInsert;
+type Unit = typeof units.$inferSelect;
+type UnitInput = typeof units.$inferInsert;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -143,4 +154,52 @@ export async function createInvitation(
     .returning();
 
   return firstRow(rows, "invitations");
+}
+
+/**
+ * An Indianapolis address by default, the demo city (#34), and in the city's
+ * own zone. No basis: `buildings_basis_complete` makes that the one state that
+ * needs no arithmetic, and a test about the basis passes all of it.
+ */
+export async function createBuilding(
+  orgId: string,
+  overrides: Partial<BuildingInput> = {},
+): Promise<Building> {
+  sequence += 1;
+
+  const rows = await testDb()
+    .insert(buildings)
+    .values({
+      orgId,
+      addressLine1: `${sequence} N Delaware St`,
+      city: "Indianapolis",
+      region: "IN",
+      postalCode: "46204",
+      timezone: "America/Indiana/Indianapolis",
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "buildings");
+}
+
+/**
+ * Takes the building as well as the org, both required, for the reason
+ * `createMembership` takes the user: a unit that could invent its building
+ * would let a test hold the org fixed on one side of the reference only —
+ * which is exactly the cross-org case `units_building` exists to refuse.
+ */
+export async function createUnit(
+  orgId: string,
+  buildingId: string,
+  overrides: Partial<UnitInput> = {},
+): Promise<Unit> {
+  sequence += 1;
+
+  const rows = await testDb()
+    .insert(units)
+    .values({ orgId, buildingId, label: `Unit ${sequence}`, ...overrides })
+    .returning();
+
+  return firstRow(rows, "units");
 }

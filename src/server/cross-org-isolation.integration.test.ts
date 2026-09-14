@@ -80,15 +80,19 @@ import { describe, expect, it, vi } from "vitest";
 import { organizations, sessions } from "@/db/schema";
 import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
+  createBuilding,
   createInvitation,
   createMembership,
   createOrganization,
+  createUnit,
   createUser,
 } from "@/test/factories";
 import {
+  FOREIGN_KEY_VIOLATION,
   INSUFFICIENT_PRIVILEGE,
   postgresErrorCode,
   rejectsWith,
+  RESTRICT_VIOLATION,
 } from "@/test/postgres-errors";
 
 /**
@@ -150,6 +154,8 @@ const ORG_OWNED = {
   organizations: "id",
   memberships: "org_id",
   invitations: "org_id",
+  buildings: "org_id",
+  units: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -298,6 +304,11 @@ async function seedTwoOrgs() {
       email: "new-hire@example.test",
     });
 
+    const building = await createBuilding(org.id, {
+      addressLine1: "412 N Delaware St",
+    });
+    const unit = await createUnit(org.id, building.id, { label: "A" });
+
     return {
       org,
       owner,
@@ -306,6 +317,8 @@ async function seedTwoOrgs() {
       memberMembership,
       sharedMembership,
       invitation,
+      building,
+      unit,
     };
   }
 
@@ -336,6 +349,8 @@ function identifiersOf(side: Side): string[] {
     side.memberMembership.id,
     side.sharedMembership.id,
     side.invitation.id,
+    side.building.id,
+    side.unit.id,
   ];
 }
 
@@ -1154,11 +1169,14 @@ describe.each(Object.entries(ORG_OWNED))(
       const db = await scopedHandleFor(a);
       const before = await rowsOwnedBy(b.org.id);
 
-      // Two acceptable outcomes, and which one a table gets is the migration's
-      // decision rather than this test's: `organizations` has no DELETE grant
-      // for the scoped role — an org is soft-deleted, and the purge is not a
-      // request — so it is refused before any row is considered. The others
-      // may delete, and must delete only A's.
+      // Three acceptable outcomes, and which one a table gets is the
+      // migration's decision rather than this test's: `organizations` has no
+      // DELETE grant for the scoped role — an org is soft-deleted, and the
+      // purge is not a request — so it is refused before any row is considered.
+      // `buildings` is refused by its units' `restrict`, because every seeded
+      // building has one (§7: archived, not deleted). The others may delete,
+      // and must delete only A's. A refusal rolls the transaction back, and the
+      // snapshot below is what says B was never touched either way.
       const outcome = await db
         .run((tx) =>
           tx.execute<{ owner: string }>(
@@ -1170,7 +1188,9 @@ describe.each(Object.entries(ORG_OWNED))(
           (error: unknown) => postgresErrorCode(error),
         );
 
-      expect([[], INSUFFICIENT_PRIVILEGE]).toContainEqual(outcome);
+      expect([[], INSUFFICIENT_PRIVILEGE, RESTRICT_VIOLATION]).toContainEqual(
+        outcome,
+      );
       expect(await rowsOwnedBy(b.org.id)).toEqual(before);
     });
 
@@ -1192,3 +1212,60 @@ describe.each(Object.entries(ORG_OWNED))(
     });
   },
 );
+
+/**
+ * The write `with check` cannot catch. A policy judges the row being written,
+ * and the unit below is A's by every column the policy reads; the building it
+ * points at is B's. Postgres checks a foreign key past row-level security, so
+ * with a plain `building_id` reference this insert succeeds even though A
+ * cannot see the building it names — `docs/data-model.md` §9 asks for exactly
+ * this case, and `units_building` is what refuses it.
+ */
+describe("a reference from one org's row to another's", () => {
+  it("lets a unit into the scoped org's own building", async () => {
+    // The control: the insert below is well-formed, and fails only for B.
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run((tx) =>
+      tx.execute(
+        sql`insert into units (org_id, building_id, label)
+            values (${a.org.id}, ${a.building.id}, 'B')`,
+      ),
+    );
+
+    expect((await rowsOwnedBy(a.org.id)).units).toHaveLength(2);
+  });
+
+  it("refuses a unit in another org's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    await expect(
+      db.run((tx) =>
+        tx.execute(
+          sql`insert into units (org_id, building_id, label)
+              values (${a.org.id}, ${b.building.id}, 'B')`,
+        ),
+      ),
+    ).rejects.toSatisfy(rejectsWith(FOREIGN_KEY_VIOLATION));
+
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    expect((await rowsOwnedBy(a.org.id)).units).toHaveLength(1);
+  });
+
+  it("refuses to move a unit into another org's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await expect(
+      db.run((tx) =>
+        tx.execute(
+          sql`update units set building_id = ${b.building.id}
+              where id = ${a.unit.id}`,
+        ),
+      ),
+    ).rejects.toSatisfy(rejectsWith(FOREIGN_KEY_VIOLATION));
+  });
+});
