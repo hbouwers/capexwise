@@ -507,12 +507,23 @@ async function restore(
     await admin.end();
   }
 
-  // Every database already has a `public` schema, and a dump that names
-  // `--schema public` carries a `CREATE SCHEMA public` that fails against it.
-  // So the restore runs from the dump's own table of contents with that one
-  // entry taken out — the rest of what the dump says about `public`, its grants
-  // included, still applies. `docs/runbooks/backup-and-restore.md` restores
-  // production the same way, and for the same reason.
+  // The restore runs from the dump's own table of contents, with two kinds of
+  // entry taken out. Neither is the application's, and each fails against any
+  // target. `docs/runbooks/backup-and-restore.md` restores production the same
+  // way, for the same reasons.
+  //
+  // - `CREATE SCHEMA public`. Every database already has a `public` schema, and
+  //   a dump that names `--schema public` carries a create that fails against
+  //   it. The rest of what the dump says about `public`, its grants included,
+  //   still applies.
+  // - Default privileges. Neon sets them in every database it creates, as its
+  //   `cloud_admin` for its `neon_superuser`, so a dump of production carries
+  //   them. They name roles a plain Postgres does not have, and on Neon only a
+  //   member of `cloud_admin` may set them, which the owner restoring is not.
+  //   A new Neon database gets its own. They only affect objects created later,
+  //   so no restored row or grant depends on them. The migrations grant
+  //   explicitly and set no default privileges of their own; one that did would
+  //   need re-applying after a restore.
   const toc = await run("pg_restore", ["--list", file]);
   const list = `${file}.list`;
 
@@ -520,7 +531,7 @@ async function restore(
     list,
     toc
       .split("\n")
-      .filter((entry) => !/ SCHEMA - public /.test(entry))
+      .filter((entry) => !/ SCHEMA - public | DEFAULT ACL /.test(entry))
       .join("\n"),
   );
 
