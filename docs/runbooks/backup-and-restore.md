@@ -57,8 +57,9 @@ SELECT pg_has_role('capexwise_backup', 'neon_superuser', 'member');
 ```
 
 The connection string uses **the direct endpoint**, the host without `-pooler` in it. `npm run
-db:backup` refuses the pooled one. Build it from the console's Connect dialog with pooling off,
-then replace the role and password:
+db:backup` refuses the pooled one. The Connect dialog's role list does not include a role created
+with SQL, so build the string by hand: open the dialog with pooling off and any role selected, then
+replace the role and password. A password from the command above needs no escaping.
 
 ```
 postgresql://capexwise_backup:<password>@<direct host>/<database>?sslmode=require&channel_binding=require
@@ -73,20 +74,27 @@ install age` on macOS), then:
 age-keygen -o capexwise-backup.key
 ```
 
-It prints the public key, `age1…`. Then:
+It prints the public key, `age1…`, and writes the file to the folder the terminal is in. Only one
+line of the file is secret, the one starting `AGE-SECRET-KEY-1`. The others are comments, and the
+public key can be derived from that line again. So it fits in an ordinary password entry:
 
-1. Put the **whole file** into the password manager as "CapExWise backup key", next to
-   production's `ACCESS_CODE_KEYS`.
-2. Delete the file.
-3. Keep the public key for step 4.
+1. Save the `AGE-SECRET-KEY-1…` line in the password manager as the password of an entry named
+   "CapExWise backup key", next to production's `ACCESS_CODE_KEYS`. Put the public key in its
+   notes.
+2. **Check the saved copy before deleting anything.** Paste it from the password manager into a new
+   file, `check.key`, and run `age-keygen -y check.key`. It must print the same `age1…` public key.
+   Pasting it into a terminal command instead would put it in the shell's history.
+3. Delete both files.
+4. Keep the public key for step 4.
 
 **Losing this key loses every backup.** The nightly job never decrypts anything, so nothing would
 notice a lost key until the day it is needed. The quarterly drill below is what catches it.
 
 ### 3. The bucket
 
-Either provider works. The job speaks S3 to both, and which one it uses is only the four variables
-in step 4. Whichever you pick, the bucket needs three things:
+**Backblaze B2 is the recommendation.** Its keys can be made write-only, and its free tier needs no
+card. R2 works as well: the job speaks S3 to both, and which one it uses is only the four
+variables in step 4. Whichever it is, the bucket needs three things:
 
 - **Private.** The dumps are encrypted, but a list of dated objects is still nobody else's business.
 - **A key limited to this one bucket, that can write and cannot delete.** If the job's credential
@@ -94,10 +102,12 @@ in step 4. Whichever you pick, the bucket needs three things:
 - **A lifecycle rule** that deletes each object 90 days after it is written. This is the retention
   ADR-0010 decided on. The job does not enforce it.
 
-**Backblaze B2.** Create a private bucket. Under Lifecycle Settings, choose custom rules: hide files
-90 days after upload, and delete them one day after they are hidden. Under Application Keys, add a
-key restricted to that bucket with **Write Only** access. The endpoint is the bucket's S3 endpoint,
-`https://s3.<region>.backblazeb2.com`, and the region is the `<region>` part of it.
+**Backblaze B2.** Choose the US East region when signing up, near Neon's `us-east-1`. The region
+is fixed for the account. Create a private bucket. Under Lifecycle Settings, choose custom rules on
+prefix `nightly/`: hide files 90 days after upload, and delete them one day after they are hidden.
+Under Application Keys, add a key restricted to that bucket and to prefix `nightly/`, with **Write
+Only** access. The endpoint is the bucket's S3 endpoint, `https://s3.<region>.backblazeb2.com`, and
+the region is the `<region>` part of it.
 
 **Cloudflare R2.** Create a bucket. Add an object lifecycle rule on prefix `nightly/` that deletes
 objects after 90 days. Add a **bucket lock** rule on the same prefix with a 90-day retention period.
@@ -178,14 +188,16 @@ You need Postgres 18's client tools (`pg_restore`), `age`, and the key from the 
 4. **Restore** as the target's owner, over the direct endpoint:
 
    ```bash
-   pg_restore --list capexwise.dump | grep -v " SCHEMA - public " > capexwise.list
+   pg_restore --list capexwise.dump | grep -v -e " SCHEMA - public " -e " DEFAULT ACL " > capexwise.list
    pg_restore --dbname "<owner's direct connection string>" --no-password \
      --single-transaction --exit-on-error --no-owner --use-list capexwise.list capexwise.dump
    ```
 
-   The first line removes the dump's `CREATE SCHEMA public`, which fails against the `public`
-   schema every database already has. `npm run db:backup` does the same thing every night. Set the
-   password in `PGPASSWORD` rather than in the string.
+   The first line removes two kinds of entry that fail against any target. One is the dump's
+   `CREATE SCHEMA public`, because every database already has that schema. The other is Neon's
+   default privileges, which it sets in every database as `cloud_admin` for `neon_superuser`. Only
+   `cloud_admin` may set them again, and a new Neon database has its own. `npm run db:backup` does
+   the same thing every night. Set the password in `PGPASSWORD` rather than in the string.
 
 5. **Give the logins their roles on a new server.** On the same Neon branch they carry over. On a
    new one, the owner needs the two memberships the migrations give the role that runs them.
