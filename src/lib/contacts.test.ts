@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { compareContactNames, tradesInUse } from "@/lib/contacts";
+import { compareContactNames, contactsHref, tradesInUse } from "@/lib/contacts";
+
+describe("contactsHref", () => {
+  it("is the bare page with nothing chosen", () => {
+    expect(contactsHref({ trade: null, archived: false, contact: null })).toBe(
+      "/contacts",
+    );
+  });
+
+  it("keeps the filter when the modal opens, as `?contact=new&trade=` needs", () => {
+    expect(
+      contactsHref({ trade: "hvac", archived: true, contact: "new" }),
+    ).toBe("/contacts?trade=hvac&archived=1&contact=new");
+  });
+});
 
 const TRADES = [
   { slug: "handyman", label: "Handyman" },

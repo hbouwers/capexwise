@@ -11,7 +11,9 @@ schema through `docs/data-model.md` §2 is migrated, with row-level security on 
 carries an org — #28. Every signed-in screen renders inside the shell — rail, org switcher, the
 `can(org, feature)` plan gate — #29. Money and dates have their one formatter each — #104.
 Buildings and units are stored, entered through the building form, and shown on the building's page
-and the portfolio's cards — #105; the other four destinations are placeholders. Capital items, the
+and the portfolio's cards — #105. Contacts and their trades are stored and kept in the contact book,
+with the first reference data seeded by a migration — #106; the other three destinations are
+placeholders. Capital items, the
 forecast, the tax planner and the rest of what the product is *for* are still unwritten. Rules below that describe
 runtime behaviour describe what the code *will* do — they are the contract to build against, not
 a description of something already working. Anything already true is marked as such.

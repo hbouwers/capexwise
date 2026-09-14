@@ -194,7 +194,7 @@ overrides turned out to be unnecessary, and two corrections nobody had predicted
 | `Select` trigger | `h-8`, and a built-in `size="sm"` at `h-7` | 33px page / 26px in-table | `rounded-md`, `pl-3`. **The dense variant already exists** — no `dense` prop needed |
 | `Badge` | `h-5`, `px-2 py-0.5`, 12px sans, `rounded-4xl` | `3px 8px`, 10px mono/500 | `px-2 py-[3px] font-mono text-micro tracking-label rounded-sm`, and the fixed height dropped so padding sets it |
 | `Card` | `py-4`/`gap-4`, `rounded-xl`, **`ring-1`** | 18–22px padding | `p-5 gap-4`, `rounded-lg`, and the ring replaced by a 1px border |
-| `Dialog` | `sm:max-w-sm`, `rounded-xl`, `p-4`, `ring-1` | 900/920px, `--radius-xl`, `22px 26px` | Border plus `--shadow-modal`; per-modal width and sectioned padding still owed, see §7 |
+| `Dialog` | `sm:max-w-sm`, `rounded-xl`, `p-4`, `ring-1` | 900/920px, `--radius-xl`, `22px 26px` | Border plus `--shadow-modal`. Per-modal width and sectioned padding are `Modal`'s (§7), which is built on it |
 | `Table` cell | `p-2` | 9–11px vertical, 12–14px horizontal | `px-3 py-2.5` |
 | `Tabs` list | `bg-muted p-[3px] rounded-lg`, trigger `rounded-md` | `4px` track, 9px outer / 6px inner radius | **Nothing.** The shape and both radii already match |
 
@@ -258,7 +258,7 @@ These are the ones worth writing down, because each owns a rule.
 | `ConfidenceBadge` | `ESTIMATED` / `AUDITED` | `Badge` | The six-property swap in [tokens §10](tokens.md). **The word is the primary signal**; the dashed border reinforces it |
 | `StatusBadge` | Tinted label | `Badge` | Foreground and tint always come from the same status pair. Five variants; see §9 for why seven labels collapse to five |
 | `PriorityPill` | High / Normal / Low | `StatusBadge` | An alias, not a component. The words are the `task_priority` enum's; High takes the overdue pair, Normal and Low the neutral pair ([maintenance.md](screens/maintenance.md#changes-from-the-prototype)) |
-| `TradeChip` | One trade tag | `Badge` | Filter chips and display chips are the same chip in two states |
+| `TradeChip` | One trade tag | `Badge` | Filter chips and display chips are the same chip in two states. Both live in `src/components/contacts/trade-chip.tsx`: the display chip a quiet sans tag, the filter chip a pill `<button aria-pressed>` with its count in the mono, pressed on `--accent-fill` |
 | `LifeBar` | Age against expected life | `Meter` | Thresholds 60 / 85 / 100 % → Healthy, Watch, Due soon, Past life. **Always paired with the percentage in text** |
 | `Meter` | A single-value bar | `Progress` | Track `--meter-track`, top-only radius on chart bars. Length is the encoding; colour is redundant ([tokens §11](tokens.md)) |
 | `MaskedValue` | Access codes | custom | Masked by default. **Fixed-width mask, reveal is a server action** — §9 |
@@ -331,7 +331,7 @@ control.
 | Component | Notes |
 | --- | --- |
 | `BuildingCard` | Photo, name, meta, flag chip, three-stat footer, `LifeBar`. The **flag** is a computed summary string in the prototype ("4 past life", "healthy", "furnace 2028") — it needs a stated rule, or it is untestable. The rule is in [portfolio.md](screens/portfolio.md#your-buildings), and the photo waits for [#40](https://github.com/hbouwers/capexwise/issues/40) |
-| `ContactCard` | Name, company, rating, trade chips, phone/email, rate + last used |
+| `ContactCard` | Name, company, trade chips, phone/email, rate + last used. No rating — [contacts.md](screens/contacts.md#changes-from-the-prototype) says why — and `last used` waits for tasks ([#113](https://github.com/hbouwers/capexwise/issues/113)) |
 | `DecisionRow` | Repair-vs-improvement row on the tax screen, with its saving |
 | `AdviceCard` | F8 recommendation: title, why, capex/tax pair, confidence note, apply action. **Must show its inputs** — PRD F8 |
 | `CatalogGroup` | One checklist group with "Select all" |
@@ -354,7 +354,8 @@ inventory exists to catch.
 
 | Component | Width | Notes |
 | --- | --- | --- |
-| `Modal` | — | Shell: `--radius-xl`, `--border-modal`, `--shadow-modal`, `--surface-overlay` scrim, `max-height: 88vh`, header / scrolling body / sticky footer |
+| `Modal` | — | Shell: `--radius-xl`, `--border-modal`, `--shadow-modal`, `--surface-overlay` scrim, `max-height: 88vh`, header / scrolling body / sticky footer. **Built** with the contact modal (#106), at `src/components/modal.tsx`: the width is a prop, it fills the viewport below `md`, and open state is the caller's, because a modal in the URL closes by navigating |
+| `ContactModal` | 560px | Name, company, trades, phone, email, rate note, notes. Archive and restore, and the discard question, ask in its footer ([contacts.md](screens/contacts.md#the-contact-modal)) |
 | `TaskDetailModal` | 900px | Notes, date, assignee, priority, cost, make-recurring, contacts rail |
 | `QuoteWizard` | 900px | Steps 1–3 inside the same shell: pick recipients → compose → sent. **v2** (PRD F7) |
 | `AddEquipmentModal` | 920px | Catalog grouped by Kitchen / Laundry / HVAC & water / Envelope / Interior. Per-item scope choice is a PRD F2 requirement the prototype does not render — the checklist proposes building or unit and the user confirms ([#48](https://github.com/hbouwers/capexwise/issues/48)) |
