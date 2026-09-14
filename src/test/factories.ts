@@ -20,6 +20,8 @@
  */
 import {
   buildings,
+  contacts,
+  contactTags,
   invitations,
   memberships,
   organizations,
@@ -41,6 +43,9 @@ type Building = typeof buildings.$inferSelect;
 type BuildingInput = typeof buildings.$inferInsert;
 type Unit = typeof units.$inferSelect;
 type UnitInput = typeof units.$inferInsert;
+type Contact = typeof contacts.$inferSelect;
+type ContactInput = typeof contacts.$inferInsert;
+type ContactTag = typeof contactTags.$inferSelect;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -202,4 +207,48 @@ export async function createUnit(
     .returning();
 
   return firstRow(rows, "units");
+}
+
+/**
+ * A tradesperson with a phone and an email, because those are what the card
+ * is for. Somebody else's details, so every value is visibly a test one: a
+ * 555-01 number and an `example.test` address.
+ */
+export async function createContact(
+  orgId: string,
+  overrides: Partial<ContactInput> = {},
+): Promise<Contact> {
+  sequence += 1;
+
+  const rows = await testDb()
+    .insert(contacts)
+    .values({
+      orgId,
+      name: `Test Contact ${sequence}`,
+      phone: "317-555-0100",
+      email: `test-contact-${sequence}@example.test`,
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "contacts");
+}
+
+/**
+ * Takes the org and the contact both, required, for the reason `createUnit`
+ * takes the building: a tag that could invent its contact would hold the org
+ * fixed on one side of `contact_tags_contact` only. `tag` is a slug from the
+ * trade list the migrations seed.
+ */
+export async function tagContact(
+  orgId: string,
+  contactId: string,
+  tag: string,
+): Promise<ContactTag> {
+  const rows = await testDb()
+    .insert(contactTags)
+    .values({ orgId, contactId, tag })
+    .returning();
+
+  return firstRow(rows, "contact_tags");
 }

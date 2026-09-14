@@ -22,12 +22,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { buildings, units } from "@/db/schema";
-import {
-  type FieldErrors,
-  UNREADABLE_FORM,
-  type UnitValues,
-  validateBuilding,
-} from "@/lib/building-form";
+import { type UnitValues, validateBuilding } from "@/lib/building-form";
+import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
 import { getOrgContext, type OrgScopedDb } from "@/server/org-context";
 
 export type SaveBuildingResult =

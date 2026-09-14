@@ -286,18 +286,36 @@ export function testDb(): NodePgDatabase<typeof schema> {
 export const appDb = applicationDb;
 
 /**
- * Empties every table, called before each test. The tables are discovered rather
- * than listed, so a migration that adds one is covered by this the day it lands
- * and nobody has to remember. Drizzle's own bookkeeping table lives in the
- * `drizzle` schema, so restricting to `public` leaves the migration history
- * alone — truncating that would make the next run migrate an already-migrated
- * database.
+ * The tables a migration fills rather than a test: reference data, which every
+ * org reads and nothing in the product writes (`docs/data-model.md` §6).
+ * `truncateAll` leaves them alone, because the migrations run once per suite
+ * and nothing would put the rows back — every test after the first would find
+ * no trades to tag anybody with.
+ *
+ * Listed rather than discovered, and the isolation test holds the list to what
+ * it claims: each table on it is outside the boundary, readable by the scoped
+ * role and writable by nobody but a migration. A test that writes to one of
+ * these would leak into every test after it, and none should.
+ */
+export const REFERENCE_TABLES: readonly string[] = ["trade_tags"];
+
+/**
+ * Empties every table but the reference data, called before each test. The
+ * tables are discovered rather than listed, so a migration that adds one is
+ * covered by this the day it lands and nobody has to remember. Drizzle's own
+ * bookkeeping table lives in the `drizzle` schema, so restricting to `public`
+ * leaves the migration history alone — truncating that would make the next run
+ * migrate an already-migrated database.
  *
  * One statement for all of them: `TRUNCATE a, b` does not care about foreign
  * keys between the tables it is given, where a table at a time would fail on
  * whichever order the dependencies disagree with. `CASCADE` covers a reference
  * from outside the list, and `RESTART IDENTITY` resets sequences so a test that
  * asserts on a generated number does not depend on how many ran before it.
+ *
+ * `CASCADE` also empties whatever references a table it is given, never what
+ * that table references, so emptying `contact_tags` leaves the trades it
+ * points at in place.
  */
 export async function truncateAll(): Promise<void> {
   if (!open) return;
@@ -305,7 +323,8 @@ export async function truncateAll(): Promise<void> {
   const { client } = open;
 
   const { rows } = await client.query<{ tablename: string }>(
-    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'",
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND NOT (tablename = ANY ($1))",
+    [REFERENCE_TABLES],
   );
 
   if (rows.length === 0) return;

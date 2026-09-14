@@ -53,7 +53,7 @@ Sorted by name. Each `ContactCard`:
 
 | Part | Content |
 | --- | --- |
-| Name | `--text-md`, weight 500, as a button opening `?contact={id}` |
+| Name | `--text-md`, weight 500, as a link to `?contact={id}` |
 | Company | Beneath, `--text-xs` |
 | Trades | `TradeChip`s, display state |
 | Phone | A `tel:` link |
@@ -61,7 +61,9 @@ Sorted by name. Each `ContactCard`:
 | Foot | The rate note, and `last used {Mon YYYY}` — the most recent completed task assigned to them — or `not used yet` |
 
 **The card is not one link**, unlike a building card: it holds a phone link and an email link, and
-links cannot nest. The name is the way in.
+links cannot nest. The name is the way in. A link rather than a button, because what it does is go
+to a URL: it opens in a new tab like any other link, and the card stays a presentational component
+that renders on the server.
 
 **`last used` is derived**, from `tasks.completed_on` where they were the assignee, so it cannot go
 stale. The prototype's `Jun 2019` for an inspector nobody has used since is exactly the figure a
@@ -78,12 +80,15 @@ hand-maintained field gets wrong.
 | Company | |
 | Trades | A checkbox list of every trade, in two columns from `sm` up. `?contact=new&trade=hvac` arrives with HVAC ticked |
 | Phone, Email | `type="tel"`, `type="email"` |
-| Rate | Free text — `$75 / hr`, `Bid basis`, `8% of gross`. A [gap](README.md#gaps-these-specs-found): `contacts` has no column for it |
+| Rate | Free text — `$75 / hr`, `Bid basis`, `8% of gross`. `contacts.rate_note`, which this [gap](README.md#gaps-these-specs-found) added |
 | Notes | `Textarea` |
 
-An existing contact's footer has `Archive contact` on the left: `Keeps them on past tasks, and takes
-them out of this book and the assignee lists.` Archived contacts come back through a `Show archived`
-link at the foot of the grid.
+An existing contact's footer has `Archive contact` on the left. It asks in the footer before it
+acts — `Archive {name}?` over `Keeps them on past tasks, and takes them out of this book and the
+assignee lists.` — rather than in a second dialog, so the question sits where the button was.
+Archived contacts come back through a `Show archived ({n})` link at the foot of the grid, into an
+`Archived` section under the same trade filter as the rest of the page. One opens in the modal with
+`Restore contact` where `Archive contact` was, and stays editable.
 
 Contacts are other people's personal data — names, phones, emails. None of it is logged, per
 `CLAUDE.md`, including in a failed save's error.
@@ -116,5 +121,9 @@ Contacts are other people's personal data — names, phones, emails. None of it 
 | State | What renders |
 | --- | --- |
 | **No contacts** | No filter row, and an `EmptyState`: `No contacts yet` / `Add the people who work on your buildings, and tag them by trade so tasks can find them.` / `Add contact` |
-| **Filtered to nothing** | Only reachable by URL, since empty trades have no chip: `No contacts tagged {trade}` and `Show all` |
+| **No trade in use** | No filter row either: a row holding only `All` filters nothing |
+| **Filtered to nothing** | Only reachable by URL, since empty trades have no chip: `No contacts tagged {trade}` and `Show all`. A `?trade=` that is not a trade at all filters nothing |
+| **The contact does not exist or is not this org's** | The task modal's rule: the page renders without the modal, with a line at the top of the page body — `That contact wasn't found.` |
+| **Unsaved changes on close** | Also the task modal's: `Cancel`, `×`, Escape and the scrim ask `Discard your changes?` in the footer. Unchanged, they close at once. Archive and restore close the modal too, so with the form changed the archive question says the changes won't be saved, and restore asks before it acts |
+| **Save failed** | The modal stays open with everything typed, and the footer says what did not save |
 | **Loading** | The chip row and six card skeletons |

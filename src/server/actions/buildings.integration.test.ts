@@ -18,8 +18,8 @@ import {
   type BuildingFields,
   buildingFields,
   emptyBuildingFields,
-  UNREADABLE_FORM,
 } from "@/lib/building-form";
+import { UNREADABLE_FORM } from "@/lib/forms";
 import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createBuilding,

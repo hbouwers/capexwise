@@ -13,9 +13,9 @@ import {
   emptyBuildingFields,
   moneyField,
   nextUnitLabel,
-  UNREADABLE_FORM,
   validateBuilding,
 } from "@/lib/building-form";
+import { UNREADABLE_FORM } from "@/lib/forms";
 
 const INDY = "America/Indiana/Indianapolis";
 
