@@ -103,7 +103,10 @@ variables in step 4. Whichever it is, the bucket needs three things:
   ADR-0010 decided on. The job does not enforce it.
 
 **Backblaze B2.** Choose the US East region when signing up, near Neon's `us-east-1`. The region
-is fixed for the account. Create a private bucket. Under Lifecycle Settings, choose custom rules on
+is fixed for the account. Create a private bucket, with **Default Encryption off**. B2's web console
+will not download a file B2 encrypted itself, so with it on a restore needs B2's command-line tool and
+a second key that can read. The dumps are already encrypted with `age`, so it adds nothing but that
+extra step. Under Lifecycle Settings, choose custom rules on
 prefix `nightly/`: hide files 90 days after upload, and delete them one day after they are hidden.
 Under Application Keys, add a key restricted to that bucket and to prefix `nightly/`, with **Write
 Only** access. The endpoint is the bucket's S3 endpoint, `https://s3.<region>.backblazeb2.com`, and
@@ -162,7 +165,11 @@ Restore a nightly dump. It holds every table in the `public` and `drizzle` schem
 
 You need Postgres 18's client tools (`pg_restore`), `age`, and the key from the password manager.
 
-1. **Download** the newest object from before the mistake, from the bucket's console.
+1. **Download** the newest object from before the mistake, from the bucket's console. If B2
+   refuses because the file is encrypted, it was uploaded while the bucket's Default Encryption
+   was on. Download it with B2's command-line tool instead (`pip install b2`), using a new
+   **Read Only** key limited to the bucket: `b2 account authorize`, then `b2 file download
+   b2://<bucket>/nightly/<object> <object>`. Delete the key and run `b2 account clear` afterwards.
 2. **Decrypt** it. Put the key in a file only while you need it:
 
    ```bash
@@ -245,7 +252,13 @@ proving the key in the password manager opens what was uploaded.
    string and `PGPASSWORD=capexwise_local_dev`. The compose database already has the roles, from its
    own migrations.
 
-3. Check that the row counts look right, then drop the database and delete the files.
+   Without Postgres 18's client tools installed, as on Windows, use the container's. Copy the dump
+   in with `docker cp capexwise.dump capexwise-postgres:/tmp/`, then run step 4 inside it with
+   `docker exec capexwise-postgres bash -c '…'`, reading `/tmp/capexwise.dump`. It connects as the
+   compose superuser and needs no password.
+
+3. Check that the row counts look right, then drop the database and delete the files, the copy in
+   the container's `/tmp` included.
 4. Add a line below.
 
 **To run the nightly command locally** (with Postgres 18's `pg_dump` and `pg_restore` on the
@@ -263,3 +276,5 @@ npm run db:backup -- ../capexwise.dump
 | Date | Drill | Source | Dump | Restore | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-11 | `db:backup`, before the first nightly run | Local compose database, two seeded orgs, logged in as a `capexwise_backup` login | 0.1 s | 0.1 s | Matched on all 9 tables. With one read policy dropped, it refused to dump. The full decrypt-and-restore drill is still to do, after setup |
+| 2026-09-14 | First nightly runs | Production | 6.0 s, then 0.7 s | 0.1 s | The first run failed restoring Neon's default privileges, fixed in #101. The next two matched on all 9 tables and uploaded |
+| 2026-09-14 | Decrypt and restore, the first | Production, `nightly/2026-09-14T153410Z.dump.age` | 0.7 s, in the job | 0.06 s, locally | The key from the password manager opened it. Restored into the compose database with the container's `pg_restore`: 8 `public` tables with their row security and policies, and Drizzle's record of all 8 migrations. Row counts as production. B2 refused to download the morning's file from its console because the bucket had Default Encryption on, so that is now off and setup says so |
