@@ -1,13 +1,13 @@
 # Data model
 
 **Status:** v1 — the schema to build against
-**Last updated:** 2026-09-10
+**Last updated:** 2026-09-14
 **Supersedes:** the sketch in [PRD](PRD.md) section 10
 
 This is the contract the migrations implement. **Section 2 is built**: `organizations` came with
-#17, `users`, `memberships` and `invitations` with #24, and `sessions`, `accounts`, `verifications`
-and `rate_limits` with the provider in #25, and section 9's row-level security has covered it since
-#28. Everything from section 3 on is still prose.
+#17 and its reserve with #92, `users`, `memberships` and `invitations` with #24, and `sessions`,
+`accounts`, `verifications` and `rate_limits` with the provider in #25, and section 9's row-level
+security has covered it since #28. Everything from section 3 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -37,6 +37,9 @@ These are mechanical, and they apply to every table below without being restated
   is the point: `replacement_cost` rendered raw is a plausible-looking number, and
   `replacement_cost_cents` rendered raw is obviously a bug. `bigint` rather than `integer` because
   `integer` cents caps at about $21.5M, which is fine for one duplex and not fine for a portfolio.
+  In Drizzle it is `bigint(..., { mode: "number" })`: a JavaScript number holds integer cents
+  exactly up to 2^53, about $90 trillion, and a JavaScript `bigint` would have to be converted at
+  every boundary that does arithmetic or writes JSON.
 - **`created_at` and `updated_at` are `timestamptz not null default now()`** on every table.
   `updated_at` is maintained by a trigger, not by the application, so a manual `UPDATE` cannot
   leave it stale.
@@ -139,9 +142,20 @@ create table organizations (
   metadata      text,
   plan          org_plan not null default 'free',
   is_demo       boolean not null default false,
+  -- The capital reserve F3 projects forward, #92. All three null means none
+  -- has been entered yet.
+  reserve_balance_cents               bigint,
+  reserve_as_of                       date,
+  reserve_monthly_contribution_cents  bigint,
   deleted_at    timestamptz,            -- see §7: purge grace period
   created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  updated_at    timestamptz not null default now(),
+  constraint organizations_reserve_all_or_none check (
+    num_nulls(reserve_balance_cents, reserve_as_of, reserve_monthly_contribution_cents) in (0, 3)
+  ),
+  constraint organizations_reserve_not_negative check (
+    reserve_balance_cents >= 0 and reserve_monthly_contribution_cents >= 0
+  )
 );
 
 -- At most one demo org, enforced rather than assumed (#34).
@@ -237,6 +251,24 @@ upgrade, not a rejected write. Written down here so it is not discovered in the 
 so it is enforced in the application at the two places that can break it (revoking a membership,
 changing a role) and asserted in a test. Writing it down here is the point; discovering it when an
 org locks itself out is not.
+
+**The reserve is the org's, not a building's** (#92). A small landlord keeps one reserve account,
+so the balance, the date it was true and the monthly contribution belong to the org. A building's
+page shows its ten-year *need* instead, which its capital items already give
+([building-detail](ui/screens/building-detail.md#summary)), and the forecast with one building
+selected says the reserve is held across the portfolio rather than inventing a share of it.
+
+It is **three columns rather than a table** because nothing reads the balance's history. The
+forecast wants today's figure and the date it was true, and the date is what tells a reader how
+stale the figure is. A table with a row per update is the change to make if a reserve-over-time
+view is ever wanted, and the columns' values seed its first row. The scoped role already holds
+`update` on `organizations` (§9), so the reserve is written through `db.forOrg()` with no new grant.
+
+**It is entered whole or not at all.** `organizations_reserve_all_or_none` leaves a reader two
+states, no reserve or one it can project, rather than a balance with no date to project from. A
+contribution of zero is a real answer and is allowed. Neither figure is stored negative: the
+projection can go below zero, but money set aside cannot, and a withdrawal is a replacement the
+forecast already counts.
 
 ---
 

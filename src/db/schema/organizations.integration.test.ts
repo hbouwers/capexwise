@@ -16,7 +16,11 @@ import { describe, expect, it } from "vitest";
 import { organizations } from "@/db/schema";
 import { testDb } from "@/test/db";
 import { createOrganization } from "@/test/factories";
-import { rejectsWith, UNIQUE_VIOLATION } from "@/test/postgres-errors";
+import {
+  CHECK_VIOLATION,
+  rejectsWith,
+  UNIQUE_VIOLATION,
+} from "@/test/postgres-errors";
 
 describe("organizations", () => {
   describe("the harness itself", () => {
@@ -72,6 +76,14 @@ describe("organizations", () => {
       expect(organization.createdAt).toBeInstanceOf(Date);
     });
 
+    it("starts an organization with no reserve entered", async () => {
+      const organization = await createOrganization();
+
+      expect(organization.reserveBalanceCents).toBeNull();
+      expect(organization.reserveAsOf).toBeNull();
+      expect(organization.reserveMonthlyContributionCents).toBeNull();
+    });
+
     it("accepts each of the three plans", async () => {
       // Three values, not two: pricing separates *pays us* from *has the premium
       // features*, so `paid` sits between `free` and `premium`. A native enum
@@ -115,6 +127,55 @@ describe("organizations", () => {
       await expect(
         createOrganization({ slug: "demo-two", isDemo: true }),
       ).rejects.toSatisfy(rejectsWith(UNIQUE_VIOLATION));
+    });
+  });
+
+  describe("the reserve", () => {
+    const RESERVE = {
+      reserveBalanceCents: 1_840_000,
+      reserveAsOf: "2026-09-03",
+      reserveMonthlyContributionCents: 75_000,
+    };
+
+    it("reads a balance back exactly, past what an integer column holds", async () => {
+      // $30,000,000.01 is over 2^31 cents, so this fails on `integer` rather
+      // than rounding, and the `.01` fails if anything on the way turned the
+      // driver's string into dollars. The date comes back as the day it was.
+      const organization = await createOrganization({
+        ...RESERVE,
+        reserveBalanceCents: 3_000_000_001,
+      });
+
+      expect(organization.reserveBalanceCents).toBe(3_000_000_001);
+      expect(organization.reserveAsOf).toBe("2026-09-03");
+      expect(organization.reserveMonthlyContributionCents).toBe(75_000);
+    });
+
+    it("accepts a monthly contribution of zero", async () => {
+      const organization = await createOrganization({
+        ...RESERVE,
+        reserveMonthlyContributionCents: 0,
+      });
+
+      expect(organization.reserveMonthlyContributionCents).toBe(0);
+    });
+
+    it("refuses a reserve with any one of its three parts missing", async () => {
+      for (const missing of Object.keys(RESERVE)) {
+        await expect(
+          createOrganization({ ...RESERVE, [missing]: null }),
+        ).rejects.toSatisfy(rejectsWith(CHECK_VIOLATION));
+      }
+    });
+
+    it("refuses a negative balance or a negative contribution", async () => {
+      await expect(
+        createOrganization({ ...RESERVE, reserveBalanceCents: -1 }),
+      ).rejects.toSatisfy(rejectsWith(CHECK_VIOLATION));
+
+      await expect(
+        createOrganization({ ...RESERVE, reserveMonthlyContributionCents: -1 }),
+      ).rejects.toSatisfy(rejectsWith(CHECK_VIOLATION));
     });
   });
 
