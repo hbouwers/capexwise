@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { DateValue } from "@/components/date-value";
+import { DeltaValue, Money } from "@/components/money";
 import { PlanGate } from "@/components/plan-gate";
 import { PremiumBadge } from "@/components/premium-badge";
 import { Badge } from "@/components/ui/badge";
@@ -522,9 +524,10 @@ export default function Styleguide() {
               </CardHeader>
               <CardContent>
                 <FieldLabel>Capex 12 mo</FieldLabel>
-                <div className="numeric mt-2 text-2xl font-normal text-text-primary">
-                  $39,700
-                </div>
+                <Money
+                  cents={3_970_000}
+                  className="mt-2 block text-2xl font-normal text-text-primary"
+                />
                 <p className="mt-3 text-xs leading-normal text-text-secondary">
                   Built in 1912, acquired June 2019, with 4 units on a 25 yr
                   service life.
@@ -560,6 +563,96 @@ export default function Styleguide() {
                 </div>
               </CardContent>
             </Card>
+          </div>
+        </Section>
+
+        <Section
+          id="figures"
+          title="Money, dates and changes"
+          note="Money, DeltaValue and DateValue from components.md §6, over src/lib/money.ts and src/lib/dates.ts. Integer cents in, rounded once at display; a date stays a YYYY-MM-DD string and never meets a clock. Each row is the call on the left and what it renders on the right."
+        >
+          <div className="flex flex-col">
+            {(
+              [
+                [
+                  "<Money cents={840000} />",
+                  <Money key="a" cents={840_000} />,
+                  "tables, tiles, statements",
+                ],
+                [
+                  "<Money cents={840050} />",
+                  <Money key="b" cents={840_050} />,
+                  "rounded here and nowhere else",
+                ],
+                [
+                  '<Money cents={840050} form="cents" />',
+                  <Money key="c" cents={840_050} form="cents" />,
+                  "exact; what a form is prefilled with",
+                ],
+                [
+                  '<Money cents={3970000} form="compact" />',
+                  <Money key="d" cents={3_970_000} form="compact" />,
+                  "chart labels and runway rows; never the tax planner",
+                ],
+                [
+                  "<Money cents={-18000} />",
+                  <Money key="e" cents={-18_000} />,
+                  "a negative always carries its sign",
+                ],
+                [
+                  "<DeltaValue cents={4480000} />",
+                  <DeltaValue key="f" cents={4_480_000} />,
+                  "a change: the plus is rendered too",
+                ],
+                [
+                  "<DeltaValue cents={-540000} />",
+                  <DeltaValue
+                    key="g"
+                    cents={-540_000}
+                    className="text-status-danger"
+                  />,
+                  "colour is the screen's, and secondary to the sign",
+                ],
+                [
+                  "<DeltaValue cents={-30} />",
+                  <DeltaValue key="h" cents={-30} />,
+                  "rounds to zero, so no direction",
+                ],
+                [
+                  '<DateValue date="2026-09-14" />',
+                  <DateValue key="i" date="2026-09-14" />,
+                  "absolute, always",
+                ],
+                [
+                  '<DateValue date="2026-09-03" form="short" />',
+                  <DateValue key="j" date="2026-09-03" form="short" />,
+                  "near dates, where the year is plain from the page",
+                ],
+                [
+                  '<DateValue date="2019-06-01" form="month" />',
+                  <DateValue key="k" date="2019-06-01" form="month" />,
+                  "a month",
+                ],
+                [
+                  "<DateValue year={2009} />",
+                  <DateValue key="l" year={2009} />,
+                  "an install year stays a year",
+                ],
+              ] as const
+            ).map(([call, figure, use]) => (
+              <div
+                key={call}
+                className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border-divider py-2.5"
+              >
+                <code className="numeric w-80 shrink-0 text-2xs text-text-muted">
+                  {call}
+                </code>
+                <span className="w-28 shrink-0 text-right text-md text-text-primary">
+                  {figure}
+                </span>
+                <span className="text-2xs text-text-tertiary">{use}</span>
+              </div>
+            ))}
           </div>
         </Section>
 
@@ -825,9 +918,9 @@ export default function Styleguide() {
               <TableBody>
                 {(
                   [
-                    ["Furnace", "2009", "$8,400", "Overdue", "overdue"],
-                    ["Roof", "2016", "$18,200", "Big ticket", "warning"],
-                    ["Water heater", "2021", "$1,750", "Planned", "neutral"],
+                    ["Furnace", 2009, 840_000, "Overdue", "overdue"],
+                    ["Roof", 2016, 1_820_000, "Big ticket", "warning"],
+                    ["Water heater", 2021, 175_000, "Planned", "neutral"],
                   ] as const
                 ).map(([item, year, cost, status, tone]) => (
                   <TableRow key={item}>
@@ -837,11 +930,11 @@ export default function Styleguide() {
                         25 yr service life
                       </div>
                     </TableCell>
-                    <TableCell className="numeric text-text-secondary">
-                      {year}
+                    <TableCell className="text-text-secondary">
+                      <DateValue year={year} />
                     </TableCell>
-                    <TableCell className="numeric text-right text-text-primary">
-                      {cost}
+                    <TableCell className="text-right text-text-primary">
+                      <Money cents={cost} />
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -890,9 +983,10 @@ export default function Styleguide() {
                 <CardDescription>Banked against needed</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="numeric text-2xl text-text-primary">
-                  $44,800
-                </div>
+                <Money
+                  cents={4_480_000}
+                  className="block text-2xl text-text-primary"
+                />
                 <Progress value={38} className="mt-3" />
               </CardContent>
             </Card>
@@ -902,9 +996,12 @@ export default function Styleguide() {
                 <CardDescription>Per month, 8 doors</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="numeric text-2xl text-text-primary">$9,150</div>
+                <Money
+                  cents={915_000}
+                  className="block text-2xl text-text-primary"
+                />
                 <div className="mt-1 text-xs text-status-good">
-                  <span className="numeric">+$450</span> vs last year
+                  <DeltaValue cents={45_000} /> vs last year
                 </div>
               </CardContent>
             </Card>
