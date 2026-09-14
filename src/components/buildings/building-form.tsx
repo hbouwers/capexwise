@@ -15,10 +15,10 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { Field, fieldId } from "@/components/field";
 import { Money } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -32,13 +32,13 @@ import {
   type BuildingFields,
   buildingValue,
   emptyUnitFields,
-  type FieldErrors,
   nextUnitLabel,
   type UnitFields,
   unitField,
   validateBuilding,
 } from "@/lib/building-form";
 import { cn } from "@/lib/cn";
+import type { FieldErrors } from "@/lib/forms";
 import { createBuilding, updateBuilding } from "@/server/actions/buildings";
 
 /**
@@ -67,11 +67,6 @@ type Mode = { kind: "new" } | { kind: "edit"; buildingId: string };
 /** Cancel's destination, and a save's: where the form was opened from. */
 function homeOf(mode: Mode): string {
   return mode.kind === "new" ? "/" : `/buildings/${mode.buildingId}`;
-}
-
-/** The DOM id of the control reporting under an error key. */
-function fieldId(name: string): string {
-  return `field-${name.replaceAll(".", "-")}`;
 }
 
 /**
@@ -868,79 +863,6 @@ function Section({
       </div>
       {children}
     </section>
-  );
-}
-
-type Control = {
-  id: string;
-  "aria-invalid": true | undefined;
-  "aria-describedby": string | undefined;
-};
-
-/**
- * A label over a control, a helper under it, and the error under that — tied
- * to the control with `aria-describedby`, in `--status-danger`
- * (`docs/ui/screens/README.md`, form fields). The control is a render prop so
- * it can be an `Input` or a `Select` trigger and still get the same wiring.
- */
-function Field({
-  name,
-  label,
-  optional,
-  helper,
-  error,
-  className,
-  labelClassName,
-  children,
-}: {
-  name: string;
-  label: string;
-  optional?: boolean;
-  helper?: string;
-  error?: string;
-  className?: string;
-  labelClassName?: string;
-  children: (control: Control) => ReactNode;
-}) {
-  const id = fieldId(name);
-  const describedBy =
-    [helper ? `${id}-helper` : null, error ? `${id}-error` : null]
-      .filter(Boolean)
-      .join(" ") || undefined;
-
-  return (
-    <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-      <Label
-        htmlFor={id}
-        className={cn(
-          "text-xs leading-none font-medium text-text-secondary",
-          labelClassName,
-        )}
-      >
-        {label}
-        {optional ? (
-          <span className="font-normal text-text-muted">(optional)</span>
-        ) : null}
-      </Label>
-      {children({
-        id,
-        "aria-invalid": error ? true : undefined,
-        "aria-describedby": describedBy,
-      })}
-      {helper ? (
-        <p id={`${id}-helper`} className="text-xs leading-snug text-text-muted">
-          {helper}
-        </p>
-      ) : null}
-      {error ? (
-        <p
-          id={`${id}-error`}
-          className="text-xs leading-snug text-status-danger"
-        >
-          {error}
-        </p>
-      ) : null}
-    </div>
   );
 }
 

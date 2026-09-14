@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import type { buildings, units } from "@/db/schema";
 import { type CalendarDate, isCalendarDate, isTimeZone } from "@/lib/dates";
+import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
 import { type Cents, formatMoney, parseMoney } from "@/lib/money";
 
 type BuildingRow = typeof buildings.$inferSelect;
@@ -102,12 +103,9 @@ export type BuildingValues = {
 };
 
 /**
- * A message per field, keyed by the field's path — `city`, `units.1.rent`.
- * Two keys belong to no single input: `units`, for the list as a whole, and
- * `form`, for what no field can fix.
+ * Keyed by the field's path, as every form's are (`src/lib/forms.ts`), plus
+ * `units`, for the list as a whole.
  */
-export type FieldErrors = Partial<Record<string, string>>;
-
 export type ValidatedBuilding =
   { ok: true; values: BuildingValues } | { ok: false; errors: FieldErrors };
 
@@ -157,9 +155,6 @@ const shape = z.object({
   basisSplitMethod: z.enum([...BASIS_SPLIT_METHODS, ""]),
   basisSplitNote: z.string().max(2000),
 });
-
-export const UNREADABLE_FORM =
-  "Something went wrong reading the form. Reload the page and enter it again.";
 
 /**
  * What to change, per `docs/ui/screens/README.md` — never "invalid amount".
