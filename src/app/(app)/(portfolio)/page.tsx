@@ -71,8 +71,9 @@ export default async function PortfolioPage() {
               </h2>
               {active.length === 0 ? (
                 <p className="text-sm leading-normal text-text-tertiary">
-                  Every building is archived. Open one below to restore it, or
-                  add a building.
+                  {inactive.some((building) => building.status === "archived")
+                    ? "None is in the portfolio right now. Open an archived one below to restore it, or add a building."
+                    : "None is in the portfolio right now. Add a building to start it again."}
                 </p>
               ) : (
                 <BuildingGrid buildings={active} />

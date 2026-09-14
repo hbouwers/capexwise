@@ -104,6 +104,13 @@ function zoneLabel(zone: string): string {
  */
 const NO_METHOD = "not-recorded";
 
+/** A unit row's status, in the trigger's words. Retired rows have no Select. */
+const UNIT_STATUS_LABELS = {
+  occupied: "Occupied",
+  vacant: "Vacant",
+  retired: "Retired",
+} as const;
+
 export function BuildingForm({
   mode,
   initial,
@@ -590,7 +597,11 @@ export function BuildingForm({
                   }
                 >
                   <SelectTrigger {...control} className="w-full">
-                    <SelectValue />
+                    <SelectValue>
+                      {fields.basisSplitMethod
+                        ? BASIS_SPLIT_METHOD_LABELS[fields.basisSplitMethod]
+                        : "Not recorded"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent position="popper">
                     <SelectItem value={NO_METHOD}>Not recorded</SelectItem>
@@ -751,7 +762,10 @@ function UnitRow({
             }
           >
             <SelectTrigger {...control} className="w-full">
-              <SelectValue />
+              {/* Named here rather than left to Radix, which portals the
+                  chosen item's text in only once the browser has mounted it —
+                  so the server's HTML would show an empty trigger. */}
+              <SelectValue>{UNIT_STATUS_LABELS[row.status]}</SelectValue>
             </SelectTrigger>
             <SelectContent position="popper">
               <SelectItem value="occupied">Occupied</SelectItem>

@@ -189,10 +189,14 @@ function UnitsCard({
                   ) : null}
                 </TableCell>
                 <TableCell className="pr-5 text-right">
-                  {unit.status === "occupied" && unit.rentCents !== null ? (
-                    <Money cents={unit.rentCents} />
-                  ) : (
+                  {unit.status === "vacant" ? (
                     <span className="text-sm text-text-muted">Vacant</span>
+                  ) : unit.rentCents === null ? (
+                    // The form requires an occupied unit's rent; a row written
+                    // any other way still says what it is, not "Vacant".
+                    <span className="text-sm text-text-muted">Not entered</span>
+                  ) : (
+                    <Money cents={unit.rentCents} />
                   )}
                 </TableCell>
               </TableRow>
