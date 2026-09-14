@@ -38,6 +38,8 @@ for `git log`.
       it: named in `ORG_OWNED`, seeded on both sides, and a probe for each path that reaches it
 - [ ] New org-owned table → `docs/data-model.md` §9's grant to `capexwise_scoped`, `enable` and
       `force` row level security, and the policy — nothing for `capexwise_identity`
+- [ ] New table of any kind → `select` for `capexwise_reader`, and its read policy if the table has
+      row level security, or the nightly backup cannot read it (ADR-0010)
 - [ ] New environment variable → in `src/lib/env-schema.mts` _and_ `.env.example`, and no
       `NEXT_PUBLIC_` prefix on anything secret
 - [ ] Money handled as integer cents

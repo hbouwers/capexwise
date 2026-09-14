@@ -34,6 +34,7 @@ eventually be world-readable.
 | `docs/ui/components.md` | Component inventory — names, layers, shadcn mapping. The contract the screen specs reference |
 | `docs/ui/screens/` | One markdown spec per screen and modal, and a README of the rules they all share — widths, tables below `md`, building-or-unit scope, states. The contract a screen is built against |
 | `docs/ui/reference/rental-manager.html` | The design prototype. Visual source of truth |
+| `docs/runbooks/` | Operational procedures: the steps, where the ADR is the reasons. `backup-and-restore.md` is the first |
 | `CONTRIBUTING.md` | Branch, commit and PR conventions, and the protection to enable at v0.5 |
 
 ### Source layout
@@ -57,6 +58,7 @@ eventually be world-readable.
 | `src/db/schema/` | Drizzle table definitions, one file per domain area, matching `docs/data-model.md` |
 | `src/db/client.ts` | The raw database client. Importing it, or the `pg` driver, from anywhere outside the allowlist is an ESLint error |
 | `src/db/migrate.mts` | The migration runner. Forward-only, and it opens its own connection — [ADR-0006](docs/adr/0006-migrations.md) |
+| `src/db/backup.mts` | The nightly backup: dump, restore into a scratch database, compare — [ADR-0010](docs/adr/0010-backups.md). Opens its own connections, like the runner |
 | `src/lib/env-schema.mts` | The environment contract — the schema, and the parser that formats a failure without printing a value. `.mts` because the migration runner imports it and runs under plain Node |
 | `src/lib/access-code-cipher.mts` | Seals and opens access codes, and parses `ACCESS_CODE_KEYS` ([ADR-0008](docs/adr/0008-access-code-encryption.md)). Takes the keyring as an argument and reads no environment. `.mts` because `env-schema.mts` imports it |
 | `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
@@ -206,6 +208,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
 | Default service lives | **National defaults, user-overridable** (PRD §12, question 4). The fix for regional variance is a per-org override, not a climate-zone question at signup — onboarding speed is already a first-class design problem (#39). Drives the `capital_item_types` seed (#34): one national default per item type, editable per org, with a visible `defaults_updated_at` |
 | Access-code encryption | **AES-256-GCM in the application**, bound to the org, keyed by a per-environment `ACCESS_CODE_KEYS` ([ADR-0008](docs/adr/0008-access-code-encryption.md)). Rejected: `pgcrypto`, which makes the code and the key bound parameters, and Drizzle prints every bound parameter of a failed query; envelope encryption, which buys nothing without a KMS and is the Cloud Run move. Utility `account_ref` stays a four-character stub and is not encrypted |
+| Backups | **Nightly `pg_dump` as `capexwise_reader`, restored and compared on the runner before it is kept, `age`-encrypted, in an S3-compatible bucket outside Neon and GitHub, kept 90 days** ([ADR-0010](docs/adr/0010-backups.md)). Neon's 6-hour history covers the hours since. The reader reads through a read policy on every table rather than bypassing row-level security, so every new table needs its `select` grant and, if it has row-level security, the policy — docs/data-model.md §9. Rejected: Neon's backups alone (6 hours, and not independent), dumping as the owner (every domain table comes out empty), GitHub artifacts |
 | Portfolio forecasting | **In v1** (PRD §12, question 6). The dashboard rollup (F0) was already settled and in v1; the 10-year forecast and reserve projection get the same portfolio view in v1 rather than staying per-building until v1.1 |
 
 All six PRD open questions (#13) are now settled — see PRD §12.

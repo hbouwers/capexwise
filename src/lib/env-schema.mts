@@ -199,6 +199,22 @@ export const testEnvSchema = z.object({
 });
 
 /**
+ * What `npm run db:backup` needs: the database to back up, and a scratch one to
+ * restore the result into (#35, ADR-0010).
+ *
+ * Two variables rather than a reuse of `DATABASE_URL`, for the reason
+ * `TEST_DATABASE_URL` is separate: one names a database to preserve and the
+ * other names one the command drops and recreates on every run.
+ * `src/db/backup.mts` additionally refuses a restore target whose name does not
+ * end in `_restore`. Neither is in `serverEnvSchema`, because the server never
+ * reads them.
+ */
+export const backupEnvSchema = z.object({
+  BACKUP_SOURCE_URL: postgresConnectionString,
+  BACKUP_RESTORE_URL: postgresConnectionString,
+});
+
+/**
  * There are no public variables today, and this is the note that says so rather
  * than an empty schema pretending to be one. When the first `NEXT_PUBLIC_`
  * variable arrives it gets a `publicEnvSchema` here and a `src/lib/env-public.ts`

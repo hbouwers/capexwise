@@ -23,6 +23,7 @@
     "db:psql": "docker compose exec postgres psql -U capexwise -d capexwise",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node src/db/migrate.mts",
+    "db:backup": "node src/db/backup.mts",
     "db:studio": "drizzle-kit studio",
     "db:drift": "node scripts/check-migration-drift.mjs",
     "docker:build": "docker build -t capexwise-app .",

@@ -28,7 +28,9 @@
  *   org it is for — so every one of B's rows it cannot reach is row-level
  *   security (#28) keeping it out. The registry checks the same layer from the
  *   catalog's side: every org-owned table forced, a scoped policy keyed on its
- *   org column, and neither database role reaching a table it should not.
+ *   org column, and neither application role reaching a table it should not.
+ *   The backup's reader is the one role that crosses orgs by design, and the
+ *   registry holds it to reading every row and writing none (ADR-0010).
  *
  * ## How a probe is judged
  *
@@ -187,9 +189,13 @@ const IDENTITY_PATH: Partial<Record<keyof typeof ORG_OWNED, string>> = {
     "Better Auth's organization endpoints, which scope by the caller's membership and are probed below.",
 };
 
-/** The two database roles the migrations create — see `drizzle/0006`. */
+/**
+ * The database roles the migrations create — see `drizzle/0006` for the first
+ * two and `drizzle/0007` for the reader, which is the nightly backup's (#35).
+ */
 const SCOPED_ROLE = "capexwise_scoped";
 const IDENTITY_ROLE = "capexwise_identity";
+const READER_ROLE = "capexwise_reader";
 
 /**
  * Every table in the schema that `role` holds any privilege on at all. A table
@@ -752,23 +758,128 @@ describe("the registry", () => {
     ).toEqual([]);
   });
 
-  it("lets neither role bypass row-level security", async () => {
-    // Either attribute would make every policy above decorative. The migration
-    // creates both roles without them; this is what notices if one is altered.
+  it("lets no role bypass row-level security", async () => {
+    // Either attribute would make every policy above decorative. The migrations
+    // create the roles without them; this is what notices if one is altered.
+    // The reader is on the list too: it reads every row through a policy that
+    // says so, and a bypass would read past every policy, including the ones
+    // that do not.
     const { rows } = await testDb().execute<{
       rolname: string;
       rolsuper: boolean;
       rolbypassrls: boolean;
     }>(sql`
       select rolname, rolsuper, rolbypassrls from pg_roles
-      where rolname in (${SCOPED_ROLE}, ${IDENTITY_ROLE})
+      where rolname in (${SCOPED_ROLE}, ${IDENTITY_ROLE}, ${READER_ROLE})
       order by rolname
     `);
 
     expect(rows).toEqual([
       { rolname: IDENTITY_ROLE, rolsuper: false, rolbypassrls: false },
+      { rolname: READER_ROLE, rolsuper: false, rolbypassrls: false },
       { rolname: SCOPED_ROLE, rolsuper: false, rolbypassrls: false },
     ]);
+  });
+
+  it("lets the reader read every table and write none", async () => {
+    // ADR-0010. A table the reader cannot select from fails the nightly backup
+    // outright, which is loud but a day late; this says so on the pull request
+    // that adds the table. And a write privilege of any kind is a backup login
+    // that can change what it is backing up.
+    const { rows } = await testDb().execute<{
+      relname: string;
+      reads: boolean;
+      writes: boolean;
+    }>(sql`
+      select relname,
+             has_table_privilege(${READER_ROLE}::name, oid, 'select') as reads,
+             has_table_privilege(${READER_ROLE}::name, oid,
+               'insert, update, delete, truncate, references, trigger') as writes
+      from pg_class
+      where relnamespace = 'public'::regnamespace and relkind = 'r'
+      order by relname
+    `);
+
+    expect(
+      rows.filter((row) => !row.reads).map((row) => row.relname),
+      `${READER_ROLE} cannot read these tables — grant it select, which is ` +
+        "item 3 of the per-table checklist in docs/data-model.md §9.",
+    ).toEqual([]);
+
+    expect(
+      rows.filter((row) => row.writes).map((row) => row.relname),
+      `${READER_ROLE} holds more than select on these tables.`,
+    ).toEqual([]);
+  });
+
+  it("gives the reader a read-everything policy on every table with row-level security", async () => {
+    // The check the backup cannot make for itself. It dumps with
+    // `--enable-row-security`, so a table whose policies do not admit the
+    // reader is dumped as empty, restores as empty, and the restore drill's
+    // row counts agree with it — both sides are read as the reader. This is
+    // the only place the missing policy shows.
+    //
+    // Exactly one, and read-only: a second permissive policy is OR'd with it,
+    // and `for all` would carry a `with check` a write could use.
+    const { rows } = await testDb().execute<{ relname: string }>(sql`
+      select relname from pg_class
+      where relnamespace = 'public'::regnamespace and relkind = 'r'
+        and relrowsecurity
+      order by relname
+    `);
+
+    const policies = await policiesFor(READER_ROLE);
+
+    for (const { relname: table } of rows) {
+      expect(
+        policies[table],
+        `${table} has row-level security and should have exactly one ` +
+          `\`for select to ${READER_ROLE} using (true)\` policy, or the ` +
+          "nightly backup dumps it empty — the template is in " +
+          "docs/data-model.md §9.",
+      ).toEqual([{ cmd: "SELECT", qual: "true", withCheck: null }]);
+    }
+  });
+
+  it("shows the reader every row of both orgs, as the backup will see them", async () => {
+    // The catalog checks above, from the other side: what `pg_dump` actually
+    // reads when it logs in as the reader and turns row security on. The
+    // harness is a superuser, so it can become the reader for one transaction
+    // and count through its policies what it has just counted past them.
+    await seedTwoOrgs();
+
+    const { rows: tables } = await testDb().execute<{ relname: string }>(sql`
+      select relname from pg_class
+      where relnamespace = 'public'::regnamespace and relkind = 'r'
+      order by relname
+    `);
+
+    const [past, through] = await testDb().transaction(async (tx) => {
+      async function countEach() {
+        const counts: Record<string, number> = {};
+
+        for (const { relname } of tables) {
+          const { rows } = await tx.execute<{ count: number }>(
+            sql`select count(*)::int as count from ${sql.identifier(relname)}`,
+          );
+
+          counts[relname] = rows[0]?.count ?? 0;
+        }
+
+        return counts;
+      }
+
+      const asHarness = await countEach();
+
+      await tx.execute(sql`set local role ${sql.identifier(READER_ROLE)}`);
+      await tx.execute(sql`set local row_security = on`);
+
+      return [asHarness, await countEach()];
+    });
+
+    expect(through).toEqual(past);
+    // Not a vacuous agreement between two sets of zeroes.
+    expect(through.organizations).toBe(2);
   });
 
   it("seeds every org-owned table on both sides", async () => {
