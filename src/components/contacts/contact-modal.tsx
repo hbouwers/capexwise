@@ -45,7 +45,13 @@ type Mode =
   | { kind: "edit"; contactId: string; name: string; archived: boolean };
 
 /** What the footer is doing: the form's buttons, or asking about one of them. */
-type Asking = null | "discard" | "archive";
+type Asking = null | "discard" | "archive" | "restore";
+
+/**
+ * Archiving and restoring close the modal without saving the form, so with
+ * something typed they say so before they do it rather than dropping it.
+ */
+const UNSAVED = "Your changes to this form won't be saved.";
 
 /** Ticked trades as a set, so ticking one off and on again is no change. */
 function sameFields(a: ContactFields, b: ContactFields): boolean {
@@ -210,8 +216,8 @@ export function ContactModal({
   function archiveOrRestore(action: typeof archiveContact, done: string) {
     if (mode.kind !== "edit") return;
 
-    // The archive question stays up while it runs, so its button can say so;
-    // a failure goes back to the form's footer, where the message goes.
+    // A question stays up while its action runs, so its button can say so; a
+    // failure goes back to the form's footer, where the message goes.
     startTransition(async () => {
       const result = await action(mode.contactId).catch(() => ({ ok: false }));
 
@@ -244,13 +250,23 @@ export function ContactModal({
     ) : asking === "archive" && mode.kind === "edit" ? (
       <FooterQuestion
         question={`Archive ${mode.name}?`}
-        detail="Keeps them on past tasks, and takes them out of this book and the assignee lists."
+        detail={`Keeps them on past tasks, and takes them out of this book and the assignee lists.${changed ? ` ${UNSAVED}` : ""}`}
         keep="Keep"
         confirm={pending ? "Archiving…" : "Archive contact"}
         destructive
         disabled={pending}
         onKeep={keep}
         onConfirm={() => archiveOrRestore(archiveContact, "Contact archived.")}
+      />
+    ) : asking === "restore" && mode.kind === "edit" ? (
+      <FooterQuestion
+        question={`Restore ${mode.name}?`}
+        detail={`${UNSAVED} Save them first to keep them.`}
+        keep="Keep editing"
+        confirm={pending ? "Restoring…" : "Restore contact"}
+        disabled={pending}
+        onKeep={keep}
+        onConfirm={() => archiveOrRestore(restoreContact, "Contact restored.")}
       />
     ) : (
       <div className="flex flex-col gap-3">
@@ -282,8 +298,11 @@ export function ContactModal({
                 type="button"
                 variant="ghost"
                 disabled={pending}
+                data-asks="restore"
                 onClick={() =>
-                  archiveOrRestore(restoreContact, "Contact restored.")
+                  changed
+                    ? ask("restore")
+                    : archiveOrRestore(restoreContact, "Contact restored.")
                 }
               >
                 Restore contact
