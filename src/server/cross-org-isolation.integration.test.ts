@@ -78,17 +78,22 @@ import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import { organizations, sessions } from "@/db/schema";
+import { buildingFields } from "@/lib/building-form";
 import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
+  createBuilding,
   createInvitation,
   createMembership,
   createOrganization,
+  createUnit,
   createUser,
 } from "@/test/factories";
 import {
+  FOREIGN_KEY_VIOLATION,
   INSUFFICIENT_PRIVILEGE,
   postgresErrorCode,
   rejectsWith,
+  RESTRICT_VIOLATION,
 } from "@/test/postgres-errors";
 
 /**
@@ -137,6 +142,10 @@ process.env.ACCESS_CODE_KEYS = "1:aW50ZWdyYXRpb24tc3VpdGUtbm90LWEtcmVhbC1rZXk";
 const { getAuth } = await import("@/server/auth");
 const { getOrgContext } = await import("@/server/org-context");
 const { switchOrganization } = await import("@/server/actions/organizations");
+// A namespace rather than names: `createBuilding` is also the factory's.
+const buildingActions = await import("@/server/actions/buildings");
+const { getBuilding, listBuildings } =
+  await import("@/server/queries/buildings");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -150,6 +159,8 @@ const ORG_OWNED = {
   organizations: "id",
   memberships: "org_id",
   invitations: "org_id",
+  buildings: "org_id",
+  units: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -298,6 +309,11 @@ async function seedTwoOrgs() {
       email: "new-hire@example.test",
     });
 
+    const building = await createBuilding(org.id, {
+      addressLine1: "412 N Delaware St",
+    });
+    const unit = await createUnit(org.id, building.id, { label: "A" });
+
     return {
       org,
       owner,
@@ -306,6 +322,8 @@ async function seedTwoOrgs() {
       memberMembership,
       sharedMembership,
       invitation,
+      building,
+      unit,
     };
   }
 
@@ -336,6 +354,8 @@ function identifiersOf(side: Side): string[] {
     side.memberMembership.id,
     side.sharedMembership.id,
     side.invitation.id,
+    side.building.id,
+    side.unit.id,
   ];
 }
 
@@ -1080,6 +1100,144 @@ describe("switchOrganization", () => {
 });
 
 /**
+ * The building form's paths — `src/server/queries/buildings.ts` and
+ * `src/server/actions/buildings.ts` — driven the way a page and a form drive
+ * them: a signed session, then the function, with nothing naming an org. Every
+ * id they are handed is B's where the probe is about B, and each is checked the
+ * same way as the switcher: B's rows unchanged, and none of B's identifiers in
+ * what came back.
+ */
+describe("the building paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  /** The edit form for `side`'s building, prefilled as the page prefills it. */
+  function formFor(side: Side) {
+    return buildingFields(side.building, [side.unit]);
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  it("lists only the caller's buildings", async () => {
+    const { a } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const listed = await listBuildings();
+
+    expect(listed.map((building) => building.id)).toEqual([a.building.id]);
+    expect(listed[0]?.unitCount).toBe(1);
+  });
+
+  it("reads the caller's building, and not the other org's by its id", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const mine = await getBuilding(a.building.id);
+    expect(mine?.units.map((unit) => unit.id)).toEqual([a.unit.id]);
+
+    expect(await getBuilding(b.building.id)).toBeNull();
+  });
+
+  it("edits the caller's building, and leaves the other org's alone", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await buildingActions.updateBuilding(a.building.id, {
+      ...formFor(a),
+      label: "Renamed duplex",
+    });
+
+    expect(result).toEqual({ ok: true, buildingId: a.building.id });
+    expect((await getBuilding(a.building.id))?.building.label).toBe(
+      "Renamed duplex",
+    );
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses to edit the other org's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await buildingActions.updateBuilding(b.building.id, {
+      ...formFor(b),
+      label: "Renamed duplex",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses the other org's unit smuggled into the caller's building", async () => {
+    // The id is a lookup into A's building's own units. B's unit is not one,
+    // so the save is refused whole — A's building is not half-edited either.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const theirs = await rowsOwnedBy(b.org.id);
+    const mine = await rowsOwnedBy(a.org.id);
+
+    const form = formFor(a);
+    const result = await buildingActions.updateBuilding(a.building.id, {
+      ...form,
+      label: "Renamed duplex",
+      units: [...form.units, { ...form.units[0]!, id: b.unit.id, label: "B" }],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
+    expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
+  });
+
+  it("archives and restores only the caller's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    expect(await buildingActions.archiveBuilding(b.building.id)).toEqual({
+      ok: false,
+    });
+    expect(await buildingActions.restoreBuilding(b.building.id)).toEqual({
+      ok: false,
+    });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: the same calls work at home.
+    expect(await buildingActions.archiveBuilding(a.building.id)).toEqual({
+      ok: true,
+    });
+    expect(await buildingActions.restoreBuilding(a.building.id)).toEqual({
+      ok: true,
+    });
+  });
+
+  it("creates in the caller's org, whatever org the submission names", async () => {
+    // An extra `orgId` is not a field the form has, and it is dropped with
+    // the rest of what the schema does not describe — ignored, not validated.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await buildingActions.createBuilding({
+      ...formFor(a),
+      units: [{ ...formFor(a).units[0]!, id: null }],
+      orgId: b.org.id,
+    });
+
+    expect(result.ok).toBe(true);
+    expect((await rowsOwnedBy(a.org.id)).buildings).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+/**
  * A scoped handle for the owner of `side`'s org, reached the way every domain
  * query will reach one: a signed session, then `getOrgContext()`. Not
  * `forOrg()`, which ESLint keeps out of this file for the reason
@@ -1154,11 +1312,14 @@ describe.each(Object.entries(ORG_OWNED))(
       const db = await scopedHandleFor(a);
       const before = await rowsOwnedBy(b.org.id);
 
-      // Two acceptable outcomes, and which one a table gets is the migration's
-      // decision rather than this test's: `organizations` has no DELETE grant
-      // for the scoped role — an org is soft-deleted, and the purge is not a
-      // request — so it is refused before any row is considered. The others
-      // may delete, and must delete only A's.
+      // Three acceptable outcomes, and which one a table gets is the
+      // migration's decision rather than this test's: `organizations` has no
+      // DELETE grant for the scoped role — an org is soft-deleted, and the
+      // purge is not a request — so it is refused before any row is considered.
+      // `buildings` is refused by its units' `restrict`, because every seeded
+      // building has one (§7: archived, not deleted). The others may delete,
+      // and must delete only A's. A refusal rolls the transaction back, and the
+      // snapshot below is what says B was never touched either way.
       const outcome = await db
         .run((tx) =>
           tx.execute<{ owner: string }>(
@@ -1170,7 +1331,9 @@ describe.each(Object.entries(ORG_OWNED))(
           (error: unknown) => postgresErrorCode(error),
         );
 
-      expect([[], INSUFFICIENT_PRIVILEGE]).toContainEqual(outcome);
+      expect([[], INSUFFICIENT_PRIVILEGE, RESTRICT_VIOLATION]).toContainEqual(
+        outcome,
+      );
       expect(await rowsOwnedBy(b.org.id)).toEqual(before);
     });
 
@@ -1192,3 +1355,60 @@ describe.each(Object.entries(ORG_OWNED))(
     });
   },
 );
+
+/**
+ * The write `with check` cannot catch. A policy judges the row being written,
+ * and the unit below is A's by every column the policy reads; the building it
+ * points at is B's. Postgres checks a foreign key past row-level security, so
+ * with a plain `building_id` reference this insert succeeds even though A
+ * cannot see the building it names — `docs/data-model.md` §9 asks for exactly
+ * this case, and `units_building` is what refuses it.
+ */
+describe("a reference from one org's row to another's", () => {
+  it("lets a unit into the scoped org's own building", async () => {
+    // The control: the insert below is well-formed, and fails only for B.
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run((tx) =>
+      tx.execute(
+        sql`insert into units (org_id, building_id, label)
+            values (${a.org.id}, ${a.building.id}, 'B')`,
+      ),
+    );
+
+    expect((await rowsOwnedBy(a.org.id)).units).toHaveLength(2);
+  });
+
+  it("refuses a unit in another org's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    await expect(
+      db.run((tx) =>
+        tx.execute(
+          sql`insert into units (org_id, building_id, label)
+              values (${a.org.id}, ${b.building.id}, 'B')`,
+        ),
+      ),
+    ).rejects.toSatisfy(rejectsWith(FOREIGN_KEY_VIOLATION));
+
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    expect((await rowsOwnedBy(a.org.id)).units).toHaveLength(1);
+  });
+
+  it("refuses to move a unit into another org's building", async () => {
+    const { a, b } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await expect(
+      db.run((tx) =>
+        tx.execute(
+          sql`update units set building_id = ${b.building.id}
+              where id = ${a.unit.id}`,
+        ),
+      ),
+    ).rejects.toSatisfy(rejectsWith(FOREIGN_KEY_VIOLATION));
+  });
+});

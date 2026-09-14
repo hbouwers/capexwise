@@ -105,6 +105,24 @@ export function todayIn(
 }
 
 /**
+ * Whether `name` is a timezone this runtime can read — the check a
+ * building's `timezone` passes before it is stored, because `todayIn` throws
+ * on one it cannot. Asked of `Intl` itself rather than of a list, so it agrees
+ * with `todayIn` by construction: an alias such as `US/Eastern` is accepted
+ * here exactly when it would work there.
+ */
+export function isTimeZone(name: string): boolean {
+  if (name.trim() === "") return false;
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: name });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The first of the date's month — the only day a rent period may fall on, and
  * `rent_periods.period_month` carries a check constraint saying so
  * (`docs/data-model.md` §4).

@@ -7,7 +7,8 @@
 This is the contract the migrations implement. **Section 2 is built**: `organizations` came with
 #17 and its reserve with #92, `users`, `memberships` and `invitations` with #24, and `sessions`,
 `accounts`, `verifications` and `rate_limits` with the provider in #25, and section 9's row-level
-security has covered it since #28. Everything from section 3 on is still prose.
+security has covered it since #28. **So are `buildings` and `units`**, the first two tables of
+section 3, with #105. Everything else from section 3 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -290,7 +291,9 @@ create table buildings (
   country       text not null default 'US',
   timezone      text not null,          -- IANA name; ADR-0005 renders in the building's zone
 
-  build_year    integer check (build_year between 1600 and 2200),
+  build_year    integer
+                  constraint buildings_build_year_plausible
+                  check (build_year between 1600 and 2200),
   status        building_status not null default 'active',
 
   -- Acquisition and basis (#43). In from the start: depreciation applies to the building
@@ -298,16 +301,26 @@ create table buildings (
   acquired_on              date,
   in_service_on            date,        -- when placed in service; depreciation starts here,
                                         -- and it is not always the acquisition date
-  purchase_price_cents     bigint check (purchase_price_cents >= 0),
-  closing_costs_cents      bigint check (closing_costs_cents >= 0),
-  land_basis_cents         bigint check (land_basis_cents >= 0),
-  building_basis_cents     bigint check (building_basis_cents >= 0),
-  basis_split_method       text check (basis_split_method in
-                             ('assessment_ratio', 'appraisal', 'manual')),
+  purchase_price_cents     bigint,
+  closing_costs_cents      bigint,
+  land_basis_cents         bigint,
+  building_basis_cents     bigint,
+  basis_split_method       text
+                             constraint buildings_basis_split_method_known
+                             check (basis_split_method in
+                               ('assessment_ratio', 'appraisal', 'manual')),
   basis_split_note         text,        -- the traceability requirement, in one field
 
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
+
+  -- What `units_building` references: the building and its org together.
+  -- `id` is unique on its own, so this admits no row that was not already legal.
+  constraint buildings_org_and_id unique (org_id, id),
+  constraint buildings_money_not_negative check (
+    purchase_price_cents >= 0 and closing_costs_cents >= 0
+      and land_basis_cents >= 0 and building_basis_cents >= 0
+  ),
 
   -- Either the whole basis is present and consistent, or none of it is. A half-entered
   -- basis is the state that produces a confidently wrong depreciation figure.
@@ -338,7 +351,7 @@ create type unit_status as enum ('occupied', 'vacant', 'retired');
 create table units (
   id            uuid primary key default uuidv7(),
   org_id        uuid not null references organizations (id) on delete cascade,
-  building_id   uuid not null references buildings (id) on delete restrict,
+  building_id   uuid not null,          -- referenced with its org, below
 
   label         text not null,          -- "A", "Unit 2", "Upstairs"
   status        unit_status not null default 'vacant',
@@ -350,9 +363,22 @@ create table units (
 
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
-  unique (org_id, building_id, label)
+  constraint units_building foreign key (org_id, building_id)
+    references buildings (org_id, id) on delete restrict,
+  constraint units_org_building_label unique (org_id, building_id, label),
+  constraint units_rent_not_negative check (rent_cents >= 0)
 );
 ```
+
+**A unit references its building and its org in one foreign key**, and the plain
+`building_id references buildings (id)` this section first had would have been a hole. Postgres
+checks a foreign key past row-level security, so a scoped handle for org A that cannot *see* org B's
+building can still insert a unit pointing at it, given the id — measured at #105, not assumed. The
+policy's `with check` judges the row being written, and that row's `org_id` is A's. Naming the org
+in the reference makes the cross-org row one the database cannot hold, and it closes the smaller
+leak beside it: without it, whether that insert succeeded would tell A whether B's id exists.
+Every reference from one org-owned table to another wants the same shape, which is §9's fifth
+checklist item.
 
 **`units.rent_cents` is the current rent and nothing else.** It is never read to compute a past
 month — see §4. `retired` covers a unit that stopped existing as a separate leasable space (two
@@ -801,7 +827,8 @@ create index invitations_org_status   on invitations (org_id, status, expires_at
 
 -- Buildings and units
 create index buildings_org_status     on buildings (org_id, status);
-create index units_org_building       on units (org_id, building_id);
+-- `units_org_building` is not listed: `units_org_building_label` in §3 is a
+-- unique btree led by (org_id, building_id), and serves every query it would.
 create index units_org_lease_end      on units (org_id, lease_end) where status = 'occupied';
 create index building_utilities_org_building on building_utilities (org_id, building_id);
 create index building_access_codes_org_building on building_access_codes (org_id, building_id);
@@ -958,6 +985,12 @@ ADR-0003 promised four items per new table, and #23 puts them in the PR template
 4. A case in the cross-org isolation test (#27). Naming the table in `ORG_OWNED` there is what makes
    the registry check items 1 and 3, and runs the unfiltered-query probes over it. The reader's
    half of item 3 is checked on every table whether it is named there or not
+5. Every reference to another org-owned table is **composite, with `org_id`** —
+   `foreign key (org_id, building_id) references buildings (org_id, id)` — against a
+   `unique (org_id, id)` on the referenced table. A foreign key is checked past row-level security,
+   so the policy alone lets a row point into another org (§3, `units_building`). Nullable
+   references follow the same shape: a composite key with a null in it is not checked, which is
+   the `unit_id is null` building-shared case, correctly
 
 ### What #27 has to cover
 
@@ -969,8 +1002,10 @@ for by #48, because they are the ones a naive test misses:
   table with `unit_id is null`) must both be invisible across orgs. `unit_id` is a scope, never a
   boundary — a test that only exercises unit-scoped rows would pass while shared rows leaked.
 - **A cross-org foreign key must be impossible**: org A's building must not accept org B's unit as
-  its `unit_id`. The policy protects reads; this is the write case, and it is what `WITH CHECK`
-  exists for.
+  its `unit_id`. The policy protects reads, and **`WITH CHECK` does not cover this write**: it
+  judges the new row's own `org_id`, and a foreign key is checked past row-level security. The
+  composite reference of the checklist's fifth item is what refuses it, and the isolation test
+  proves it through a scoped handle — first for `units` to `buildings`, at #105.
 
 ---
 

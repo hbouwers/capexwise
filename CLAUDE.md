@@ -5,12 +5,14 @@ Companion to Zillow Rental Manager, not a replacement: Zillow keeps rent collect
 listings, tenants and messaging; this owns the capital asset lifecycle, CapEx forecasting, tax
 planning, maintenance scheduling, vendor contacts and building operational facts.
 
-**Status: the tenancy spine and the app shell are in; no feature code yet.** The application signs
+**Status: the tenancy spine, the app shell and the first feature are in.** The application signs
 in with Google, creates the account's org and owner membership, and protects its routes — #25. The
 schema through `docs/data-model.md` §2 is migrated, with row-level security on every table that
 carries an org — #28. Every signed-in screen renders inside the shell — rail, org switcher, the
-`can(org, feature)` plan gate — #29, and the five destinations are placeholders. Everything the
-product is *for* — buildings, capital items, the forecast, the tax planner — is still unwritten. Rules below that describe
+`can(org, feature)` plan gate — #29. Money and dates have their one formatter each — #104.
+Buildings and units are stored, entered through the building form, and shown on the building's page
+and the portfolio's cards — #105; the other four destinations are placeholders. Capital items, the
+forecast, the tax planner and the rest of what the product is *for* are still unwritten. Rules below that describe
 runtime behaviour describe what the code *will* do — they are the contract to build against, not
 a description of something already working. Anything already true is marked as such.
 

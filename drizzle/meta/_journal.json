@@ -64,6 +64,20 @@
       "when": 1789401492756,
       "tag": "0008_org_reserve",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789405757013,
+      "tag": "0009_buildings_and_units",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789405759176,
+      "tag": "0010_buildings_row_level_security",
+      "breakpoints": true
     }
   ]
 }

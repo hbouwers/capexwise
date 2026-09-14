@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/shell/app-shell";
+import { Toaster } from "@/components/ui/sonner";
 import { getOrgContext, listOrgsForUser } from "@/server/org-context";
 
 /**
@@ -25,6 +26,9 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       user={{ name: user.name, email: user.email }}
     >
       {children}
+      {/* Mounted here rather than per page, so a toast raised just before a
+          navigation — "Building added." — survives the page it was raised on. */}
+      <Toaster position="bottom-right" />
     </AppShell>
   );
 }
