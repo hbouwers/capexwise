@@ -77,8 +77,9 @@ import { makeSignature } from "better-auth/crypto";
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
-import { organizations, sessions } from "@/db/schema";
+import { contacts, organizations, sessions } from "@/db/schema";
 import { buildingFields } from "@/lib/building-form";
+import { contactFields } from "@/lib/contact-form";
 import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
 import {
   createBuilding,
@@ -148,6 +149,9 @@ const { switchOrganization } = await import("@/server/actions/organizations");
 const buildingActions = await import("@/server/actions/buildings");
 const { getBuilding, listBuildings } =
   await import("@/server/queries/buildings");
+const contactActions = await import("@/server/actions/contacts");
+const { getContact, listContacts, listTradeTags } =
+  await import("@/server/queries/contacts");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1296,6 +1300,141 @@ describe("the building paths", () => {
 
     expect(result.ok).toBe(true);
     expect((await rowsOwnedBy(a.org.id)).buildings).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+/**
+ * The contact book's paths — `src/server/queries/contacts.ts` and
+ * `src/server/actions/contacts.ts` — driven as the page and the modal drive
+ * them, and judged as the building paths are. The two orgs' plumbers share a
+ * name and a phone number, so a lookup keyed on either would find both.
+ */
+describe("the contact paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  /** The modal for `side`'s contact, prefilled as the page prefills it. */
+  function formFor(side: Side) {
+    return contactFields({ ...side.contact, trades: ["plumber"] });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  it("lists only the caller's contacts", async () => {
+    const { a } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const listed = await listContacts();
+
+    expect(listed.map((contact) => contact.id)).toEqual([a.contact.id]);
+    expect(listed[0]?.trades).toEqual(["plumber"]);
+  });
+
+  it("reads the caller's contact, and not the other org's by its id", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    expect((await getContact(a.contact.id))?.id).toBe(a.contact.id);
+    expect(await getContact(b.contact.id)).toBeNull();
+  });
+
+  it("reads the whole trade list, which belongs to no org", async () => {
+    // The control for the reference-data exemption: the scoped handle reads
+    // every trade, and the list is the same from either side.
+    const { a, b } = await seedTwoOrgs();
+
+    await signedInAs(a);
+    const fromA = await listTradeTags();
+    await signedInAs(b);
+    const fromB = await listTradeTags();
+
+    expect(fromA).toHaveLength(19);
+    expect(fromB).toEqual(fromA);
+  });
+
+  it("edits the caller's contact, and leaves the other org's alone", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await contactActions.updateContact(a.contact.id, {
+      ...formFor(a),
+      trades: ["plumber", "handyman"],
+    });
+
+    expect(result).toEqual({ ok: true, contactId: a.contact.id });
+    expect((await getContact(a.contact.id))?.trades).toEqual([
+      "handyman",
+      "plumber",
+    ]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses to edit the other org's contact or its trades", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await contactActions.updateContact(b.contact.id, {
+      ...formFor(b),
+      name: "Renamed",
+      trades: [],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("archives and restores only the caller's contact", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    expect(await contactActions.archiveContact(b.contact.id)).toEqual({
+      ok: false,
+    });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: the same call works at home.
+    expect(await contactActions.archiveContact(a.contact.id)).toEqual({
+      ok: true,
+    });
+
+    // And restoring needs an archived contact, which B's now is.
+    await testDb()
+      .update(contacts)
+      .set({ archivedAt: new Date() })
+      .where(eq(contacts.id, b.contact.id));
+    const archived = await rowsOwnedBy(b.org.id);
+
+    expect(await contactActions.restoreContact(b.contact.id)).toEqual({
+      ok: false,
+    });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(archived);
+    expect(await contactActions.restoreContact(a.contact.id)).toEqual({
+      ok: true,
+    });
+  });
+
+  it("creates in the caller's org, whatever org the submission names", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await contactActions.createContact({
+      ...formFor(a),
+      orgId: b.org.id,
+    });
+
+    expect(result.ok).toBe(true);
+    expect((await rowsOwnedBy(a.org.id)).contacts).toHaveLength(2);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });
