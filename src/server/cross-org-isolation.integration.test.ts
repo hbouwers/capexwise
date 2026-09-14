@@ -79,14 +79,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { organizations, sessions } from "@/db/schema";
 import { buildingFields } from "@/lib/building-form";
-import { applicationDatabaseUrl, testDb } from "@/test/db";
+import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
 import {
   createBuilding,
+  createContact,
   createInvitation,
   createMembership,
   createOrganization,
   createUnit,
   createUser,
+  tagContact,
 } from "@/test/factories";
 import {
   FOREIGN_KEY_VIOLATION,
@@ -161,14 +163,22 @@ const ORG_OWNED = {
   invitations: "org_id",
   buildings: "org_id",
   units: "org_id",
+  contacts: "org_id",
+  contact_tags: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
  * Every table with no org, by name, and why. Written down rather than left out,
  * so that a reader finds a decision instead of an omission — which is what
  * `docs/data-model.md` §5 asks for `capital_item_types` when it arrives.
+ *
+ * The reference data among them is also on `REFERENCE_TABLES`, in the harness,
+ * which the registry holds to being readable by the scoped role and writable
+ * by nobody.
  */
 const OUTSIDE_THE_BOUNDARY: Record<string, string> = {
+  trade_tags:
+    "Reference data: one trade list every org reads and only a migration writes (data-model §6).",
   users:
     "Identity sits above the boundary: one account, any number of orgs (data-model §2).",
   sessions:
@@ -272,7 +282,7 @@ async function policiesFor(role: string): Promise<Record<string, Policy[]>> {
  * probe could not reach it" is never confused with "it was never there".
  *
  * Ordered by the whole row cast to text rather than by `id`, because not every
- * table will have one: `contact_tags` is keyed on `(contact_id, tag)`.
+ * table has one: `contact_tags` is keyed on `(org_id, contact_id, tag)`.
  */
 async function rowsOwnedBy(orgId: string): Promise<Record<string, unknown[]>> {
   const owned: Record<string, unknown[]> = {};
@@ -314,6 +324,14 @@ async function seedTwoOrgs() {
     });
     const unit = await createUnit(org.id, building.id, { label: "A" });
 
+    // The same plumber on both sides, by name and by phone, so a lookup keyed
+    // on either finds one in each org.
+    const contact = await createContact(org.id, {
+      name: "Dana Whitfield",
+      phone: "317-555-0142",
+    });
+    await tagContact(org.id, contact.id, "plumber");
+
     return {
       org,
       owner,
@@ -324,6 +342,7 @@ async function seedTwoOrgs() {
       invitation,
       building,
       unit,
+      contact,
     };
   }
 
@@ -356,6 +375,8 @@ function identifiersOf(side: Side): string[] {
     side.invitation.id,
     side.building.id,
     side.unit.id,
+    side.contact.id,
+    side.contact.email!,
   ];
 }
 
@@ -720,19 +741,61 @@ describe("the registry", () => {
     }
   });
 
-  it("gives the scoped role nothing on a table without a policy for it", async () => {
+  it("gives the scoped role nothing on a table this file has not vetted", async () => {
     // The general form of the rule, rather than a list of tables to check: a
     // grant with no policy behind it is every org's rows, so any table the
-    // scoped role can touch must be one the test above has already vetted. A
-    // table outside the boundary that the scoped role could read is the leak.
-    const reachable = await tablesReachableBy(SCOPED_ROLE);
-    const policed = Object.keys(await policiesFor(SCOPED_ROLE));
+    // scoped role can touch must be one a test here has already vetted — an
+    // org-owned table the test above holds to its org, or reference data the
+    // next test holds to reading. Having *a* policy is not enough since
+    // reference data arrived: its `using (true)` is a policy, and on any other
+    // table it would be every org's rows with a policy in front of them.
+    const vetted = [...Object.keys(ORG_OWNED), ...REFERENCE_TABLES];
 
     expect(
-      reachable.filter((table) => !policed.includes(table)),
-      `${SCOPED_ROLE} holds privileges on these tables and no policy limits ` +
-        "which rows it sees.",
+      (await tablesReachableBy(SCOPED_ROLE)).filter(
+        (table) => !vetted.includes(table),
+      ),
+      `${SCOPED_ROLE} holds privileges on these tables, which are neither ` +
+        "org-owned nor reference data.",
     ).toEqual([]);
+  });
+
+  it("lets the scoped role read reference data and write none of it", async () => {
+    // docs/data-model.md §6 and §9. Every org reads the whole trade list, so
+    // the one policy says `using (true)` — and it is `for select`, so a write
+    // granted by mistake still finds no policy to admit it. The grant is held
+    // to `select` as well, so that mistake is one this test names first.
+    const policies = await policiesFor(SCOPED_ROLE);
+
+    for (const table of REFERENCE_TABLES) {
+      expect(
+        Object.hasOwn(OUTSIDE_THE_BOUNDARY, table),
+        `${table} is reference data, so it has no org: name it in OUTSIDE_THE_BOUNDARY.`,
+      ).toBe(true);
+
+      expect(
+        policies[table],
+        `${table} should have exactly one \`for select to ${SCOPED_ROLE} ` +
+          "using (true)` policy.",
+      ).toEqual([{ cmd: "SELECT", qual: "true", withCheck: null }]);
+
+      const { rows } = await testDb().execute<{
+        reads: boolean;
+        writes: boolean;
+        protected: boolean;
+      }>(sql`
+        select has_table_privilege(${SCOPED_ROLE}::name, oid, 'select') as reads,
+               has_table_privilege(${SCOPED_ROLE}::name, oid,
+                 'insert, update, delete') as writes,
+               relrowsecurity as protected
+        from pg_class
+        where relnamespace = 'public'::regnamespace and relname = ${table}
+      `);
+
+      expect(rows, table).toEqual([
+        { reads: true, writes: false, protected: true },
+      ]);
+    }
   });
 
   it("grants neither role a privilege row-level security does not govern", async () => {
@@ -1313,9 +1376,10 @@ describe.each(Object.entries(ORG_OWNED))(
       const before = await rowsOwnedBy(b.org.id);
 
       // Three acceptable outcomes, and which one a table gets is the
-      // migration's decision rather than this test's: `organizations` has no
-      // DELETE grant for the scoped role — an org is soft-deleted, and the
-      // purge is not a request — so it is refused before any row is considered.
+      // migration's decision rather than this test's: `organizations` and
+      // `contacts` have no DELETE grant for the scoped role — an org is
+      // soft-deleted and the purge is not a request, and a contact is archived
+      // — so they are refused before any row is considered.
       // `buildings` is refused by its units' `restrict`, because every seeded
       // building has one (§7: archived, not deleted). The others may delete,
       // and must delete only A's. A refusal rolls the transaction back, and the
@@ -1362,7 +1426,8 @@ describe.each(Object.entries(ORG_OWNED))(
  * points at is B's. Postgres checks a foreign key past row-level security, so
  * with a plain `building_id` reference this insert succeeds even though A
  * cannot see the building it names — `docs/data-model.md` §9 asks for exactly
- * this case, and `units_building` is what refuses it.
+ * this case, and `units_building` is what refuses it. Every composite
+ * reference after it gets the same pair of cases.
  */
 describe("a reference from one org's row to another's", () => {
   it("lets a unit into the scoped org's own building", async () => {
@@ -1410,5 +1475,39 @@ describe("a reference from one org's row to another's", () => {
         ),
       ),
     ).rejects.toSatisfy(rejectsWith(FOREIGN_KEY_VIOLATION));
+  });
+
+  // The same shape one table over: a tag that is A's by its `org_id`, on B's
+  // contact. `contact_tags_contact` names the org, so it is refused.
+  it("lets a tag onto the scoped org's own contact", async () => {
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run((tx) =>
+      tx.execute(
+        sql`insert into contact_tags (org_id, contact_id, tag)
+            values (${a.org.id}, ${a.contact.id}, 'handyman')`,
+      ),
+    );
+
+    expect((await rowsOwnedBy(a.org.id)).contact_tags).toHaveLength(2);
+  });
+
+  it("refuses a tag on another org's contact", async () => {
+    const { a, b } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    await expect(
+      db.run((tx) =>
+        tx.execute(
+          sql`insert into contact_tags (org_id, contact_id, tag)
+              values (${a.org.id}, ${b.contact.id}, 'handyman')`,
+        ),
+      ),
+    ).rejects.toSatisfy(rejectsWith(FOREIGN_KEY_VIOLATION));
+
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+    expect((await rowsOwnedBy(a.org.id)).contact_tags).toHaveLength(1);
   });
 });

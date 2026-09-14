@@ -8,7 +8,8 @@ This is the contract the migrations implement. **Section 2 is built**: `organiza
 #17 and its reserve with #92, `users`, `memberships` and `invitations` with #24, and `sessions`,
 `accounts`, `verifications` and `rate_limits` with the provider in #25, and section 9's row-level
 security has covered it since #28. **So are `buildings` and `units`**, the first two tables of
-section 3, with #105. Everything else from section 3 on is still prose.
+section 3, with #105, and **`trade_tags`, `contacts` and `contact_tags`** from section 6, with #106.
+Everything else from section 3 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -558,9 +559,10 @@ create table capital_item_types (
 ```
 
 **`capital_item_types` has no `org_id`, and that is deliberate.** It is reference data — a
-catalogue every org reads and only migrations and seeds write. It carries no RLS policy, and the
-cross-org isolation test (#27) should skip it *by name*, with a comment, so that a future reader
-finds an explicit exemption rather than an omission.
+catalogue every org reads and only migrations write. It gets `trade_tags`' treatment from §6: seeded
+by a migration, a read-only `using (true)` policy for the scoped role, and a name in the cross-org
+isolation test (#27) with a comment, so that a future reader finds an explicit exemption rather
+than an omission.
 
 The user-override requirement from PRD §11 is met without a per-org override table: **defaults are
 copied onto the `capital_items` row at add time**, and the user edits them there. The catalogue's
@@ -657,13 +659,50 @@ percent, which is finer than any split a landlord will defend to a CPA.
 create table trade_tags (
   slug       text primary key,          -- 'hvac', 'roofer', 'snow-removal'
   label      text not null,
-  sort_order integer not null default 0
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  -- The slug is what `?trade=` carries, so it is a shape a URL need not escape
+  constraint trade_tags_slug_format check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$')
 );
 ```
 
-Reference data, like `capital_item_types` — no `org_id`, no policy, same exemption. The PRD's
-eighteen trades seed it. A reference table rather than a native enum because this set is *current*
-rather than *defined*: the nineteenth trade should be a seed row, not a migration and a deploy.
+Reference data, like `capital_item_types` — no `org_id`, and the same exemption. The PRD's
+**nineteen** trades seed it, in the PRD's order: the trades first, then the professionals. A
+reference table rather than a native enum because this set is *current* rather than *defined*: a
+twentieth trade is an `insert`, where an enum value would be a type change that can never be taken
+back.
+
+### How reference data is seeded
+
+**In a migration** (#106), not by the seed script #34 builds. `drizzle/0013_seed_trade_tags.sql` is
+the first, and `capital_item_types` (#109) follows it.
+
+- **The rows are part of the schema's contract, not content.** `contact_tags` cannot hold a row
+  without a trade to point at, and no screen creates one. So the list has to exist wherever the
+  schema does: production, every preview branch, CI, the integration suite's database and a
+  developer's. The migration runner already reaches all of them. A seed script would have to be
+  remembered in each, and the one place it was forgotten would be a contact book with nothing to
+  tag.
+- **A change is reviewed as SQL, and kept.** The catalogue's defaults will be refreshed —
+  `defaults_updated_at` exists for that — and a refresh as a migration is a diff someone reads, in
+  the order it happened, beside the schema it changes. `git log drizzle/` is the catalogue's
+  history.
+- **#34's script is for content.** It writes the demo org, and the nightly reset wipes that org and
+  writes it again. Reference data belongs to every org, and nothing about it should depend on
+  whether the demo was reset last night.
+
+Forward-only is not a cost here. Adding a trade is a new migration with its own `insert`, and
+relabelling one an `update` in it. Removing one is refused while anybody is tagged with it (§7).
+The one place this costs anything is the integration suite, which truncates every table before each
+test: it leaves the reference tables alone (`REFERENCE_TABLES` in `src/test/db.ts`), because the
+migrations run once per suite and nothing would put the rows back.
+
+**Row level security is enabled on a reference table and not forced.** The scoped role holds
+`select` and a `for select ... using (true)` policy, so every org reads every row — and a write
+granted to it by mistake still finds no policy that admits it. Not forced, because the owner is the
+role that runs the migrations and seeds the table, and `FORCE` exists to keep one org's rows from
+an owner login; there is no org here.
 
 ```sql
 create type task_status   as enum ('unscheduled', 'scheduled', 'done', 'canceled');
@@ -714,25 +753,44 @@ create table contacts (
   org_id      uuid not null references organizations (id) on delete cascade,
   name        text not null,
   company     text,
-  phone       text,
+  phone       text,                     -- as typed; the tel: link is built from its digits
   email       text,
+  rate_note   text,                     -- '$75 / hr', 'Bid basis', '8% of gross' (#95)
   notes       text,
   archived_at timestamptz,              -- archive, not delete: history stays attached
   created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
+  updated_at  timestamptz not null default now(),
+  -- What `contact_tags_contact` references, as `buildings_org_and_id` is for units
+  constraint contacts_org_and_id unique (org_id, id)
 );
 
 create table contact_tags (
-  contact_id uuid not null references contacts (id) on delete cascade,
-  tag        text not null references trade_tags (slug) on delete cascade,
   org_id     uuid not null references organizations (id) on delete cascade,
-  primary key (contact_id, tag)
+  contact_id uuid not null,             -- referenced with its org, below
+  tag        text not null references trade_tags (slug) on delete restrict,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  -- Led by org_id, as §8 has every index on a domain table
+  constraint contact_tags_pkey primary key (org_id, contact_id, tag),
+  constraint contact_tags_contact foreign key (org_id, contact_id)
+    references contacts (org_id, id) on delete cascade
 );
 ```
 
 Contacts are org-scoped and reusable across buildings, per F6. `org_id` on `contact_tags` is
 redundant through `contacts` and present anyway, because ADR-0003's rule is that a query proves it
 is scoped without a join — including this one.
+
+**`rate_note` is free text** (#95). The examples the specs need are an hourly rate, a per-job
+basis and a share of rent — three different units — and nothing computes with the figure, so a
+number column would impose a structure the data does not have.
+
+**A tag names its contact's org as well as its contact**, the fifth item of §9's checklist and
+`units_building`'s shape: the policy judges the tag's own `org_id`, and the reference is checked
+past it. The primary key leads with `org_id` for §8's reason, and since `contact_id` is unique on its
+own it admits exactly the rows `(contact_id, tag)` would. **Its trade is `restrict`**, not the
+`cascade` this section first had: §7's rule for reference data is that it is not deleted, and a
+cascade would make deleting a trade silently untag everybody who had it.
 
 ### Transactions — scheduled for v1
 
@@ -792,10 +850,10 @@ references that are informational.** A `set null` that would lose a fact is a `r
 | **Building** | `restrict` from units, capital items, tasks, rent periods, transactions. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
 | **Unit** | `restrict` from rent periods, capital items, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
 | **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete |
-| **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it, and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor |
+| **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it, and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
 | **Rent period** | Deletable while `amount_received_cents is null` — an opened-in-error month. Once money is recorded it is edited, not deleted, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
-| **Reference data** (`capital_item_types`, `trade_tags`) | Not deleted. `restrict` from every referencing row; retire by removing it from the seed's active set |
+| **Reference data** (`capital_item_types`, `trade_tags`) | Not deleted. `restrict` from every referencing row, so an entry in use cannot be removed. Retiring one means keeping the row and hiding it from new choices, which needs a column neither table has; it is added with the first entry that has to go |
 
 **Soft delete is used in exactly two places** — `organizations.deleted_at` and
 `contacts.archived_at` — and nowhere else. Everything else that looks like a soft delete is a
@@ -853,6 +911,7 @@ create index tasks_org_assignee      on tasks (org_id, assignee_contact_id)
 -- Contacts
 create index contacts_org_name  on contacts (org_id, name) where archived_at is null;
 create index contact_tags_org_tag on contact_tags (org_id, tag);
+-- A contact's own tags are `contact_tags_pkey` in §6, led by (org_id, contact_id).
 
 -- Transactions (with the feature, per §6)
 create index transactions_org_building_date on transactions (org_id, building_id, occurred_on);
@@ -940,7 +999,7 @@ create policy buildings_backup_read on buildings
 | Table | Reason |
 |---|---|
 | `users`, `sessions`, `accounts`, `verifications`, `rate_limits` | Above the tenancy boundary; read during sign-in, before an org context exists (§2). No row-level security, and no grant to the scoped role — so a scoped handle cannot read them at all, which is why a members list needs a policy on `users` of its own before it can show a name (#30) |
-| `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations and seeds — a deliberate `using (true)` policy for the scoped role when the tables arrive |
+| `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations (§6). Row level security enabled and not forced, `select` and nothing else for the scoped role, and a deliberate `for select ... using (true)` policy for it beside the reader's. `trade_tags` has had it since #106, and the isolation test holds every table on `REFERENCE_TABLES` to it |
 | `organizations` | Has a policy, but keyed on `id = current_org_id()`, not `org_id` |
 
 **The identity path reads three tables without an org, and that is the whole of the bypass.**
@@ -1005,7 +1064,8 @@ for by #48, because they are the ones a naive test misses:
   its `unit_id`. The policy protects reads, and **`WITH CHECK` does not cover this write**: it
   judges the new row's own `org_id`, and a foreign key is checked past row-level security. The
   composite reference of the checklist's fifth item is what refuses it, and the isolation test
-  proves it through a scoped handle — first for `units` to `buildings`, at #105.
+  proves it through a scoped handle — first for `units` to `buildings`, at #105, then
+  `contact_tags` to `contacts`, at #106.
 
 ---
 

@@ -78,6 +78,27 @@
       "when": 1789405759176,
       "tag": "0010_buildings_row_level_security",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789424005487,
+      "tag": "0011_contacts_and_trade_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789424013237,
+      "tag": "0012_contacts_row_level_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789424015369,
+      "tag": "0013_seed_trade_tags",
+      "breakpoints": true
     }
   ]
 }

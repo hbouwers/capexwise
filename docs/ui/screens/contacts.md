@@ -78,7 +78,7 @@ hand-maintained field gets wrong.
 | Company | |
 | Trades | A checkbox list of every trade, in two columns from `sm` up. `?contact=new&trade=hvac` arrives with HVAC ticked |
 | Phone, Email | `type="tel"`, `type="email"` |
-| Rate | Free text — `$75 / hr`, `Bid basis`, `8% of gross`. A [gap](README.md#gaps-these-specs-found): `contacts` has no column for it |
+| Rate | Free text — `$75 / hr`, `Bid basis`, `8% of gross`. `contacts.rate_note`, which this [gap](README.md#gaps-these-specs-found) added |
 | Notes | `Textarea` |
 
 An existing contact's footer has `Archive contact` on the left: `Keeps them on past tasks, and takes
