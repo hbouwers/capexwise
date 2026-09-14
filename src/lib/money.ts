@@ -62,9 +62,14 @@ const grouped = new Intl.NumberFormat("en-US");
 
 /**
  * `$8,400`, `−$5,400`, `$39.7k`. Throws on anything that is not a whole number
- * of cents, because a dollar amount passed where cents belong renders a
- * hundredfold error that looks entirely plausible — ADR-0005's warning about
- * the raw value, from the other side.
+ * of cents — a fraction of a cent is a float that got through, from a division
+ * or a dollar figure with cents in it, and the page is better failing than
+ * showing it.
+ *
+ * It cannot catch whole dollars passed as cents: `250000` meant as dollars is
+ * a valid `$2,500`. That hundredfold error — ADR-0005's warning about the raw
+ * value — is guarded by naming, not by this check: the `_cents` columns and
+ * `Money`'s `cents` prop say the unit at every call site.
  *
  * A negative always renders its sign, since `transactions.amount_cents` is
  * signed (`docs/data-model.md` §6). A figure that rounds to zero renders as

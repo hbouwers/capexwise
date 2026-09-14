@@ -77,8 +77,8 @@ describe("formatMoney", () => {
   });
 
   it("refuses anything that is not a whole number of cents", () => {
-    // A dollar amount passed where cents belong is a hundredfold error that
-    // looks plausible; a fraction of a cent is a float that got through.
+    // A fraction of a cent is a float that got through. Whole dollars passed
+    // as cents are integers and pass; naming is what guards those.
     expect(() => formatMoney(84.5)).toThrow(TypeError);
     expect(() => formatMoney(Number.NaN)).toThrow(TypeError);
     expect(() => formatMoney(Number.POSITIVE_INFINITY)).toThrow(TypeError);
