@@ -208,6 +208,9 @@ export const units = pgTable(
       columns: [table.orgId, table.buildingId],
       foreignColumns: [buildings.orgId, buildings.id],
     }).onDelete("restrict"),
+    // What a unit-scoped row's composite reference points at — a utility or a
+    // code names its unit and its org, for `buildings_org_and_id`'s reason.
+    unique("units_org_and_id").on(table.orgId, table.id),
     // Also §8's `units_org_building`: a unique constraint is a btree, and one
     // led by `(org_id, building_id)` serves every query that index would —
     // the same reasoning as `memberships_org_user`. Named, so a violation says

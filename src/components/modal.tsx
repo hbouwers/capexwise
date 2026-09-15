@@ -90,3 +90,71 @@ export function Modal({
     </Dialog>
   );
 }
+
+/**
+ * A modal's footer, asking before it does something that cannot be taken back
+ * from inside the modal: throwing away what was typed, or archiving. In the footer
+ * rather than a second dialog, so the question sits where the button that
+ * raised it was.
+ */
+export function FooterQuestion({
+  question,
+  detail,
+  keep,
+  confirm,
+  destructive,
+  disabled,
+  onKeep,
+  onConfirm,
+}: {
+  question: string;
+  detail?: string;
+  keep: string;
+  confirm: string;
+  destructive?: boolean;
+  disabled?: boolean;
+  onKeep: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    // A labelled group rather than an `alertdialog`, which would claim to be a
+    // second modal. Focus moves to its first button as it appears, so the
+    // question is read out with the choice.
+    <div
+      role="group"
+      aria-labelledby="footer-question"
+      aria-describedby={detail ? "footer-question-detail" : undefined}
+      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex flex-col gap-1">
+        <p
+          id="footer-question"
+          className="text-sm leading-tight font-medium text-text-primary"
+        >
+          {question}
+        </p>
+        {detail ? (
+          <p
+            id="footer-question-detail"
+            className="text-xs leading-snug text-text-muted"
+          >
+            {detail}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row">
+        <Button type="button" variant="outline" onClick={onKeep} autoFocus>
+          {keep}
+        </Button>
+        <Button
+          type="button"
+          variant={destructive ? "destructive" : "default"}
+          disabled={disabled}
+          onClick={onConfirm}
+        >
+          {confirm}
+        </Button>
+      </div>
+    </div>
+  );
+}

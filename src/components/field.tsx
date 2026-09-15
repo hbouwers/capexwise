@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/cn";
 
@@ -85,5 +86,22 @@ export function Field({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * An amount, typed as text. Not `type="number"`, which would round, drop the
+ * `$` and the commas a person naturally types, and let a scroll wheel change a
+ * purchase price. `parseMoney` reads it, and refuses rather than rounds.
+ */
+export function MoneyInput(props: ComponentProps<typeof Input>) {
+  return (
+    <Input
+      inputMode="decimal"
+      autoComplete="off"
+      placeholder="$0"
+      {...props}
+      className={cn("font-mono tabular-nums", props.className)}
+    />
   );
 }

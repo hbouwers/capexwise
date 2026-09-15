@@ -8,3 +8,4 @@ export * from "./invitations";
 export * from "./auth";
 export * from "./buildings";
 export * from "./contacts";
+export * from "./building-facts";

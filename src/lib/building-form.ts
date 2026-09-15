@@ -15,8 +15,8 @@ import { z } from "zod";
 
 import type { buildings, units } from "@/db/schema";
 import { type CalendarDate, isCalendarDate, isTimeZone } from "@/lib/dates";
-import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
-import { type Cents, formatMoney, parseMoney } from "@/lib/money";
+import { amount, type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
+import { type Cents, formatMoney } from "@/lib/money";
 
 type BuildingRow = typeof buildings.$inferSelect;
 type UnitRow = typeof units.$inferSelect;
@@ -155,32 +155,6 @@ const shape = z.object({
   basisSplitMethod: z.enum([...BASIS_SPLIT_METHODS, ""]),
   basisSplitNote: z.string().max(2000),
 });
-
-/**
- * What to change, per `docs/ui/screens/README.md` — never "invalid amount".
- * The empty case is the caller's, because whether an empty field is a problem
- * depends on which field it is.
- */
-const MONEY_MESSAGES = {
-  "not-a-number": "Enter an amount in dollars, like 1,250.",
-  negative: "Enter the amount without a minus sign.",
-  "fraction-of-a-cent":
-    "Enter the amount to the cent — two decimal places at most.",
-} as const;
-
-type Amount =
-  | { state: "empty" }
-  | { state: "ok"; cents: Cents }
-  | { state: "bad"; message: string };
-
-function amount(raw: string): Amount {
-  const parsed = parseMoney(raw);
-
-  if (parsed.ok) return { state: "ok", cents: parsed.cents };
-  if (parsed.reason === "empty") return { state: "empty" };
-
-  return { state: "bad", message: MONEY_MESSAGES[parsed.reason] };
-}
 
 /**
  * The building's share of the basis, from the three figures that decide it:

@@ -4,7 +4,6 @@ import { PlusIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  type ComponentProps,
   type FormEvent,
   type ReactNode,
   useMemo,
@@ -15,7 +14,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { Field, fieldId } from "@/components/field";
+import { Field, fieldId, MoneyInput } from "@/components/field";
 import { Money } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -863,22 +862,5 @@ function Section({
       </div>
       {children}
     </section>
-  );
-}
-
-/**
- * An amount, typed as text. Not `type="number"`, which would round, drop the
- * `$` and the commas a person naturally types, and let a scroll wheel change a
- * purchase price. `parseMoney` reads it, and refuses rather than rounds.
- */
-function MoneyInput(props: ComponentProps<typeof Input>) {
-  return (
-    <Input
-      inputMode="decimal"
-      autoComplete="off"
-      placeholder="$0"
-      {...props}
-      className={cn("font-mono tabular-nums", props.className)}
-    />
   );
 }
