@@ -25,12 +25,18 @@ import {
   buildingAccessCodes,
   buildings,
   buildingUtilities,
+  rentPeriods,
   units,
 } from "@/db/schema";
 import { type UnitValues, validateBuilding } from "@/lib/building-form";
 import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
+import { sqlState } from "@/lib/query-errors";
 import { recordAccessCodeEvent } from "@/server/access-codes";
-import { getOrgContext, type OrgScopedDb } from "@/server/org-context";
+import {
+  getOrgContext,
+  type OrgScopedDb,
+  type OrgScopedTx,
+} from "@/server/org-context";
 
 export type SaveBuildingResult =
   { ok: true; buildingId: string } | { ok: false; errors: FieldErrors };
@@ -48,6 +54,12 @@ const buildingIdSchema = z.uuid();
 function refused(message: string): SaveBuildingResult {
   return { ok: false, errors: { form: message } };
 }
+
+/** `on delete restrict` refused a delete: something still hangs off the row. */
+const RESTRICT_VIOLATION = "23001";
+
+const UNIT_GAINED_RENT =
+  "A unit you removed has had rent recorded since you opened this form. Reload the page and retire it instead — its months stay on the rent roll.";
 
 /**
  * A unit the form added. It has no id yet, and it cannot arrive retired —
@@ -117,13 +129,14 @@ export async function createBuilding(
  * refuses the whole save before anything is written, rather than being
  * skipped: a save that quietly dropped a row would look like it worked.
  *
- * Removing a unit is a delete. When rent periods arrive (#108) a unit with
- * history gets `Retire` instead, and `units`' `restrict` refuses the delete if
- * anything still asks for one. Two things on the building's facts hang off a
- * unit already (`docs/data-model.md` §3). A utility account holds the unit
- * back until the account is moved or removed, and the save says which unit.
- * An access code goes with its unit, and is recorded as removed, as a code
- * removed in the facts editor is (ADR-0008).
+ * Removing a unit is a delete, and only a unit with no rent history can be
+ * removed: one with months of rent is retired instead (`docs/data-model.md`
+ * §7), which the form offers in its place, and a submission that removes one
+ * anyway is refused with the units named. Two things on the building's facts
+ * hang off a unit as well (§3). A utility account holds the unit back until
+ * the account is moved or removed, and the save says which unit. An access
+ * code goes with its unit, and is recorded as removed, as a code removed in
+ * the facts editor is (ADR-0008).
  */
 export async function updateBuilding(
   buildingId: unknown,
@@ -141,7 +154,7 @@ export async function updateBuilding(
 
   const removedCodes: { id: string; buildingId: string }[] = [];
 
-  const result = await db.run(async (tx): Promise<SaveBuildingResult> => {
+  const save = async (tx: OrgScopedTx): Promise<SaveBuildingResult> => {
     // `for update`: two saves of one building serialise here, so neither
     // reconciles its units against a list the other has already changed.
     const [existing] = await tx
@@ -173,6 +186,29 @@ export async function updateBuilding(
     const removedIds = removed.map((unit) => unit.id);
 
     if (removed.length > 0) {
+      // Before the accounts: retiring is the answer for a unit with history,
+      // and it needs no account moved first.
+      const history = await tx
+        .selectDistinct({ unitId: rentPeriods.unitId })
+        .from(rentPeriods)
+        .where(
+          and(
+            eq(rentPeriods.orgId, db.orgId),
+            inArray(rentPeriods.unitId, removedIds),
+          ),
+        );
+
+      if (history.length > 0) {
+        const held = removed.filter((unit) =>
+          history.some((row) => row.unitId === unit.id),
+        );
+
+        return {
+          ok: false,
+          errors: { units: unitsWithRent(held.map((unit) => unit.label)) },
+        };
+      }
+
       const accounts = await tx
         .select({ unitId: buildingUtilities.unitId })
         .from(buildingUtilities)
@@ -254,7 +290,19 @@ export async function updateBuilding(
     }
 
     return { ok: true, buildingId: existing.id };
-  });
+  };
+
+  // A unit removed here that had a month of rent opened after the check
+  // above — a view of the building's page, or `Record rent`, in between. Its
+  // `restrict` refuses the delete, the transaction wrote nothing, and the
+  // answer is the one the check would have given.
+  const result = await db
+    .run(save)
+    .catch((error: unknown): SaveBuildingResult => {
+      if (sqlState(error) !== RESTRICT_VIOLATION) throw error;
+
+      return { ok: false, errors: { units: UNIT_GAINED_RENT } };
+    });
 
   // After the commit, so a save that failed records nothing.
   if (result.ok) {
@@ -272,19 +320,37 @@ export async function updateBuilding(
   return result;
 }
 
+/** `“A”`, `“A” and “B”`, `“A”, “B” and “C”`. */
+function quotedList(labels: readonly string[]): string {
+  const quoted = labels.map((label) => `“${label}”`);
+
+  return quoted.length === 1
+    ? quoted[0]!
+    : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+}
+
+/**
+ * The units list's message when a unit removed on this form has months of
+ * rent recorded — which the form's `Retire` avoids, so this is a form drawn
+ * before the unit's first month was opened.
+ */
+function unitsWithRent(labels: readonly string[]): string {
+  const names = quotedList(labels);
+
+  return labels.length === 1
+    ? `Unit ${names} has rent recorded, so it can’t be removed. Retire it instead — its months stay on the rent roll.`
+    : `Units ${names} have rent recorded, so they can’t be removed. Retire them instead — their months stay on the rent roll.`;
+}
+
 /**
  * The units list's message when a unit removed on this form still has a
  * utility account on the building's facts. It names the units, because the
  * form may have removed more than one, and says where the account is.
  */
 function unitsWithAccounts(labels: readonly string[]): string {
-  const quoted = labels.map((label) => `“${label}”`);
-  const names =
-    quoted.length === 1
-      ? quoted[0]
-      : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+  const names = quotedList(labels);
 
-  return quoted.length === 1
+  return labels.length === 1
     ? `Unit ${names} has a utility account in Building facts. Change the account to Shared, or remove it there, before removing the unit.`
     : `Units ${names} have utility accounts in Building facts. Change the accounts to Shared, or remove them there, before removing the units.`;
 }

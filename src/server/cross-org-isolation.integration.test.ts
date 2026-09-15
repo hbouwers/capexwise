@@ -77,7 +77,7 @@ import { makeSignature } from "better-auth/crypto";
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
-import { contacts, organizations, sessions } from "@/db/schema";
+import { contacts, organizations, rentPeriods, sessions } from "@/db/schema";
 import {
   buildingFactsFields,
   emptyAccessCodeFields,
@@ -85,6 +85,7 @@ import {
 } from "@/lib/building-facts-form";
 import { buildingFields } from "@/lib/building-form";
 import { contactFields } from "@/lib/contact-form";
+import { addMonths, firstOfMonth, todayIn } from "@/lib/dates";
 import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
 import {
   createAccessCode,
@@ -94,6 +95,7 @@ import {
   createInvitation,
   createMembership,
   createOrganization,
+  createRentPeriod,
   createUnit,
   createUser,
   createUtility,
@@ -164,6 +166,9 @@ const { getContact, listContacts, listTradeTags } =
 const { revealAccessCode, saveBuildingFacts } =
   await import("@/server/actions/building-facts");
 const { getBuildingFacts } = await import("@/server/queries/building-facts");
+const { markRentPaid, openRentPeriod, saveRentPeriod, unmarkRentPaid } =
+  await import("@/server/actions/rent-periods");
+const { getRentRoll } = await import("@/server/queries/rent-periods");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -184,6 +189,7 @@ const ORG_OWNED = {
   building_facts: "org_id",
   building_utilities: "org_id",
   building_access_codes: "org_id",
+  rent_periods: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -342,7 +348,11 @@ async function seedTwoOrgs() {
     const building = await createBuilding(org.id, {
       addressLine1: "412 N Delaware St",
     });
-    const unit = await createUnit(org.id, building.id, { label: "A" });
+    const unit = await createUnit(org.id, building.id, {
+      label: "A",
+      status: "occupied",
+      rentCents: 230_000,
+    });
 
     // The same plumber on both sides, by name and by phone, so a lookup keyed
     // on either finds one in each org.
@@ -365,6 +375,10 @@ async function seedTwoOrgs() {
       code: "4417#",
     });
 
+    // The same month on both sides, unmarked: a mark keyed on the unit's
+    // label or the month would find a period in each org.
+    const rentPeriod = await createRentPeriod(org.id, building.id, unit.id);
+
     return {
       org,
       owner,
@@ -378,6 +392,7 @@ async function seedTwoOrgs() {
       contact,
       utility,
       accessCode,
+      rentPeriod,
     };
   }
 
@@ -414,6 +429,7 @@ function identifiersOf(side: Side): string[] {
     side.contact.email!,
     side.utility.id,
     side.accessCode.id,
+    side.rentPeriod.id,
   ];
 }
 
@@ -1620,6 +1636,109 @@ describe("the building facts paths", () => {
 });
 
 /**
+ * The rent roll's paths — `src/server/queries/rent-periods.ts` and
+ * `src/server/actions/rent-periods.ts` — judged as the building paths are.
+ * Both orgs have the same month open on a unit labelled `A`, so a write keyed
+ * on the label or the month would find a period in each; it is the ids that
+ * tell.
+ */
+describe("the rent roll paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  /** The month before the current one where the seeded buildings are. */
+  function lastMonth() {
+    return addMonths(firstOfMonth(todayIn("America/Indiana/Indianapolis")), -1);
+  }
+
+  const paid = {
+    expected: "$2,300",
+    received: "$2,300",
+    receivedOn: "2026-09-01",
+    note: "",
+    vacant: false,
+  };
+
+  it("reads the caller's rent roll, opening nothing in the other org, and not the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const mine = await getRentRoll(a.building.id, "2026-09");
+    expect(mine?.rows.map((row) => row.period?.id)).toEqual([a.rentPeriod.id]);
+    expect(mentionsB(mine, b)).toEqual([]);
+
+    // B's building by its id is the same `null` as one that does not exist,
+    // and viewing it opens none of B's months.
+    expect(await getRentRoll(b.building.id, undefined)).toBeNull();
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("marks and un-marks the caller's month, and not the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    expect(await markRentPaid(b.rentPeriod.id)).toEqual({ ok: false });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: the same call works at home.
+    expect(await markRentPaid(a.rentPeriod.id)).toEqual({ ok: true });
+
+    // And un-marking needs a marked month, which B's now is.
+    await testDb()
+      .update(rentPeriods)
+      .set({ amountReceivedCents: 230_000, receivedOn: "2026-09-01" })
+      .where(eq(rentPeriods.id, b.rentPeriod.id));
+    const marked = await rowsOwnedBy(b.org.id);
+
+    expect(await unmarkRentPaid(b.rentPeriod.id)).toEqual({ ok: false });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(marked);
+    expect(await unmarkRentPaid(a.rentPeriod.id)).toEqual({ ok: true });
+  });
+
+  it("saves the caller's month, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const theirs = await saveRentPeriod(b.rentPeriod.id, paid);
+    expect(theirs.ok).toBe(false);
+    expect(mentionsB(theirs, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect(await saveRentPeriod(a.rentPeriod.id, paid)).toEqual({ ok: true });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("records rent on the caller's unit, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+    const month = lastMonth();
+    const input = { ...paid, receivedOn: month };
+
+    const theirs = await openRentPeriod(b.unit.id, month, input);
+    expect(theirs.ok).toBe(false);
+    expect(mentionsB(theirs, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect(await openRentPeriod(a.unit.id, month, input)).toEqual({
+      ok: true,
+    });
+    expect((await rowsOwnedBy(a.org.id)).rent_periods).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+/**
  * A scoped handle for the owner of `side`'s org, reached the way every domain
  * query will reach one: a signed session, then `getOrgContext()`. Not
  * `forOrg()`, which ESLint keeps out of this file for the reason
@@ -1696,13 +1815,14 @@ describe.each(Object.entries(ORG_OWNED))(
 
       // Three acceptable outcomes, and which one a table gets is the
       // migration's decision rather than this test's: `organizations`,
-      // `contacts` and `building_facts` have no DELETE grant for the scoped
-      // role — an org is soft-deleted and the purge is not a request, a
-      // contact is archived, and a building's facts are cleared rather than
-      // removed — so they are refused before any row is considered.
-      // `buildings` is refused by its units' `restrict`, because every seeded
-      // building has one (§7: archived, not deleted), and `units` by the
-      // electric account on each. The others may delete, and must delete only
+      // `contacts`, `building_facts` and `rent_periods` have no DELETE grant
+      // for the scoped role — an org is soft-deleted and the purge is not a
+      // request, a contact is archived, a building's facts are cleared rather
+      // than removed, and a vacant month is marked rather than deleted — so
+      // they are refused before any row is considered. `buildings` is refused
+      // by its units' `restrict`, because every seeded building has one (§7:
+      // archived, not deleted), and `units` by the electric account and the
+      // month of rent on each. The others may delete, and must delete only
       // A's. A refusal rolls the transaction back, and the snapshot below is
       // what says B was never touched either way.
       const outcome = await db
@@ -1899,6 +2019,18 @@ describe("a reference from one org's row to another's", () => {
         sql`update building_access_codes set unit_id = ${b.unit.id}
             where id = ${a.accessCode.id}`,
     ],
+    [
+      "a rent period on another org's unit",
+      (a: Side, b: Side) =>
+        sql`insert into rent_periods (org_id, building_id, unit_id, period_month, amount_expected_cents)
+            values (${a.org.id}, ${b.building.id}, ${b.unit.id}, '2026-10-01', 230000)`,
+    ],
+    [
+      "a rent period counted toward another org's building",
+      (a: Side, b: Side) =>
+        sql`update rent_periods set building_id = ${b.building.id}
+            where id = ${a.rentPeriod.id}`,
+    ],
   ])("refuses %s", async (_, statement) => {
     const { a, b } = await seedTwoOrgs();
     const db = await scopedHandleFor(a);
@@ -1911,5 +2043,21 @@ describe("a reference from one org's row to another's", () => {
 
     expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
     expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
+  });
+
+  // The control for the two rent-period cases above: A's own unit takes a
+  // second month, so the inserts fail for naming B and for nothing else.
+  it("lets a rent period onto the scoped org's own unit", async () => {
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run((tx) =>
+      tx.execute(
+        sql`insert into rent_periods (org_id, building_id, unit_id, period_month, amount_expected_cents)
+            values (${a.org.id}, ${a.building.id}, ${a.unit.id}, '2026-10-01', 230000)`,
+      ),
+    );
+
+    expect((await rowsOwnedBy(a.org.id)).rent_periods).toHaveLength(2);
   });
 });

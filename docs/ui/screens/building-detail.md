@@ -85,7 +85,9 @@ headed `Units & rent`, with a month switcher and a `DataTable` — the rent roll
 `?month=2026-09` search param. It stops at the current month, because rent periods open lazily on
 first view ([data-model §4](../../data-model.md)) and viewing a future month would snapshot today's
 rent into it. It goes back to the month the building was acquired, or two years when that is not
-entered, so a year can be back-filled for the tax planner.
+entered, so a year can be back-filled for the tax planner. A param outside that range lands on its
+nearest end, and the current month is the page with no param. **Neither step is prefetched**: a
+prefetch of last month would open it, and a month nobody looked at would read `Not marked`.
 
 | Column | Priority | Content |
 | --- | --- | --- |
@@ -96,27 +98,45 @@ entered, so a year can be back-filled for the tax planner.
 
 A **footer row** totals expected and received for the month.
 
-Each occupied unit's row is in one of four states:
+A row with a month of rent expected is in one of four states:
 
 | State | Received | Paid |
 | --- | --- | --- |
 | **Not marked** | `—`, and a `Not marked` warning badge for a past month | `Mark paid` |
 | **Paid** | `Money` and the date — `$2,300` · `Sep 3` | `Paid`, pressed; pressing it again un-marks |
-| **Partial** | `$1,200 of $2,300`, with a `Partial` warning badge | `Paid`, pressed |
-| **More than expected** | `$2,400`, with a note `$100 more than expected` | `Paid`, pressed |
+| **Partial** | `$1,200 of $2,300` and the date, with a `Partial` warning badge | `Paid`, pressed |
+| **More than expected** | `$2,400`, with a note `$100 more than expected` and the date | `Paid`, pressed |
+
+And a row with none is one of three ([#97](https://github.com/hbouwers/capexwise/issues/97)):
+
+| State | Received | Paid |
+| --- | --- | --- |
+| **Vacant that month** | `Vacant`; note line `No rent expected` | `Record rent`, opening the form with `Vacant this month` ticked |
+| **No period** — a vacant unit, or a let one with no rent entered | `Vacant`, or `Rent not entered` | `Record rent`, opening the form with the unit's rent as the expected amount |
+| **Retired** | Its month as it was recorded, note line `Retired` | As the month's state |
 
 - **`Mark paid` is one click** and records the expected amount — on today's date in the building's
   zone for the current month, and on the period's first day for a past month, because back-filling
   January in September should not record January's rent as received in September. Undo in a toast.
 - **`Other amount`** is a small text button beside every Paid control. It opens a `Popover` with the
   amount received, the date received, the amount expected (editable, per
-  [data-model §4](../../data-model.md) — a retroactive rent change is corrected here) and a note.
-  A partial or late payment is recorded this way; lateness is simply the date.
+  [data-model §4](../../data-model.md) — a retroactive rent change is corrected here), a note, and
+  `Vacant this month`. A partial or late payment is recorded this way; lateness is simply the date.
+  The date is prefilled with the one `Mark paid` would record, and only means something beside an
+  amount. Nothing received is an empty field, never `$0`.
+- **`Vacant this month`** is for a month the unit stood empty, whatever its status today — occupied
+  now, empty then. The month stays on the roll as `Vacant`, expects nothing, and is left out of the
+  footer and of every other total. It is a mark on the row, not a removal, because the next view of
+  the month would open a removed row again ([data-model §4](../../data-model.md)).
+- **`Record rent`** is how rent is recorded for a month the unit has no period for — vacant now,
+  let then. It opens the same form, and saving opens the month with the expected amount as typed.
 - **A past month left unmarked is `Not marked`, never "unpaid".** The product does not know it was
   not paid; it knows nobody said. On the current month, a line under the table names the earlier
-  months with unmarked periods — `August has 1 unit not marked` — each a link to that month.
-- **A vacant unit** has no period. Its row reads `Vacant` in the Received cell and `No rent
-  expected`, with no control, and it is excluded from the footer.
+  months with unmarked periods — `August has 1 unit not marked` — each a link to that month. A
+  vacant month is marked.
+- **A unit with no period** is excluded from the footer, and so is a vacant month.
+- **A retired unit** has a row in the months it has a period, and none after. Its months stay where
+  they were recorded.
 
 Mark paid, un-mark and Other amount are server actions. The table re-renders from the server's
 answer; nothing is computed in the browser.
@@ -302,7 +322,7 @@ On narrow viewports the row's `Item` button is how `Confirm` is reached — the 
 | **No recurring tasks** | `No recurring tasks yet` in the table body, with the inline add row beneath it — the add row is the action. The seasonal rhythm card is not rendered |
 | **No facts** | Each empty group reads `Not recorded`, and the card's `Edit` is the action |
 | **Filtered to nothing** | `No {Shared / Unit B / estimated} items` and a `Clear filter` button |
-| **Archived or sold** | A neutral line above the summary — `Archived. Kept for its history; it is left out of the portfolio's figures.` — and no `Add equipment`, `Mark paid` or inline add. `Edit building` stays, which is where it is restored |
+| **Archived or sold** | A neutral line above the summary — `Archived. Kept for its history; it is left out of the portfolio's figures.` — and no `Add equipment` or inline add. The rent roll has no Paid column and opens no month, since nothing on it can be marked. `Edit building` stays, which is where it is restored |
 | **Not this org's, or not a building** | 404 |
 | **Reveal failed** | Under the code: `Couldn't reveal this code. Try again.` The mask stays |
 | **Loading** | The summary, a three-row rent table, the facts card's four groups, five task rows, eight equipment rows |

@@ -45,6 +45,9 @@ export default async function EditBuildingPage({
           <BuildingForm
             mode={{ kind: "edit", buildingId: building.id }}
             initial={buildingFields(building, units)}
+            historic={units
+              .filter((unit) => unit.hasRentHistory)
+              .map((unit) => unit.id)}
           />
           {building.status === "sold" ? null : (
             <ArchiveBuilding

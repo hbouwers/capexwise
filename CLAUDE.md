@@ -14,8 +14,10 @@ Buildings and units are stored, entered through the building form, and shown on 
 and the portfolio's cards — #105. Contacts and their trades are stored and kept in the contact book,
 with the first reference data seeded by a migration — #106; the other three destinations are
 placeholders. A building's facts — collection days, utilities and services, and access codes sealed
-in the application and revealed one at a time — are on its page — #107. Capital items, the
-forecast, the tax planner and the rest of what the product is *for* are still unwritten. Rules below that describe
+in the application and revealed one at a time — are on its page — #107. Rent is tracked a month at
+a time on the building's rent roll, with the Paid checkoff, a month that stood vacant, and rent
+recorded for a unit that was let then — #108. Capital items, the forecast, the tax planner and the
+rest of what the product is *for* are still unwritten. Rules below that describe
 runtime behaviour describe what the code *will* do — they are the contract to build against, not
 a description of something already working. Anything already true is marked as such.
 

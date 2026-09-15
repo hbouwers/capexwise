@@ -108,9 +108,16 @@ const UNIT_STATUS_LABELS = {
 export function BuildingForm({
   mode,
   initial,
+  historic = [],
 }: {
   mode: Mode;
   initial: BuildingFields;
+  /**
+   * The units with months of rent recorded, which are retired rather than
+   * removed (`docs/data-model.md` §7) — their rows offer `Retire` instead of
+   * the remove button.
+   */
+  historic?: readonly string[];
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -450,6 +457,7 @@ export function BuildingForm({
                 row.id !== null && initialRent.get(row.id) !== row.rent
               }
               removable={activeRows > 1 || row.status === "retired"}
+              historic={row.id !== null && historic.includes(row.id)}
               onChange={(patch) => setRow(index, patch)}
               onRemove={() => removeRow(index)}
             />
@@ -681,6 +689,7 @@ function UnitRow({
   errors,
   rentChanged,
   removable,
+  historic,
   onChange,
   onRemove,
 }: {
@@ -689,6 +698,8 @@ function UnitRow({
   errors: FieldErrors;
   rentChanged: boolean;
   removable: boolean;
+  /** Whether it has rent recorded, and so is retired rather than removed. */
+  historic: boolean;
   onChange: (patch: Partial<UnitFields>) => void;
   onRemove: () => void;
 }) {
@@ -703,6 +714,11 @@ function UnitRow({
       <li className="flex items-center justify-between gap-3 rounded-md bg-surface-subtle px-3 py-2.5">
         <span className="text-sm text-text-muted">
           {row.label} <span className="text-xs">· retired</span>
+          {historic ? (
+            <span className="block text-xs leading-snug">
+              Its months stay on the rent roll.
+            </span>
+          ) : null}
         </span>
         <Button
           type="button"
@@ -777,7 +793,19 @@ function UnitRow({
           index !== 0 && "sm:pt-0",
         )}
       >
-        {removable ? (
+        {removable && historic ? (
+          // A unit with rent history is never deleted: retiring keeps its
+          // months where they were recorded, and the save refuses a delete.
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange({ status: "retired" })}
+            aria-label={`Retire ${name}`}
+          >
+            Retire
+          </Button>
+        ) : removable ? (
           <Button
             type="button"
             variant="ghost"

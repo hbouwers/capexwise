@@ -14,7 +14,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { cache } from "react";
 import { z } from "zod";
 
-import { buildings, units } from "@/db/schema";
+import { buildings, rentPeriods, units } from "@/db/schema";
 import { compareUnitLabels } from "@/lib/buildings";
 import { getOrgContext } from "@/server/org-context";
 
@@ -95,7 +95,14 @@ export type BuildingRecord = typeof buildings.$inferSelect;
 export type UnitRecord = Pick<
   typeof units.$inferSelect,
   "id" | "label" | "status" | "rentCents" | "leaseEnd"
->;
+> & {
+  /**
+   * Whether any month of rent has been opened for it. A unit with history is
+   * retired rather than removed (`docs/data-model.md` §7), so the edit form
+   * offers `Retire` in its place.
+   */
+  hasRentHistory: boolean;
+};
 
 export type BuildingDetail = {
   building: BuildingRecord;
@@ -147,11 +154,26 @@ export const getBuilding = cache(async function getBuilding(
       .from(units)
       .where(and(eq(units.orgId, db.orgId), eq(units.buildingId, building.id)));
 
+    // Which of them any month of rent has been opened for — the building's
+    // periods, by its own index, rather than a probe per unit.
+    const historic = await tx
+      .selectDistinct({ unitId: rentPeriods.unitId })
+      .from(rentPeriods)
+      .where(
+        and(
+          eq(rentPeriods.orgId, db.orgId),
+          eq(rentPeriods.buildingId, building.id),
+        ),
+      );
+    const withHistory = new Set(historic.map((row) => row.unitId));
+
     // Sorted here rather than in SQL: "Unit 10" after "Unit 9" is a collation
     // Postgres's default does not do, and `compareUnitLabels` is the one the
     // rest of the product uses.
-    rows.sort((a, b) => compareUnitLabels(a.label, b.label));
+    const unitRecords = rows
+      .map((unit) => ({ ...unit, hasRentHistory: withHistory.has(unit.id) }))
+      .sort((a, b) => compareUnitLabels(a.label, b.label));
 
-    return { building, units: rows };
+    return { building, units: unitRecords };
   });
 });

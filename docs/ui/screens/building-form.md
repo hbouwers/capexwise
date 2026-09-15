@@ -59,7 +59,9 @@ field: `Months already recorded keep the rent they had.` That sentence is [data-
 §4](../../data-model.md)'s snapshot rule, in the one place a person could believe the opposite.
 
 On the edit form, a unit with rent history has `Retire` instead of a remove button, and a retired
-unit is listed muted with `Restore`.
+unit is listed muted with `Restore` and the line `Its months stay on the rent roll.` A save that
+removes a unit with history anyway — a form opened before its first month — is refused, with the
+unit named and `Retire` as the way out ([data-model §7](../../data-model.md)).
 
 ### Purchase and basis
 

@@ -9,8 +9,8 @@ This is the contract the migrations implement. **Section 2 is built**: `organiza
 `accounts`, `verifications` and `rate_limits` with the provider in #25, and section 9's row-level
 security has covered it since #28. **So is section 3**: `buildings` and `units` with #105, and
 `building_facts`, `building_utilities` and `building_access_codes` with #107. **So are
-`trade_tags`, `contacts` and `contact_tags`** from section 6, with #106. Everything else from
-section 4 on is still prose.
+`trade_tags`, `contacts` and `contact_tags`** from section 6, with #106, **and section 4's
+`rent_periods`**, with #108. Everything else from section 5 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -369,6 +369,8 @@ create table units (
     references buildings (org_id, id) on delete restrict,
   -- What a unit-scoped row references, as `buildings_org_and_id` is for units
   constraint units_org_and_id unique (org_id, id),
+  -- And a rent period, which names the building as well (§4)
+  constraint units_org_building_and_id unique (org_id, building_id, id),
   constraint units_org_building_label unique (org_id, building_id, label),
   constraint units_rent_not_negative check (rent_cents >= 0)
 );
@@ -516,32 +518,47 @@ refused rather than stored. ADR-0008 says why that is the scope.
 create table rent_periods (
   id                    uuid primary key default uuidv7(),
   org_id                uuid not null references organizations (id) on delete cascade,
-  unit_id               uuid not null references units (id) on delete restrict,
-  building_id           uuid not null references buildings (id) on delete restrict,
+  building_id           uuid not null,  -- referenced with its unit and org, below
+  unit_id               uuid not null,
 
   period_month          date not null,  -- always the first of the month
-  amount_expected_cents bigint not null check (amount_expected_cents >= 0),
-  amount_received_cents bigint check (amount_received_cents >= 0),
+  amount_expected_cents bigint not null,
+  amount_received_cents bigint,
   received_on           date,
+  vacant                boolean not null default false,  -- the unit stood empty (#97)
   note                  text,
 
   created_at            timestamptz not null default now(),
   updated_at            timestamptz not null default now(),
 
+  -- The unit, its building and its org, in one reference
+  constraint rent_periods_unit foreign key (org_id, building_id, unit_id)
+    references units (org_id, building_id, id) on delete restrict,
+  constraint rent_periods_org_unit_month unique (org_id, unit_id, period_month),
   constraint rent_periods_month_is_first
     check (extract(day from period_month) = 1),
+  constraint rent_periods_money_not_negative
+    check (amount_expected_cents >= 0 and amount_received_cents >= 0),
   constraint rent_periods_received_pair
     check ((amount_received_cents is null) = (received_on is null)),
-  unique (org_id, unit_id, period_month)
+  constraint rent_periods_vacant_received_nothing
+    check (not vacant or amount_received_cents is null)
 );
 ```
 
 `building_id` is denormalised onto the row. It is derivable through `units`, and it is stored
 anyway because the cash-flow tile (F0) and the per-building Schedule E (F4) both aggregate by
 building over a date range, and making those queries join to `units` to prove which building they
-belong to costs more than the redundancy. It is maintained by the same helper that creates the row,
-and a check that it matches `units.building_id` is a job for the isolation test rather than a
-constraint that would require a composite foreign key on every write.
+belong to costs more than the redundancy.
+
+**The reference to the unit names its building as well as its org**, against a new
+`units_org_building_and_id unique (org_id, building_id, id)`. This section first left "does
+`building_id` match the unit's" to the isolation test, on the grounds that a constraint would need a
+composite foreign key on every write. Since #105 every reference is composite anyway, naming the org
+for §9's fifth reason, so naming the building too costs nothing more — and a period counted toward
+a building its unit is not in is now a row the database cannot hold, rather than one a test hopes
+never to see. The same key keeps a unit from moving to another building while its months are
+there, and holds the building by way of its units, so the building needs no key of its own.
 
 **`amount_expected_cents` is a snapshot, taken when the period is created.** It is never
 recomputed from `units.rent_cents`. This is the single most important rule in this table: a rent
@@ -550,20 +567,21 @@ next year that it produced this year.
 
 ### What opens a period
 
-**Lazily, on first read or write of that month, through one helper, idempotently.**
+**Lazily, on first read of that month, through one helper, idempotently.**
 
 ```
-ensureRentPeriod(unitId, month) →
-  insert … values (…, units.rent_cents as amount_expected_cents, …)
+ensureRentPeriods(buildingId, month) →
+  insert into rent_periods (…, amount_expected_cents)
+  select …, units.rent_cents from units
+   where the unit is the building's, occupied, and has a rent
   on conflict (org_id, unit_id, period_month) do nothing
-  returning …
 ```
 
-The rent roll rendering September materialises September. The alternative — a scheduled job that
-opens every period at midnight on the first — needs somewhere to run (a container entrypoint, per
-ADR-0002), needs a backfill path for a customer who signs up mid-year, and needs a second one for
-the nightly demo reset. Lazy creation has one code path, and the unique constraint makes it safe
-when two requests race.
+The rent roll rendering September materialises September, for every occupied unit of the building
+at once. The alternative — a scheduled job that opens every period at midnight on the first — needs
+somewhere to run (a container entrypoint, per ADR-0002), needs a backfill path for a customer who
+signs up mid-year, and needs a second one for the nightly demo reset. Lazy creation has one code
+path, and the unique constraint makes it safe when two requests race.
 
 Two consequences worth naming. A unit nobody looks at accrues no rows, which is correct — an
 un-opened period is not an unpaid one. And a period opened late snapshots the rent as of the moment
@@ -571,8 +589,34 @@ it was opened, so a rent increase entered *before* anyone views the new month wi
 figure. That is the right answer for a forward-looking increase and the wrong one for a
 retroactively-entered increase, which is why `amount_expected_cents` is editable on the row.
 
-Periods are only opened for units with `status = 'occupied'`. A vacant unit has no expected rent,
-and recording zero would put a false zero in the cash-flow denominator.
+Periods are only opened for units with `status = 'occupied'` and a rent, and only on an active
+building — an archived building's rent roll is a read-only view, and a view that wrote would open
+months nobody can mark. A vacant unit has no expected rent, and recording zero would put a false
+zero in the cash-flow denominator. A month is never opened ahead of the current one in the
+building's zone, because it would snapshot today's rent into a month whose rent is not known yet.
+
+### A month whose occupancy was not today's (#97)
+
+Periods open on the unit's status *now*, and the rent roll goes back two years so a year can be
+back-filled. So a past month can be wrong in two directions, and each has its own answer.
+
+- **Occupied now, vacant then.** Viewing last March opens a period expecting today's rent for a
+  month nobody owed. It is marked **`vacant`**: the period exists, expects nothing, and is left out
+  of both halves of every total — the rent roll's footer, the cash-flow tile and the F4 income
+  figure — and out of every count of months not marked. `rent_periods_vacant_received_nothing` keeps
+  money off it. The snapshot stays on the row, so un-marking the vacancy puts the month back as it
+  was. A flag rather than a deleted row, because the next view of March would open the row again;
+  and rather than a zero, for the reason above.
+- **Vacant now, occupied then.** No period opens for March, so rent that did arrive has nowhere to
+  go. The rent roll offers **`Record rent`** on the row of a unit with no period that month, which
+  opens one **on request, with the expected amount typed** rather than taken from the snapshot — a
+  vacant unit's `rent_cents` is an asking rent at best. It is the one way a period opens other than
+  by being viewed, and it shares the helper's conflict target, so a request that races a view opens
+  one period, not two. The same button serves an occupied unit with no rent entered.
+
+A retired unit's months stay on the rent roll in the months it has them, and it is offered no
+`Record rent`: it stopped being a leasable space, and a new month for it would be rent from a unit
+that no longer exists.
 
 ---
 
@@ -885,7 +929,7 @@ references that are informational.** A `set null` that would lose a fact is a `r
 | **Unit** | `restrict` from rent periods, capital items, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
 | **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete |
 | **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it — `building_utilities_contact` is `restrict`, which enforces that (§3) — and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
-| **Rent period** | Deletable while `amount_received_cents is null` — an opened-in-error month. Once money is recorded it is edited, not deleted, and once its year is filed (#44) it is immutable |
+| **Rent period** | Not deleted. A month opened for a unit that stood empty is marked `vacant` (§4), which records it, where a deleted row would be reopened by the next view — so the scoped role holds no `delete` on `rent_periods` until something needs one. Once money is recorded it is edited, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
 | **Reference data** (`capital_item_types`, `trade_tags`) | Not deleted. `restrict` from every referencing row, so an entry in use cannot be removed. Retiring one means keeping the row and hiding it from new choices, which needs a column neither table has; it is added with the first entry that has to go |
 
@@ -925,11 +969,13 @@ create index units_org_lease_end      on units (org_id, lease_end) where status 
 create index building_utilities_org_building on building_utilities (org_id, building_id);
 create index building_access_codes_org_building on building_access_codes (org_id, building_id);
 
--- Rent periods: the cash-flow tile and the annual tax figure
-create unique index rent_periods_org_unit_month on rent_periods (org_id, unit_id, period_month);
-create index rent_periods_org_building_month    on rent_periods (org_id, building_id, period_month);
-create index rent_periods_org_unpaid            on rent_periods (org_id, period_month)
-  where amount_received_cents is null;
+-- Rent periods: the cash-flow tile and the annual tax figure. `rent_periods_org_unit_month`
+-- is not listed: it is the unique constraint in §4, which is already that btree.
+create index rent_periods_org_building_month on rent_periods (org_id, building_id, period_month);
+-- "Not marked", never "unpaid": the product knows nobody said, not that nothing arrived.
+-- A vacant month is marked.
+create index rent_periods_org_unmarked       on rent_periods (org_id, period_month)
+  where amount_received_cents is null and not vacant;
 
 -- Capital items: the forecast reads by building across both scopes
 create index capital_items_org_building_unit on capital_items (org_id, building_id, unit_id);
@@ -1099,7 +1145,8 @@ for by #48, because they are the ones a naive test misses:
   judges the new row's own `org_id`, and a foreign key is checked past row-level security. The
   composite reference of the checklist's fifth item is what refuses it, and the isolation test
   proves it through a scoped handle — first for `units` to `buildings`, at #105, then
-  `contact_tags` to `contacts`, at #106, then every reference the facts tables make, at #107.
+  `contact_tags` to `contacts`, at #106, then every reference the facts tables make, at #107, then
+  `rent_periods` to its unit, at #108.
 
 ---
 

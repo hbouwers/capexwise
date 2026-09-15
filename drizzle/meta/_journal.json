@@ -113,6 +113,20 @@
       "when": 1789430695456,
       "tag": "0015_building_facts_row_level_security",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789433406493,
+      "tag": "0016_rent_periods",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789433416388,
+      "tag": "0017_rent_periods_row_level_security",
+      "breakpoints": true
     }
   ]
 }

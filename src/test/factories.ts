@@ -28,6 +28,7 @@ import {
   invitations,
   memberships,
   organizations,
+  rentPeriods,
   units,
   users,
 } from "@/db/schema";
@@ -67,6 +68,8 @@ type Utility = typeof buildingUtilities.$inferSelect;
 type UtilityInput = typeof buildingUtilities.$inferInsert;
 type AccessCode = typeof buildingAccessCodes.$inferSelect;
 type AccessCodeInput = typeof buildingAccessCodes.$inferInsert;
+type RentPeriod = typeof rentPeriods.$inferSelect;
+type RentPeriodInput = typeof rentPeriods.$inferInsert;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -345,4 +348,34 @@ export async function createAccessCode(
     .returning();
 
   return firstRow(rows, "building_access_codes");
+}
+
+/**
+ * One unit's month, not yet marked: September 2026 at $2,300 unless told
+ * otherwise. Takes the org, the building and the unit, all three required,
+ * because `rent_periods_unit` names all three — a factory that could invent
+ * the building would let a test hold it fixed on one side of the key only.
+ *
+ * Written straight to the table, not through `ensureRentPeriods()`, so the
+ * expected amount is whatever the test says rather than the unit's rent.
+ */
+export async function createRentPeriod(
+  orgId: string,
+  buildingId: string,
+  unitId: string,
+  overrides: Partial<RentPeriodInput> = {},
+): Promise<RentPeriod> {
+  const rows = await testDb()
+    .insert(rentPeriods)
+    .values({
+      orgId,
+      buildingId,
+      unitId,
+      periodMonth: "2026-09-01",
+      amountExpectedCents: 230_000,
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "rent_periods");
 }
