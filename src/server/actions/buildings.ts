@@ -25,6 +25,7 @@ import {
   buildingAccessCodes,
   buildings,
   buildingUtilities,
+  rentPeriods,
   units,
 } from "@/db/schema";
 import { type UnitValues, validateBuilding } from "@/lib/building-form";
@@ -117,13 +118,14 @@ export async function createBuilding(
  * refuses the whole save before anything is written, rather than being
  * skipped: a save that quietly dropped a row would look like it worked.
  *
- * Removing a unit is a delete. When rent periods arrive (#108) a unit with
- * history gets `Retire` instead, and `units`' `restrict` refuses the delete if
- * anything still asks for one. Two things on the building's facts hang off a
- * unit already (`docs/data-model.md` §3). A utility account holds the unit
- * back until the account is moved or removed, and the save says which unit.
- * An access code goes with its unit, and is recorded as removed, as a code
- * removed in the facts editor is (ADR-0008).
+ * Removing a unit is a delete, and only a unit with no rent history can be
+ * removed: one with months of rent is retired instead (`docs/data-model.md`
+ * §7), which the form offers in its place, and a submission that removes one
+ * anyway is refused with the units named. Two things on the building's facts
+ * hang off a unit as well (§3). A utility account holds the unit back until
+ * the account is moved or removed, and the save says which unit. An access
+ * code goes with its unit, and is recorded as removed, as a code removed in
+ * the facts editor is (ADR-0008).
  */
 export async function updateBuilding(
   buildingId: unknown,
@@ -173,6 +175,29 @@ export async function updateBuilding(
     const removedIds = removed.map((unit) => unit.id);
 
     if (removed.length > 0) {
+      // Before the accounts: retiring is the answer for a unit with history,
+      // and it needs no account moved first.
+      const history = await tx
+        .selectDistinct({ unitId: rentPeriods.unitId })
+        .from(rentPeriods)
+        .where(
+          and(
+            eq(rentPeriods.orgId, db.orgId),
+            inArray(rentPeriods.unitId, removedIds),
+          ),
+        );
+
+      if (history.length > 0) {
+        const held = removed.filter((unit) =>
+          history.some((row) => row.unitId === unit.id),
+        );
+
+        return {
+          ok: false,
+          errors: { units: unitsWithRent(held.map((unit) => unit.label)) },
+        };
+      }
+
       const accounts = await tx
         .select({ unitId: buildingUtilities.unitId })
         .from(buildingUtilities)
@@ -272,19 +297,37 @@ export async function updateBuilding(
   return result;
 }
 
+/** `“A”`, `“A” and “B”`, `“A”, “B” and “C”`. */
+function quotedList(labels: readonly string[]): string {
+  const quoted = labels.map((label) => `“${label}”`);
+
+  return quoted.length === 1
+    ? quoted[0]!
+    : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+}
+
+/**
+ * The units list's message when a unit removed on this form has months of
+ * rent recorded — which the form's `Retire` avoids, so this is a form drawn
+ * before the unit's first month was opened.
+ */
+function unitsWithRent(labels: readonly string[]): string {
+  const names = quotedList(labels);
+
+  return labels.length === 1
+    ? `Unit ${names} has rent recorded, so it can’t be removed. Retire it instead — its months stay on the rent roll.`
+    : `Units ${names} have rent recorded, so they can’t be removed. Retire them instead — their months stay on the rent roll.`;
+}
+
 /**
  * The units list's message when a unit removed on this form still has a
  * utility account on the building's facts. It names the units, because the
  * form may have removed more than one, and says where the account is.
  */
 function unitsWithAccounts(labels: readonly string[]): string {
-  const quoted = labels.map((label) => `“${label}”`);
-  const names =
-    quoted.length === 1
-      ? quoted[0]
-      : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+  const names = quotedList(labels);
 
-  return quoted.length === 1
+  return labels.length === 1
     ? `Unit ${names} has a utility account in Building facts. Change the account to Shared, or remove it there, before removing the unit.`
     : `Units ${names} have utility accounts in Building facts. Change the accounts to Shared, or remove them there, before removing the units.`;
 }

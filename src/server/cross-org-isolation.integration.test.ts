@@ -77,7 +77,7 @@ import { makeSignature } from "better-auth/crypto";
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
-import { contacts, organizations, sessions } from "@/db/schema";
+import { contacts, organizations, rentPeriods, sessions } from "@/db/schema";
 import {
   buildingFactsFields,
   emptyAccessCodeFields,
@@ -85,6 +85,7 @@ import {
 } from "@/lib/building-facts-form";
 import { buildingFields } from "@/lib/building-form";
 import { contactFields } from "@/lib/contact-form";
+import { addMonths, firstOfMonth, todayIn } from "@/lib/dates";
 import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
 import {
   createAccessCode,
@@ -165,6 +166,9 @@ const { getContact, listContacts, listTradeTags } =
 const { revealAccessCode, saveBuildingFacts } =
   await import("@/server/actions/building-facts");
 const { getBuildingFacts } = await import("@/server/queries/building-facts");
+const { markRentPaid, openRentPeriod, saveRentPeriod, unmarkRentPaid } =
+  await import("@/server/actions/rent-periods");
+const { getRentRoll } = await import("@/server/queries/rent-periods");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1628,6 +1632,109 @@ describe("the building facts paths", () => {
     expect(mentionsB(result, b)).toEqual([]);
     expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
     expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
+  });
+});
+
+/**
+ * The rent roll's paths — `src/server/queries/rent-periods.ts` and
+ * `src/server/actions/rent-periods.ts` — judged as the building paths are.
+ * Both orgs have the same month open on a unit labelled `A`, so a write keyed
+ * on the label or the month would find a period in each; it is the ids that
+ * tell.
+ */
+describe("the rent roll paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  /** The month before the current one where the seeded buildings are. */
+  function lastMonth() {
+    return addMonths(firstOfMonth(todayIn("America/Indiana/Indianapolis")), -1);
+  }
+
+  const paid = {
+    expected: "$2,300",
+    received: "$2,300",
+    receivedOn: "2026-09-01",
+    note: "",
+    vacant: false,
+  };
+
+  it("reads the caller's rent roll, opening nothing in the other org, and not the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const mine = await getRentRoll(a.building.id, "2026-09");
+    expect(mine?.rows.map((row) => row.period?.id)).toEqual([a.rentPeriod.id]);
+    expect(mentionsB(mine, b)).toEqual([]);
+
+    // B's building by its id is the same `null` as one that does not exist,
+    // and viewing it opens none of B's months.
+    expect(await getRentRoll(b.building.id, undefined)).toBeNull();
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("marks and un-marks the caller's month, and not the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    expect(await markRentPaid(b.rentPeriod.id)).toEqual({ ok: false });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: the same call works at home.
+    expect(await markRentPaid(a.rentPeriod.id)).toEqual({ ok: true });
+
+    // And un-marking needs a marked month, which B's now is.
+    await testDb()
+      .update(rentPeriods)
+      .set({ amountReceivedCents: 230_000, receivedOn: "2026-09-01" })
+      .where(eq(rentPeriods.id, b.rentPeriod.id));
+    const marked = await rowsOwnedBy(b.org.id);
+
+    expect(await unmarkRentPaid(b.rentPeriod.id)).toEqual({ ok: false });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(marked);
+    expect(await unmarkRentPaid(a.rentPeriod.id)).toEqual({ ok: true });
+  });
+
+  it("saves the caller's month, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const theirs = await saveRentPeriod(b.rentPeriod.id, paid);
+    expect(theirs.ok).toBe(false);
+    expect(mentionsB(theirs, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect(await saveRentPeriod(a.rentPeriod.id, paid)).toEqual({ ok: true });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("records rent on the caller's unit, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+    const month = lastMonth();
+    const input = { ...paid, receivedOn: month };
+
+    const theirs = await openRentPeriod(b.unit.id, month, input);
+    expect(theirs.ok).toBe(false);
+    expect(mentionsB(theirs, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect(await openRentPeriod(a.unit.id, month, input)).toEqual({
+      ok: true,
+    });
+    expect((await rowsOwnedBy(a.org.id)).rent_periods).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });
 
