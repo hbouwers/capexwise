@@ -66,6 +66,13 @@ const { getBuildingFacts } = await import("@/server/queries/building-facts");
 
 const keyring = parseKeyring(TEST_ACCESS_CODE_KEYS);
 
+/**
+ * Every line `console.info` was handed. The codes these tests type all carry
+ * a `#`, which is what makes "the log does not contain the code" a test of
+ * the log: a line is ids and a timestamp, all hex digits and dashes, so a
+ * digits-only code turns up inside one sooner or later — `3333` did, in an
+ * org's UUID in CI — and the check fails on no leak at all.
+ */
 let logged: string[] = [];
 
 beforeEach(() => {
@@ -135,7 +142,7 @@ describe("saveBuildingFacts", () => {
           ...emptyAccessCodeFields(),
           kind: "lockbox",
           label: "Basement",
-          code: "2280",
+          code: "2280#",
         },
       ],
       utilities: [
@@ -187,28 +194,28 @@ describe("saveBuildingFacts", () => {
     const [summary] = facts.accessCodes;
     const row = await codeRow(summary!.id);
     expect(row?.secret).toHaveLength(92);
-    expect(row?.secret.includes(Buffer.from("2280"))).toBe(false);
-    expect(openAccessCode(keyring, org.id, row!)).toBe("2280");
+    expect(row?.secret.includes(Buffer.from("2280#"))).toBe(false);
+    expect(openAccessCode(keyring, org.id, row!)).toBe("2280#");
 
     expect(records()).toMatchObject([
       { event: "added", access_code_id: summary!.id, building_id: building.id },
     ]);
-    expect(logged.join("\n")).not.toContain("2280");
+    expect(logged.join("\n")).not.toContain("2280#");
     expect(logged.join("\n")).not.toContain("Basement");
   });
 
   it("keeps a code whose field is left empty, and re-seals one that is typed", async () => {
     const { org, building } = await duplex();
-    const kept = await createAccessCode(org.id, building.id, { code: "1111" });
+    const kept = await createAccessCode(org.id, building.id, { code: "1111#" });
     const replaced = await createAccessCode(org.id, building.id, {
-      code: "2222",
+      code: "2222#",
     });
 
     const editor = await editorFor(building.id);
     const result = await saveBuildingFacts(building.id, {
       ...editor,
       accessCodes: editor.accessCodes.map((row) =>
-        row.id === replaced.id ? { ...row, code: "3333" } : row,
+        row.id === replaced.id ? { ...row, code: "3333#" } : row,
       ),
     });
 
@@ -219,14 +226,14 @@ describe("saveBuildingFacts", () => {
     expect(keptRow?.lastRotatedAt).toBeNull();
 
     const replacedRow = await codeRow(replaced.id);
-    expect(openAccessCode(keyring, org.id, replacedRow!)).toBe("3333");
+    expect(openAccessCode(keyring, org.id, replacedRow!)).toBe("3333#");
     // The code at the lock changed, and the row says when.
     expect(replacedRow?.lastRotatedAt).toBeInstanceOf(Date);
 
     expect(records().map((line) => [line.event, line.access_code_id])).toEqual([
       ["replaced", replaced.id],
     ]);
-    expect(logged.join("\n")).not.toMatch(/1111|2222|3333/);
+    expect(logged.join("\n")).not.toMatch(/1111#|2222#|3333#/);
   });
 
   it("removes what the editor removed, and records a removed code", async () => {
@@ -325,7 +332,7 @@ describe("revealAccessCode", () => {
         building_id: building.id,
       },
     ]);
-    expect(logged.join("\n")).not.toContain("4417");
+    expect(logged.join("\n")).not.toContain("4417#");
     expect(logged.join("\n")).not.toContain("Rear door");
   });
 
