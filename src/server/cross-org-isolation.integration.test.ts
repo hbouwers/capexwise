@@ -94,6 +94,7 @@ import {
   createInvitation,
   createMembership,
   createOrganization,
+  createRentPeriod,
   createUnit,
   createUser,
   createUtility,
@@ -184,6 +185,7 @@ const ORG_OWNED = {
   building_facts: "org_id",
   building_utilities: "org_id",
   building_access_codes: "org_id",
+  rent_periods: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -342,7 +344,11 @@ async function seedTwoOrgs() {
     const building = await createBuilding(org.id, {
       addressLine1: "412 N Delaware St",
     });
-    const unit = await createUnit(org.id, building.id, { label: "A" });
+    const unit = await createUnit(org.id, building.id, {
+      label: "A",
+      status: "occupied",
+      rentCents: 230_000,
+    });
 
     // The same plumber on both sides, by name and by phone, so a lookup keyed
     // on either finds one in each org.
@@ -365,6 +371,10 @@ async function seedTwoOrgs() {
       code: "4417#",
     });
 
+    // The same month on both sides, unmarked: a mark keyed on the unit's
+    // label or the month would find a period in each org.
+    const rentPeriod = await createRentPeriod(org.id, building.id, unit.id);
+
     return {
       org,
       owner,
@@ -378,6 +388,7 @@ async function seedTwoOrgs() {
       contact,
       utility,
       accessCode,
+      rentPeriod,
     };
   }
 
@@ -414,6 +425,7 @@ function identifiersOf(side: Side): string[] {
     side.contact.email!,
     side.utility.id,
     side.accessCode.id,
+    side.rentPeriod.id,
   ];
 }
 
@@ -1696,13 +1708,14 @@ describe.each(Object.entries(ORG_OWNED))(
 
       // Three acceptable outcomes, and which one a table gets is the
       // migration's decision rather than this test's: `organizations`,
-      // `contacts` and `building_facts` have no DELETE grant for the scoped
-      // role — an org is soft-deleted and the purge is not a request, a
-      // contact is archived, and a building's facts are cleared rather than
-      // removed — so they are refused before any row is considered.
-      // `buildings` is refused by its units' `restrict`, because every seeded
-      // building has one (§7: archived, not deleted), and `units` by the
-      // electric account on each. The others may delete, and must delete only
+      // `contacts`, `building_facts` and `rent_periods` have no DELETE grant
+      // for the scoped role — an org is soft-deleted and the purge is not a
+      // request, a contact is archived, a building's facts are cleared rather
+      // than removed, and a vacant month is marked rather than deleted — so
+      // they are refused before any row is considered. `buildings` is refused
+      // by its units' `restrict`, because every seeded building has one (§7:
+      // archived, not deleted), and `units` by the electric account and the
+      // month of rent on each. The others may delete, and must delete only
       // A's. A refusal rolls the transaction back, and the snapshot below is
       // what says B was never touched either way.
       const outcome = await db
@@ -1899,6 +1912,18 @@ describe("a reference from one org's row to another's", () => {
         sql`update building_access_codes set unit_id = ${b.unit.id}
             where id = ${a.accessCode.id}`,
     ],
+    [
+      "a rent period on another org's unit",
+      (a: Side, b: Side) =>
+        sql`insert into rent_periods (org_id, building_id, unit_id, period_month, amount_expected_cents)
+            values (${a.org.id}, ${b.building.id}, ${b.unit.id}, '2026-10-01', 230000)`,
+    ],
+    [
+      "a rent period counted toward another org's building",
+      (a: Side, b: Side) =>
+        sql`update rent_periods set building_id = ${b.building.id}
+            where id = ${a.rentPeriod.id}`,
+    ],
   ])("refuses %s", async (_, statement) => {
     const { a, b } = await seedTwoOrgs();
     const db = await scopedHandleFor(a);
@@ -1911,5 +1936,21 @@ describe("a reference from one org's row to another's", () => {
 
     expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
     expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
+  });
+
+  // The control for the two rent-period cases above: A's own unit takes a
+  // second month, so the inserts fail for naming B and for nothing else.
+  it("lets a rent period onto the scoped org's own unit", async () => {
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run((tx) =>
+      tx.execute(
+        sql`insert into rent_periods (org_id, building_id, unit_id, period_month, amount_expected_cents)
+            values (${a.org.id}, ${a.building.id}, ${a.unit.id}, '2026-10-01', 230000)`,
+      ),
+    );
+
+    expect((await rowsOwnedBy(a.org.id)).rent_periods).toHaveLength(2);
   });
 });
