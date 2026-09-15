@@ -21,9 +21,15 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { buildings, units } from "@/db/schema";
+import {
+  buildingAccessCodes,
+  buildings,
+  buildingUtilities,
+  units,
+} from "@/db/schema";
 import { type UnitValues, validateBuilding } from "@/lib/building-form";
 import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
+import { recordAccessCodeEvent } from "@/server/access-codes";
 import { getOrgContext, type OrgScopedDb } from "@/server/org-context";
 
 export type SaveBuildingResult =
@@ -111,16 +117,19 @@ export async function createBuilding(
  * refuses the whole save before anything is written, rather than being
  * skipped: a save that quietly dropped a row would look like it worked.
  *
- * Removing a unit is a delete. Nothing references a unit yet, so every unit
- * can be removed; when rent periods arrive (#108) a unit with history gets
- * `Retire` instead, and `units`' `restrict` refuses the delete if anything
- * still asks for one.
+ * Removing a unit is a delete. When rent periods arrive (#108) a unit with
+ * history gets `Retire` instead, and `units`' `restrict` refuses the delete if
+ * anything still asks for one. Two things on the building's facts hang off a
+ * unit already (`docs/data-model.md` §3). A utility account holds the unit
+ * back until the account is moved or removed, and the save says which unit.
+ * An access code goes with its unit, and is recorded as removed, as a code
+ * removed in the facts editor is (ADR-0008).
  */
 export async function updateBuilding(
   buildingId: unknown,
   input: unknown,
 ): Promise<SaveBuildingResult> {
-  const { db } = await getOrgContext();
+  const { db, user } = await getOrgContext();
 
   const id = buildingIdSchema.safeParse(buildingId);
   if (!id.success) return refused(NOT_FOUND);
@@ -130,7 +139,9 @@ export async function updateBuilding(
 
   const { units: submitted, ...building } = validated.values;
 
-  return await db.run(async (tx): Promise<SaveBuildingResult> => {
+  const removedCodes: { id: string; buildingId: string }[] = [];
+
+  const result = await db.run(async (tx): Promise<SaveBuildingResult> => {
     // `for update`: two saves of one building serialise here, so neither
     // reconciles its units against a list the other has already changed.
     const [existing] = await tx
@@ -158,22 +169,56 @@ export async function updateBuilding(
       return refused(UNREADABLE_FORM);
     }
 
+    const removed = current.filter((unit) => !keptIds.has(unit.id));
+    const removedIds = removed.map((unit) => unit.id);
+
+    if (removed.length > 0) {
+      const accounts = await tx
+        .select({ unitId: buildingUtilities.unitId })
+        .from(buildingUtilities)
+        .where(
+          and(
+            eq(buildingUtilities.orgId, db.orgId),
+            inArray(buildingUtilities.unitId, removedIds),
+          ),
+        );
+
+      if (accounts.length > 0) {
+        const held = removed.filter((unit) =>
+          accounts.some((account) => account.unitId === unit.id),
+        );
+
+        return {
+          ok: false,
+          errors: { units: unitsWithAccounts(held.map((unit) => unit.label)) },
+        };
+      }
+
+      removedCodes.push(
+        ...(await tx
+          .select({
+            id: buildingAccessCodes.id,
+            buildingId: buildingAccessCodes.buildingId,
+          })
+          .from(buildingAccessCodes)
+          .where(
+            and(
+              eq(buildingAccessCodes.orgId, db.orgId),
+              inArray(buildingAccessCodes.unitId, removedIds),
+            ),
+          )),
+      );
+    }
+
     await tx
       .update(buildings)
       .set(building)
       .where(and(eq(buildings.orgId, db.orgId), eq(buildings.id, existing.id)));
 
-    const removed = current.filter((unit) => !keptIds.has(unit.id));
     if (removed.length > 0) {
-      await tx.delete(units).where(
-        and(
-          eq(units.orgId, db.orgId),
-          inArray(
-            units.id,
-            removed.map((unit) => unit.id),
-          ),
-        ),
-      );
+      await tx
+        .delete(units)
+        .where(and(eq(units.orgId, db.orgId), inArray(units.id, removedIds)));
     }
 
     // Two passes over the renamed units, so that swapping two labels — A
@@ -210,6 +255,38 @@ export async function updateBuilding(
 
     return { ok: true, buildingId: existing.id };
   });
+
+  // After the commit, so a save that failed records nothing.
+  if (result.ok) {
+    for (const code of removedCodes) {
+      recordAccessCodeEvent({
+        event: "removed",
+        orgId: db.orgId,
+        userId: user.id,
+        accessCodeId: code.id,
+        buildingId: code.buildingId,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * The units list's message when a unit removed on this form still has a
+ * utility account on the building's facts. It names the units, because the
+ * form may have removed more than one, and says where the account is.
+ */
+function unitsWithAccounts(labels: readonly string[]): string {
+  const quoted = labels.map((label) => `“${label}”`);
+  const names =
+    quoted.length === 1
+      ? quoted[0]
+      : `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+
+  return quoted.length === 1
+    ? `Unit ${names} has a utility account in Building facts. Change the account to Shared, or remove it there, before removing the unit.`
+    : `Units ${names} have utility accounts in Building facts. Change the accounts to Shared, or remove them there, before removing the units.`;
 }
 
 /**

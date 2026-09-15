@@ -451,6 +451,11 @@ already says a contact is archived, and deleted only when nothing references it 
 which its `not null` refuses: the first contact deleted with a utility pointing at it would fail
 the delete for a reason nobody meant.
 
+**A unit with an account on it is not removed** (`restrict`). The building form says which unit
+and where the account is, and the account is moved to the whole building or removed first. A
+unit's codes go with it (`cascade`), and the form records each as removed, as the facts editor does
+(ADR-0008).
+
 ### Access codes live in their own table
 
 ```sql

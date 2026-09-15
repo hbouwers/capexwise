@@ -78,6 +78,11 @@ import { eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import { contacts, organizations, sessions } from "@/db/schema";
+import {
+  buildingFactsFields,
+  emptyAccessCodeFields,
+  emptyUtilityFields,
+} from "@/lib/building-facts-form";
 import { buildingFields } from "@/lib/building-form";
 import { contactFields } from "@/lib/contact-form";
 import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
@@ -156,6 +161,9 @@ const { getBuilding, listBuildings } =
 const contactActions = await import("@/server/actions/contacts");
 const { getContact, listContacts, listTradeTags } =
   await import("@/server/queries/contacts");
+const { revealAccessCode, saveBuildingFacts } =
+  await import("@/server/actions/building-facts");
+const { getBuildingFacts } = await import("@/server/queries/building-facts");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1461,6 +1469,153 @@ describe("the contact paths", () => {
     expect(result.ok).toBe(true);
     expect((await rowsOwnedBy(a.org.id)).contacts).toHaveLength(2);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+/**
+ * The facts card's paths — `src/server/queries/building-facts.ts` and
+ * `src/server/actions/building-facts.ts` — judged as the building paths are.
+ * The two orgs' front doors have the same code, sealed for each, so a reveal
+ * that found B's row would return the digits A expects and look like it
+ * worked: it is the ids that tell.
+ */
+describe("the building facts paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  /** The editor for `side`'s building, prefilled as the page prefills it. */
+  async function editorFor(side: Side) {
+    return buildingFactsFields(await getBuildingFacts(side.building.id));
+  }
+
+  it("reads the caller's facts, and nothing of the other org's by its building's id", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const mine = await getBuildingFacts(a.building.id);
+    expect(mine.accessCodes.map((code) => code.id)).toEqual([a.accessCode.id]);
+    expect(mine.utilities.map((utility) => utility.id)).toEqual([a.utility.id]);
+
+    const theirs = await getBuildingFacts(b.building.id);
+    expect(theirs).toEqual({
+      trashDay: null,
+      recyclingDay: null,
+      recyclingNote: null,
+      utilities: [],
+      accessCodes: [],
+    });
+  });
+
+  it("reveals the caller's code, and not the other org's by its id", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    expect(await revealAccessCode(a.accessCode.id)).toEqual({
+      ok: true,
+      code: "4417#",
+    });
+
+    const theirs = await revealAccessCode(b.accessCode.id);
+    expect(theirs).toEqual({ ok: false });
+    expect(mentionsB(theirs, b)).toEqual([]);
+  });
+
+  it("saves the caller's facts, and leaves the other org's alone", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await saveBuildingFacts(a.building.id, {
+      ...(await editorFor(a)),
+      trashDay: "fri",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect((await getBuildingFacts(a.building.id)).trashDay).toBe("fri");
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses to save the other org's facts", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const result = await saveBuildingFacts(b.building.id, {
+      ...(await editorFor(a)),
+      accessCodes: [],
+      utilities: [],
+      trashDay: "fri",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it.each([
+    [
+      "the other org's code",
+      (editor: Awaited<ReturnType<typeof editorFor>>, b: Side) => ({
+        ...editor,
+        accessCodes: [
+          ...editor.accessCodes,
+          { ...emptyAccessCodeFields(), id: b.accessCode.id },
+        ],
+      }),
+    ],
+    [
+      "the other org's utility",
+      (editor: Awaited<ReturnType<typeof editorFor>>, b: Side) => ({
+        ...editor,
+        utilities: [
+          ...editor.utilities,
+          {
+            ...emptyUtilityFields("gas"),
+            id: b.utility.id,
+            providerName: "Citizens Energy",
+          },
+        ],
+      }),
+    ],
+    [
+      "the other org's unit",
+      (editor: Awaited<ReturnType<typeof editorFor>>, b: Side) => ({
+        ...editor,
+        accessCodes: [
+          { ...emptyAccessCodeFields(), unitId: b.unit.id, code: "9999" },
+        ],
+      }),
+    ],
+    [
+      "the other org's contact",
+      (editor: Awaited<ReturnType<typeof editorFor>>, b: Side) => ({
+        ...editor,
+        utilities: [{ ...emptyUtilityFields("snow"), contactId: b.contact.id }],
+      }),
+    ],
+  ])("refuses %s smuggled into the caller's facts", async (_, smuggle) => {
+    // Refused whole: A's facts are not half-saved either.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const theirs = await rowsOwnedBy(b.org.id);
+    const mine = await rowsOwnedBy(a.org.id);
+
+    const result = await saveBuildingFacts(
+      a.building.id,
+      smuggle({ ...(await editorFor(a)), trashDay: "fri" }, b),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
+    expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
   });
 });
 
