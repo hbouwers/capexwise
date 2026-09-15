@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addMonths,
   firstOfMonth,
   formatDate,
   isCalendarDate,
@@ -77,6 +78,31 @@ describe("firstOfMonth", () => {
   });
 });
 
+describe("addMonths", () => {
+  it("steps to the first of the month either side", () => {
+    expect(addMonths("2026-09-01", 1)).toBe("2026-10-01");
+    expect(addMonths("2026-09-01", -1)).toBe("2026-08-01");
+    expect(addMonths("2026-09-01", 0)).toBe("2026-09-01");
+  });
+
+  it("crosses a year in both directions", () => {
+    expect(addMonths("2026-12-01", 1)).toBe("2027-01-01");
+    expect(addMonths("2026-01-01", -1)).toBe("2025-12-01");
+    expect(addMonths("2026-09-01", -24)).toBe("2024-09-01");
+  });
+
+  it("lands on the first from any day, the 31st included", () => {
+    // A month is not a number of days, so there is no 31 February to fall
+    // into and no clamping rule to get wrong.
+    expect(addMonths("2026-01-31", 1)).toBe("2026-02-01");
+    expect(addMonths("2026-03-31", -1)).toBe("2026-02-01");
+  });
+
+  it("refuses a fraction of a month", () => {
+    expect(() => addMonths("2026-09-01", 0.5)).toThrow(RangeError);
+  });
+});
+
 describe("yearOf", () => {
   it("is the calendar year, with no timezone to move it", () => {
     expect(yearOf("2026-12-31")).toBe(2026);
@@ -93,6 +119,8 @@ describe("formatDate", () => {
   it("renders the short and month forms", () => {
     expect(formatDate("2026-09-03", "short")).toBe("Sep 3");
     expect(formatDate("2019-06-01", "month")).toBe("Jun 2019");
+    expect(formatDate("2026-09-01", "month-long")).toBe("September 2026");
+    expect(formatDate("2026-09-01", "month-name")).toBe("September");
   });
 
   it("does not move a date across a day boundary", () => {

@@ -133,10 +133,43 @@ export function firstOfMonth(date: CalendarDate): CalendarDate {
   return `${date.slice(0, 7)}-01`;
 }
 
+/**
+ * The first of the month `months` away from the date's — negative for
+ * earlier. The rent roll's month switcher steps by it. Whole months on the
+ * calendar, never a number of days, so the 31st of a month is never a problem
+ * it has to solve.
+ */
+export function addMonths(date: CalendarDate, months: number): CalendarDate {
+  if (!Number.isSafeInteger(months)) {
+    throw new RangeError(`Expected a whole number of months, got ${months}.`);
+  }
+
+  const { year, month } = parts(date);
+  const index = year * 12 + (month - 1) + months;
+  const shifted = String((index % 12) + 1).padStart(2, "0");
+
+  return `${String(Math.floor(index / 12)).padStart(4, "0")}-${shifted}-01`;
+}
+
 /** The year a date falls in: the forecast's "this year", from `todayIn`. */
 export function yearOf(date: CalendarDate): number {
   return parts(date).year;
 }
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
 
 const MONTHS = [
   "Jan",
@@ -158,8 +191,11 @@ const MONTHS = [
  * - `short`: `Sep 14`, for a column of near dates where the year is plain from
  *   the page — a task list, a rent period's paid date.
  * - `month`: `Sep 2026`.
+ * - `month-long`: `September 2026`, for a month that is the subject of the
+ *   page rather than a value in a column — the rent roll's month switcher.
+ * - `month-name`: `September`, where the year is plain from the sentence.
  */
-export type DateForm = "full" | "short" | "month";
+export type DateForm = "full" | "short" | "month" | "month-long" | "month-name";
 
 /**
  * Always absolute: every date on this product is a planning date, so "3 days
@@ -179,6 +215,8 @@ export function formatDate(
   const name = MONTHS[month - 1];
 
   if (form === "month") return `${name} ${year}`;
+  if (form === "month-long") return `${MONTH_NAMES[month - 1]} ${year}`;
+  if (form === "month-name") return MONTH_NAMES[month - 1]!;
   if (form === "short") return `${name} ${day}`;
   return `${name} ${day}, ${year}`;
 }
