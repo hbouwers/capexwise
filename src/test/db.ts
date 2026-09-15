@@ -297,7 +297,10 @@ export const appDb = applicationDb;
  * role and writable by nobody but a migration. A test that writes to one of
  * these would leak into every test after it, and none should.
  */
-export const REFERENCE_TABLES: readonly string[] = ["trade_tags"];
+export const REFERENCE_TABLES: readonly string[] = [
+  "trade_tags",
+  "capital_item_types",
+];
 
 /**
  * Empties every table but the reference data, called before each test. The

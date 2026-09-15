@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** v1 — the schema to build against
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-15
 **Supersedes:** the sketch in [PRD](PRD.md) section 10
 
 This is the contract the migrations implement. **Section 2 is built**: `organizations` came with
@@ -10,7 +10,8 @@ This is the contract the migrations implement. **Section 2 is built**: `organiza
 security has covered it since #28. **So is section 3**: `buildings` and `units` with #105, and
 `building_facts`, `building_utilities` and `building_access_codes` with #107. **So are
 `trade_tags`, `contacts` and `contact_tags`** from section 6, with #106, **and section 4's
-`rent_periods`**, with #108. Everything else from section 5 on is still prose.
+`rent_periods`**, with #108, **and section 5** — the catalogue, capital items and their
+allocations — with #109. Everything else from section 6 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -624,7 +625,7 @@ that no longer exists.
 
 ```sql
 create table capital_item_types (
-  slug                text primary key,          -- 'furnace', 'roof-asphalt'
+  slug                text primary key,          -- 'furnace-gas', 'roof-asphalt'
   label               text not null,
   item_group          text not null check (item_group in
                         ('kitchen', 'laundry', 'hvac_water', 'envelope', 'interior_systems')),
@@ -632,7 +633,10 @@ create table capital_item_types (
   default_life_years  integer not null check (default_life_years > 0),
   default_cost_cents  bigint not null check (default_cost_cents >= 0),
   defaults_updated_at date not null,             -- PRD §11: visible "last updated"
-  sort_order          integer not null default 0
+  sort_order          integer not null default 0,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  constraint capital_item_types_slug_format check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$')
 );
 ```
 
@@ -640,13 +644,33 @@ create table capital_item_types (
 catalogue every org reads and only migrations write. It gets `trade_tags`' treatment from §6: seeded
 by a migration, a read-only `using (true)` policy for the scoped role, and a name in the cross-org
 isolation test (#27) with a comment, so that a future reader finds an explicit exemption rather
-than an omission.
+than an omission. It carries `created_at` and `updated_at` as §1 has every table do, and `trade_tags`'
+slug check, which this section's first draft left out.
 
 The user-override requirement from PRD §11 is met without a per-org override table: **defaults are
 copied onto the `capital_items` row at add time**, and the user edits them there. The catalogue's
 `defaults_updated_at` is what the UI surfaces as the staleness signal. Refreshing the catalogue
 therefore does not silently move anyone's existing numbers, which is the correct behaviour for a
 figure a forecast is built on.
+
+### The catalogue's figures
+
+`drizzle/0020_seed_capital_item_types.sql` seeds the add-equipment checklist's twenty-seven types
+(#109), and the comment on each row names the figure it took. In short:
+
+- **Lives** are Fannie Mae's multifamily Estimated Useful Life tables (Form 4099.F, 10/14), the
+  "Multifamily / Coop" column — a lender's table for rented buildings, which is the wear these items
+  get. The NAHB's 2007 *Study of Life Expectancy of Home Components* fills the rows Fannie Mae does
+  not have: washers, dryers, disposals and garage door openers. A range takes its midpoint rounded
+  up.
+- **Costs** are Angi's 2026 national cost guides, and HomeGuide's for the appliances: the national
+  average where one is stated, the midpoint of the typical range where not, rounded to the nearest
+  hundred dollars. A unit-scoped cost is one unit's worth; a building-scoped one is the whole
+  building's. Where a source prices by the square foot, the area is a unit of about 1,000 sq ft.
+
+They are a starting point for somebody who has not read the labels yet. The item is theirs to
+correct the moment it is added, and a refresh is a migration that updates `defaults_updated_at` on
+the rows it touches.
 
 ```sql
 create type item_confidence as enum ('estimated', 'audited');
@@ -656,65 +680,133 @@ create type allocation_method as enum ('building_only', 'by_unit_count', 'explic
 create table capital_items (
   id                     uuid primary key default uuidv7(),
   org_id                 uuid not null references organizations (id) on delete cascade,
-  building_id            uuid not null references buildings (id) on delete restrict,
-  unit_id                uuid references units (id) on delete restrict,  -- null = shared
+  building_id            uuid not null,          -- referenced with its org, below
+  unit_id                uuid,                   -- null = shared
 
   type_slug              text references capital_item_types (slug) on delete restrict,
   label                  text not null,          -- copied from the type, then editable
 
-  install_year           integer check (install_year between 1600 and 2200),
+  install_year           integer not null
+                           constraint capital_items_install_year_plausible
+                           check (install_year between 1600 and 2200),
   install_date           date,                   -- non-null only when audited
   confidence             item_confidence not null default 'estimated',
   expected_life_years    integer not null check (expected_life_years > 0),
-  replacement_cost_cents bigint not null check (replacement_cost_cents >= 0),
-  actual_cost_cents      bigint check (actual_cost_cents >= 0),
+  replacement_cost_cents bigint not null,
+  actual_cost_cents      bigint,
   status                 item_status not null default 'active',
   allocation             allocation_method not null default 'by_unit_count',
-  replaced_by_id         uuid references capital_items (id) on delete set null,
+  replaced_by_id         uuid,                   -- referenced with its building, below
   notes                  text,
 
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now(),
 
+  -- Each reference names the org (§9, fifth item), and the unit and the
+  -- replacement name the building too
+  constraint capital_items_building foreign key (org_id, building_id)
+    references buildings (org_id, id) on delete restrict,
+  constraint capital_items_unit foreign key (org_id, building_id, unit_id)
+    references units (org_id, building_id, id) on delete restrict,
+  constraint capital_items_org_building_and_id unique (org_id, building_id, id),
+  constraint capital_items_replaced_by foreign key (org_id, building_id, replaced_by_id)
+    references capital_items (org_id, building_id, id) on delete restrict,
+
   -- ADR-0005: a precise date is a claim about knowledge, not a formatting choice
   constraint capital_items_audited_has_date
     check (confidence = 'estimated' or install_date is not null),
+  constraint capital_items_install_date_in_year
+    check (install_date is null or extract(year from install_date) = install_year),
+  constraint capital_items_money_not_negative
+    check (replacement_cost_cents >= 0 and actual_cost_cents >= 0),
   -- allocation only means something for a shared item
   constraint capital_items_allocation_scope
-    check (unit_id is null or allocation = 'building_only')
+    check (unit_id is null or allocation = 'building_only'),
+  -- a replaced item has the row that replaced it, and only a replaced one does
+  constraint capital_items_replaced_by_set
+    check ((status = 'replaced') = (replaced_by_id is not null)),
+  constraint capital_items_not_its_own_replacement
+    check (replaced_by_id <> id)
 );
 ```
 
 `replaced_by_id` is what makes a replacement a fact rather than an edit. Replacing a 2009 furnace
 in 2027 creates a new row and marks the old one `replaced`, so the forecast stops counting it while
 #44's depreciation schedule keeps its basis and its in-service date. Editing the install year in
-place would erase the thing the tax planner needs most.
+place would erase the thing the tax planner needs most. `recordReplacement` in
+`src/server/actions/capital-items.ts` is the one path that does it: the new row takes the old one's
+type, label, scope, split, life and replacement cost, and is `audited` from the day it went in.
+
+**Five departures from this section's first draft, made with #109.**
+
+- **Every reference is composite**, for `units_building`'s reason (§3). A unit-scoped item names its
+  building as well as its unit, as a rent period does (§4), so it cannot be counted toward a
+  building its unit is not in.
+- **`install_year` is required.** An item with no year cannot be aged, and every item the checklist
+  adds arrives with an estimate. Dropping a `not null` later is one statement; adding one after rows
+  without a year exist would not be.
+- **A date and a year agree** (`capital_items_install_date_in_year`), because two answers to when
+  it went in is one too many.
+- **A replacement is in the same building, and is `restrict`, not `set null`.** Nulling
+  `replaced_by_id` would leave a `replaced` row with nothing replacing it — which
+  `capital_items_replaced_by_set` now refuses — and `set null` on a composite key nulls `org_id` too,
+  §3's reason for the utility's contact. Undoing a replacement puts the old row back before removing
+  the new one.
+- **The two checks on `replaced_by_id` are new.** `replaced` and a successor come together, so a
+  replaced item always has its successor and an active one never pretends to.
 
 ### The allocation rule
 
 The issue asked whether a shared item's split is stored per item or derived at read time. **It is
 derived from a stored rule, not stored as a number — and frozen when a tax year is filed.**
+`allocateCapitalItem()` in `src/lib/capital-items.ts` is the rule, and the one place it is
+computed.
 
 - `allocation = 'by_unit_count'` — the default. Basis divides across the building's non-retired
   units by a **largest-remainder split** (ADR-0005), so the parts sum to the whole exactly. A
-  $10,000.01 roof across two units is 500001 and 500000 cents, not two halves.
+  $10,000.01 roof across two units is 500001 and 500000 cents, not two halves. The unit created
+  first takes the first leftover cent, whatever order the units are read in, so the same inputs give
+  the same split on every page. With every unit retired there is nothing to divide across, and the
+  basis stays with the building.
 - `allocation = 'building_only'` — not allocated; the whole basis sits at the building level. The
-  only legal value when `unit_id` is set.
+  only legal value when `unit_id` is set, where the whole basis is that unit's.
 - `allocation = 'explicit'` — rows in `capital_item_allocations` carry basis points per unit, and
-  a constraint requires them to sum to 10000.
+  they sum to 10000. They are read as written, a retired unit's share included: the person set
+  them.
 
 ```sql
 create table capital_item_allocations (
-  id              uuid primary key default uuidv7(),
   org_id          uuid not null references organizations (id) on delete cascade,
-  capital_item_id uuid not null references capital_items (id) on delete cascade,
-  unit_id         uuid not null references units (id) on delete cascade,
+  building_id     uuid not null,                 -- so both references name it
+  capital_item_id uuid not null,
+  unit_id         uuid not null,
   share_bps       integer not null check (share_bps between 0 and 10000),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  unique (capital_item_id, unit_id)
+  -- Led by org_id, as §8 has every index on a domain table
+  constraint capital_item_allocations_pkey primary key (org_id, capital_item_id, unit_id),
+  constraint capital_item_allocations_item foreign key (org_id, building_id, capital_item_id)
+    references capital_items (org_id, building_id, id) on delete cascade,
+  constraint capital_item_allocations_unit foreign key (org_id, building_id, unit_id)
+    references units (org_id, building_id, id) on delete restrict
 );
 ```
+
+**The sum is a deferred trigger**, because no check constraint can see more than one row.
+`drizzle/0019_capital_items_row_level_security.sql` judges each item at commit: an `explicit` item's
+shares sum to 10000 (`capital_item_allocations_sum_to_whole`), and an item that is not `explicit` has
+no shares at all (`capital_item_allocations_explicit_only`). Deferred, because making an item
+explicit and writing its shares are several statements, and the rule is about where they end up.
+Both raise as check violations under those names. The trigger runs with the invoker's rights, so the
+scoped role reads the shares back through the same policies that let it write them.
+
+Three more departures, for the same reasons as the item's. The table is keyed on
+`(org_id, capital_item_id, unit_id)`, as `contact_tags` is, rather than on an `id` with a unique pair
+beside it — and that key is §8's `capital_item_allocations_org_item`. It carries `building_id`, as
+`rent_periods` does, so a share cannot go to a unit in a different building from its item's. And
+**a unit is `restrict`, not `cascade`**: a cascade would take one share out of a split and leave the
+rest short of the whole, which the sum rule would then refuse at commit, so a unit with a share is
+retired instead (§7).
 
 Deriving rather than storing is the right default because a stored number goes stale the moment a
 unit is added or retired, and a stale allocation on a tax page is exactly the failure the PRD
@@ -754,7 +846,7 @@ back.
 ### How reference data is seeded
 
 **In a migration** (#106), not by the seed script #34 builds. `drizzle/0013_seed_trade_tags.sql` is
-the first, and `capital_item_types` (#109) follows it.
+the first, and `drizzle/0020_seed_capital_item_types.sql` (#109) followed it.
 
 - **The rows are part of the schema's contract, not content.** `contact_tags` cannot hold a row
   without a trade to point at, and no screen creates one. So the list has to exist wherever the
@@ -926,8 +1018,8 @@ references that are informational.** A `set null` that would lose a fact is a `r
 | **User** | The `users` row survives as long as anything references it — `invitations.inviter_id` is `restrict`, and #42's audit log will be too. Account deletion revokes memberships and clears sessions; it does not erase authorship |
 | **Membership (revoked)** | Hard delete of the row. Nothing is orphaned: tasks are assigned to contacts, not users. Blocked if it would leave the org with no owner |
 | **Building** | `restrict` from units, capital items, tasks, rent periods, transactions. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
-| **Unit** | `restrict` from rent periods, capital items, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
-| **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete |
+| **Unit** | `restrict` from rent periods, capital items and their explicit shares, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
+| **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete, and the row that replaced it is held by `restrict` while the old one points at it. Nothing in v0 deletes one, so the scoped role holds no `delete` on `capital_items` or `capital_item_allocations`; the add-equipment modal's Undo (#110) is the first thing that will, and brings the grant. An item's shares go with it (`cascade`) |
 | **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it — `building_utilities_contact` is `restrict`, which enforces that (§3) — and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
 | **Rent period** | Not deleted. A month opened for a unit that stood empty is marked `vacant` (§4), which records it, where a deleted row would be reopened by the next view — so the scoped role holds no `delete` on `rent_periods` until something needs one. Once money is recorded it is edited, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
@@ -980,7 +1072,8 @@ create index rent_periods_org_unmarked       on rent_periods (org_id, period_mon
 -- Capital items: the forecast reads by building across both scopes
 create index capital_items_org_building_unit on capital_items (org_id, building_id, unit_id);
 create index capital_items_org_status_year   on capital_items (org_id, status, install_year);
-create index capital_item_allocations_org_item on capital_item_allocations (org_id, capital_item_id);
+-- `capital_item_allocations_org_item` is not listed: it is the primary key in §5,
+-- which is a btree led by (org_id, capital_item_id).
 
 -- Tasks: the dashboard's two tiles are these two indexes
 create index tasks_org_status_due    on tasks (org_id, status, due_date);
@@ -1079,7 +1172,7 @@ create policy buildings_backup_read on buildings
 | Table | Reason |
 |---|---|
 | `users`, `sessions`, `accounts`, `verifications`, `rate_limits` | Above the tenancy boundary; read during sign-in, before an org context exists (§2). No row-level security, and no grant to the scoped role — so a scoped handle cannot read them at all, which is why a members list needs a policy on `users` of its own before it can show a name (#30) |
-| `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations (§6). Row level security enabled and not forced, `select` and nothing else for the scoped role, and a deliberate `for select ... using (true)` policy for it beside the reader's. `trade_tags` has had it since #106, and the isolation test holds every table on `REFERENCE_TABLES` to it |
+| `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations (§6). Row level security enabled and not forced, `select` and nothing else for the scoped role, and a deliberate `for select ... using (true)` policy for it beside the reader's. `trade_tags` has had it since #106 and `capital_item_types` since #109, and the isolation test holds every table on `REFERENCE_TABLES` to it |
 | `organizations` | Has a policy, but keyed on `id = current_org_id()`, not `org_id` |
 
 **The identity path reads three tables without an org, and that is the whole of the bypass.**
@@ -1140,13 +1233,16 @@ for by #48, because they are the ones a naive test misses:
 - **A unit-scoped row** (`capital_items` with `unit_id` set) and **a building-shared row** (the same
   table with `unit_id is null`) must both be invisible across orgs. `unit_id` is a scope, never a
   boundary — a test that only exercises unit-scoped rows would pass while shared rows leaked.
+  Both are seeded on each side since #109: a shared furnace, split explicitly so it has a share,
+  and a refrigerator in unit A.
 - **A cross-org foreign key must be impossible**: org A's building must not accept org B's unit as
   its `unit_id`. The policy protects reads, and **`WITH CHECK` does not cover this write**: it
   judges the new row's own `org_id`, and a foreign key is checked past row-level security. The
   composite reference of the checklist's fifth item is what refuses it, and the isolation test
   proves it through a scoped handle — first for `units` to `buildings`, at #105, then
   `contact_tags` to `contacts`, at #106, then every reference the facts tables make, at #107, then
-  `rent_periods` to its unit, at #108.
+  `rent_periods` to its unit, at #108, then an item to its building, its unit and its replacement,
+  and a share to its item and its unit, at #109.
 
 ---
 

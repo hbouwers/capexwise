@@ -18,11 +18,15 @@
  * an org would misrepresent the schema. `createMembership` is the one that joins
  * them, and it takes an `orgId` first like every domain factory does.
  */
+import { eq } from "drizzle-orm";
+
 import {
   buildingAccessCodes,
   buildingFacts,
   buildings,
   buildingUtilities,
+  capitalItemAllocations,
+  capitalItems,
   contacts,
   contactTags,
   invitations,
@@ -70,6 +74,9 @@ type AccessCode = typeof buildingAccessCodes.$inferSelect;
 type AccessCodeInput = typeof buildingAccessCodes.$inferInsert;
 type RentPeriod = typeof rentPeriods.$inferSelect;
 type RentPeriodInput = typeof rentPeriods.$inferInsert;
+type CapitalItem = typeof capitalItems.$inferSelect;
+type CapitalItemInput = typeof capitalItems.$inferInsert;
+type CapitalItemAllocation = typeof capitalItemAllocations.$inferSelect;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -378,4 +385,69 @@ export async function createRentPeriod(
     .returning();
 
   return firstRow(rows, "rent_periods");
+}
+
+/**
+ * A shared gas furnace from 2009, estimated, at the catalogue's figures — the
+ * building's unless a `unitId` is given, and then scoped to that unit alone
+ * (`capital_items_allocation_scope` requires `building_only` of it, so the
+ * factory sets that too unless told otherwise). Takes the building as well as
+ * the org, both required, for `createUnit`'s reason.
+ *
+ * Written straight to the table, not through `addCapitalItems`, so a test says
+ * exactly what the row holds rather than what the catalogue would give it.
+ */
+export async function createCapitalItem(
+  orgId: string,
+  buildingId: string,
+  overrides: Partial<CapitalItemInput> = {},
+): Promise<CapitalItem> {
+  const rows = await testDb()
+    .insert(capitalItems)
+    .values({
+      orgId,
+      buildingId,
+      typeSlug: "furnace-gas",
+      label: "Gas furnace",
+      installYear: 2009,
+      expectedLifeYears: 20,
+      replacementCostCents: 480_000,
+      ...(overrides.unitId ? { allocation: "building_only" as const } : {}),
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "capital_items");
+}
+
+/**
+ * Makes a shared item's split explicit: the item's `allocation` and its shares
+ * in one transaction, because the rule that they sum to 10000 is judged at
+ * commit and would refuse either half alone. Takes the org and the building
+ * both, required, because both references out of a share name them.
+ */
+export async function splitCapitalItem(
+  orgId: string,
+  buildingId: string,
+  capitalItemId: string,
+  shares: readonly { unitId: string; shareBps: number }[],
+): Promise<CapitalItemAllocation[]> {
+  return await testDb().transaction(async (tx) => {
+    await tx
+      .update(capitalItems)
+      .set({ allocation: "explicit" })
+      .where(eq(capitalItems.id, capitalItemId));
+
+    return await tx
+      .insert(capitalItemAllocations)
+      .values(
+        shares.map((share) => ({
+          orgId,
+          buildingId,
+          capitalItemId,
+          ...share,
+        })),
+      )
+      .returning();
+  });
 }
