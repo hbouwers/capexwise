@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { BuildingFactsCard } from "@/components/buildings/building-facts-card";
 import { Money } from "@/components/money";
 import { PageBody, PageHeader } from "@/components/shell/page-header";
 import { StatTile, StatTiles } from "@/components/stat-tile";
@@ -23,13 +24,15 @@ import {
   unitCount,
 } from "@/lib/buildings";
 import { formatDate } from "@/lib/dates";
+import { getBuildingFacts } from "@/server/queries/building-facts";
 import { getBuilding, type UnitRecord } from "@/server/queries/buildings";
+import { listContacts } from "@/server/queries/contacts";
 
 /**
  * A building's page (`docs/ui/screens/building-detail.md`): its header, the
- * Summary's `Rent / mo` tile, and its units. The other regions — the rent
- * roll's checkoff, the facts card, recurring tasks, equipment — each come with
- * the issue that stores what they show, and the page grows downward as they do.
+ * Summary's `Rent / mo` tile, its units, and its facts. The other regions — the
+ * rent roll's checkoff, recurring tasks, equipment — each come with the issue
+ * that stores what they show, and the page grows downward as they do.
  *
  * `getBuilding()` answers `null` for an id that does not exist, one that is not
  * an id, and one in another org, and all three are the same 404.
@@ -51,6 +54,10 @@ export default async function BuildingPage({
   if (!detail) notFound();
 
   const { building } = detail;
+  const [facts, contacts] = await Promise.all([
+    getBuildingFacts(building.id),
+    listContacts(),
+  ]);
   // Retired units are history, not part of the building's figures.
   const units = detail.units.filter((unit) => unit.status !== "retired");
   const occupied = units.filter((unit) => unit.status === "occupied");
@@ -119,6 +126,23 @@ export default async function BuildingPage({
           </section>
 
           <UnitsCard units={units} rentCents={rentCents} />
+
+          <BuildingFactsCard
+            buildingId={building.id}
+            timezone={building.timezone}
+            facts={facts}
+            units={detail.units.map((unit) => ({
+              id: unit.id,
+              label: unit.label,
+              retired: unit.status === "retired",
+            }))}
+            contacts={contacts.map((contact) => ({
+              id: contact.id,
+              name: contact.name,
+              company: contact.company,
+              archived: contact.archivedAt !== null,
+            }))}
+          />
         </div>
       </PageBody>
     </>

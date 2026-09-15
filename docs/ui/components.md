@@ -261,9 +261,9 @@ These are the ones worth writing down, because each owns a rule.
 | `TradeChip` | One trade tag | `Badge` | Filter chips and display chips are the same chip in two states. Both live in `src/components/contacts/trade-chip.tsx`: the display chip a quiet sans tag, the filter chip a pill `<button aria-pressed>` with its count in the mono, pressed on `--accent-fill` |
 | `LifeBar` | Age against expected life | `Meter` | Thresholds 60 / 85 / 100 % → Healthy, Watch, Due soon, Past life. **Always paired with the percentage in text** |
 | `Meter` | A single-value bar | `Progress` | Track `--meter-track`, top-only radius on chart bars. Length is the encoding; colour is redundant ([tokens §11](tokens.md)) |
-| `MaskedValue` | Access codes | custom | Masked by default. **Fixed-width mask, reveal is a server action** — §9 |
-| `ScopeLabel` | `Shared`, or a unit's label | custom | **Not in the prototype**, which predates units. Scope is written, never only coloured, and a single-unit building renders none — [screens/README](screens/README.md#building-or-unit) |
-| `FactRow` / `FactGroup` | Label-over-value pairs in the facts card | custom | Four groups: Access, Services, Utility accounts, Average bill |
+| `MaskedValue` | Access codes | custom | Masked by default. **Fixed-width mask, reveal is a server action** — §9. Built with the facts card (#107), at `src/components/buildings/masked-value.tsx`: eight dots, one code per reveal, re-masked after 60 seconds or when the page is hidden |
+| `ScopeLabel` | `Shared`, or a unit's label | custom | **Not in the prototype**, which predates units. Scope is written, never only coloured, and a single-unit building renders none — [screens/README](screens/README.md#building-or-unit). Built at `src/components/scope-label.tsx`; the caller decides whether to render one |
+| `FactRow` / `FactGroup` | Label-over-value pairs in the facts card | custom | Four groups: Access, Services, Utility accounts, Average bill. Built as a `<dl>` per group, at `src/components/buildings/fact-group.tsx` |
 | `EmptyState` | **Not in the prototype** | custom | Title, one line, one action. Every list needs one; see §10 |
 | `PlanGate` | Wraps a premium surface | custom | Reads `can(org, feature)` from props, never from the client ([#29](https://github.com/hbouwers/capexwise/issues/29)). **Server-only**: a locked org's `children` are never rendered, so they are in neither the HTML nor the RSC payload. No upgrade button until billing gives it somewhere to go |
 | `PremiumBadge` | The `PREMIUM` pip | `Badge` | Cosmetic. `PlanGate` does the gating; this only labels it |
@@ -355,7 +355,8 @@ inventory exists to catch.
 | Component | Width | Notes |
 | --- | --- | --- |
 | `Modal` | — | Shell: `--radius-xl`, `--border-modal`, `--shadow-modal`, `--surface-overlay` scrim, `max-height: 88vh`, header / scrolling body / sticky footer. **Built** with the contact modal (#106), at `src/components/modal.tsx`: the width is a prop, it fills the viewport below `md`, and open state is the caller's, because a modal in the URL closes by navigating |
-| `ContactModal` | 560px | Name, company, trades, phone, email, rate note, notes. Archive and restore, and the discard question, ask in its footer ([contacts.md](screens/contacts.md#the-contact-modal)) |
+| `ContactModal` | 560px | Name, company, trades, phone, email, rate note, notes. Archive and restore, and the discard question, ask in its footer ([contacts.md](screens/contacts.md#the-contact-modal)). The footer's question is `FooterQuestion`, in `modal.tsx` since the facts editor asks one too |
+| Building facts editor | 720px | Access codes, services and utility accounts as rows, and the collection days. Opened from the facts card's `Edit`, and not in the URL ([building-detail.md](screens/building-detail.md#building-facts)) |
 | `TaskDetailModal` | 900px | Notes, date, assignee, priority, cost, make-recurring, contacts rail |
 | `QuoteWizard` | 900px | Steps 1–3 inside the same shell: pick recipients → compose → sent. **v2** (PRD F7) |
 | `AddEquipmentModal` | 920px | Catalog grouped by Kitchen / Laundry / HVAC & water / Envelope / Interior. Per-item scope choice is a PRD F2 requirement the prototype does not render — the checklist proposes building or unit and the user confirms ([#48](https://github.com/hbouwers/capexwise/issues/48)) |

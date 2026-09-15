@@ -152,9 +152,24 @@ and an **Owner-paid** total beneath a rule, summing only `paid_by = 'owner'`. Te
 listed because knowing them helps price a unit, and excluded from the total because the owner does
 not pay them.
 
-`Edit` opens a `Modal` with the four groups as form sections. **An access code field never shows
-the current code** — pre-filling it would mean decrypting every code to render a form. The field is
-empty with a `Replace code` placeholder, and leaving it empty keeps the code.
+`Edit` opens a `Modal`, 720px, with the card's groups as form sections. **An access code field
+never shows the current code** — pre-filling it would mean decrypting every code to render a form.
+The field is empty with a `Replace code` placeholder, and leaving it empty keeps the code; typing
+one replaces it and dates the `changed` note.
+
+- **Access** — a row per code: kind, label, scope on a multi-unit building, and the code. `Add a
+  code` adds one, whose code is required. Removing a row deletes the code on save.
+- **Services** — trash day, recycling day and its schedule, then a row per lawn or snow service:
+  company, contact from the contact book, average bill and who pays it. A service needs a company
+  or a contact.
+- **Utility accounts** — a row per account: kind, scope on a multi-unit building, provider, the
+  account number's last four characters, average bill, and who pays it. A longer account number is
+  refused with a message rather than cut to four, because the first four are the wrong four.
+
+**Average bill is a field on each row, not a fourth section.** A bill belongs to its account, and a
+section of its own would ask for it away from the row it belongs to; the card still shows it as its
+own group, where the owner-paid total needs it. Closing a changed form asks `Discard your changes?`,
+the contact modal's rule.
 
 ### Recurring tasks
 
