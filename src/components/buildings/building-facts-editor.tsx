@@ -64,7 +64,7 @@ import { saveBuildingFacts } from "@/server/actions/building-facts";
  * changed form asks first, as the contact modal does, and for its reason.
  */
 
-export type UnitOption = { id: string; label: string };
+export type UnitOption = { id: string; label: string; retired: boolean };
 
 export type ContactOption = {
   id: string;
@@ -140,7 +140,7 @@ export function BuildingFactsEditor({
 }: {
   buildingId: string;
   initial: BuildingFactsFields;
-  /** The units a row may be scoped to. */
+  /** Every unit, retired ones included; each row offers what it may use. */
   units: readonly UnitOption[];
   /** Whether to ask for a scope at all — a single-unit building does not. */
   multiUnit: boolean;
@@ -917,7 +917,11 @@ function contactLabel(contact: ContactOption): string {
   return contact.archived ? `${name} (archived)` : name;
 }
 
-/** Which unit a row belongs to, or `Shared` — only on a multi-unit building. */
+/**
+ * Which unit a row belongs to, or `Shared` — only on a multi-unit building. A
+ * retired unit is offered only to the row already on it, so a save does not
+ * move that row; nothing new is put on one.
+ */
 function ScopeField({
   name,
   value,
@@ -930,7 +934,8 @@ function ScopeField({
   onChange: (unitId: string) => void;
 }) {
   const SHARED = "shared";
-  const chosen = units.find((unit) => unit.id === value);
+  const offered = units.filter((unit) => !unit.retired || unit.id === value);
+  const chosen = offered.find((unit) => unit.id === value);
 
   return (
     <Field name={name} label="Scope">
@@ -944,7 +949,7 @@ function ScopeField({
           </SelectTrigger>
           <SelectContent position="popper">
             <SelectItem value={SHARED}>Shared</SelectItem>
-            {units.map((unit) => (
+            {offered.map((unit) => (
               <SelectItem key={unit.id} value={unit.id}>
                 {unit.label}
               </SelectItem>

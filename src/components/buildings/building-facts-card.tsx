@@ -50,7 +50,7 @@ export function BuildingFactsCard({
   timezone: string;
   facts: BuildingFactsRecord;
   /** Every unit, retired ones included, in label order. */
-  units: readonly (UnitOption & { retired: boolean })[];
+  units: readonly UnitOption[];
   contacts: readonly ContactOption[];
 }) {
   const unitLabels = new Map(units.map((unit) => [unit.id, unit.label]));
@@ -87,14 +87,7 @@ export function BuildingFactsCard({
         <BuildingFactsEditor
           buildingId={buildingId}
           initial={buildingFactsFields(facts)}
-          // A retired unit is offered only to the rows already on it, so a
-          // save does not move them; nothing new is put on one.
-          units={units.filter(
-            (unit) =>
-              !unit.retired ||
-              facts.utilities.some((row) => row.unitId === unit.id) ||
-              facts.accessCodes.some((row) => row.unitId === unit.id),
-          )}
+          units={units}
           multiUnit={multiUnit}
           contacts={contacts}
         />
@@ -210,24 +203,27 @@ function ServiceRow({ service }: { service: UtilityRecord }) {
   const phone = contact?.phone ?? null;
   const href = phone ? telHref(phone) : null;
 
-  const reach = contact ? (
-    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      {service.providerName ? <span>{contact.name}</span> : null}
-      {phone ? (
-        href ? (
-          <a
-            href={href}
-            className="inline-flex min-h-11 items-center gap-1.5 text-accent underline-offset-3 hover:underline md:min-h-0"
-          >
-            <PhoneIcon aria-hidden className="size-3" />
+  // Only when there is something to add: the contact's name is the value
+  // itself when there is no company, and without a phone that leaves nothing.
+  const reach =
+    contact && (service.providerName || phone) ? (
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {service.providerName ? <span>{contact.name}</span> : null}
+        {phone ? (
+          href ? (
+            <a
+              href={href}
+              className="inline-flex min-h-11 items-center gap-1.5 text-accent underline-offset-3 hover:underline md:min-h-0"
+            >
+              <PhoneIcon aria-hidden className="size-3" />
+              <Numeric>{phone}</Numeric>
+            </a>
+          ) : (
             <Numeric>{phone}</Numeric>
-          </a>
-        ) : (
-          <Numeric>{phone}</Numeric>
-        )
-      ) : null}
-    </span>
-  ) : null;
+          )
+        ) : null}
+      </span>
+    ) : null;
 
   return (
     <FactRow
