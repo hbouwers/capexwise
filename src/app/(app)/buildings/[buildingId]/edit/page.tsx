@@ -48,6 +48,9 @@ export default async function EditBuildingPage({
             historic={units
               .filter((unit) => unit.hasRentHistory)
               .map((unit) => unit.id)}
+            equipped={units
+              .filter((unit) => unit.hasEquipment)
+              .map((unit) => unit.id)}
           />
           {building.status === "sold" ? null : (
             <ArchiveBuilding

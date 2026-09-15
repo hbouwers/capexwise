@@ -10,3 +10,4 @@ export * from "./buildings";
 export * from "./contacts";
 export * from "./building-facts";
 export * from "./rent-periods";
+export * from "./capital-items";

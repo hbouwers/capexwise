@@ -91,6 +91,7 @@ import {
   createAccessCode,
   createBuilding,
   createBuildingFacts,
+  createCapitalItem,
   createContact,
   createInvitation,
   createMembership,
@@ -99,6 +100,7 @@ import {
   createUnit,
   createUser,
   createUtility,
+  splitCapitalItem,
   tagContact,
   TEST_ACCESS_CODE_KEYS,
 } from "@/test/factories";
@@ -169,6 +171,8 @@ const { getBuildingFacts } = await import("@/server/queries/building-facts");
 const { markRentPaid, openRentPeriod, saveRentPeriod, unmarkRentPaid } =
   await import("@/server/actions/rent-periods");
 const { getRentRoll } = await import("@/server/queries/rent-periods");
+const { addCapitalItems, recordReplacement } =
+  await import("@/server/actions/capital-items");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -190,12 +194,14 @@ const ORG_OWNED = {
   building_utilities: "org_id",
   building_access_codes: "org_id",
   rent_periods: "org_id",
+  capital_items: "org_id",
+  capital_item_allocations: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
  * Every table with no org, by name, and why. Written down rather than left out,
  * so that a reader finds a decision instead of an omission — which is what
- * `docs/data-model.md` §5 asks for `capital_item_types` when it arrives.
+ * `docs/data-model.md` §5 asks for `capital_item_types`.
  *
  * The reference data among them is also on `REFERENCE_TABLES`, in the harness,
  * which the registry holds to being readable by the scoped role and writable
@@ -204,6 +210,8 @@ const ORG_OWNED = {
 const OUTSIDE_THE_BOUNDARY: Record<string, string> = {
   trade_tags:
     "Reference data: one trade list every org reads and only a migration writes (data-model §6).",
+  capital_item_types:
+    "Reference data: one catalogue every org reads and only a migration writes. An item copies its defaults when it is added, so nothing reads across orgs through it (data-model §5).",
   users:
     "Identity sits above the boundary: one account, any number of orgs (data-model §2).",
   sessions:
@@ -379,6 +387,23 @@ async function seedTwoOrgs() {
     // label or the month would find a period in each org.
     const rentPeriod = await createRentPeriod(org.id, building.id, unit.id);
 
+    // Both scopes §9 asks for, because `unit_id` is a scope and never a
+    // boundary: a furnace shared by the building and split explicitly — so
+    // it has a share — and a refrigerator in unit A. The same two on both
+    // sides, by type, label and year.
+    const sharedItem = await createCapitalItem(org.id, building.id);
+    await splitCapitalItem(org.id, building.id, sharedItem.id, [
+      { unitId: unit.id, shareBps: 10_000 },
+    ]);
+    const unitItem = await createCapitalItem(org.id, building.id, {
+      unitId: unit.id,
+      typeSlug: "refrigerator",
+      label: "Refrigerator",
+      installYear: 2016,
+      expectedLifeYears: 10,
+      replacementCostCents: 160_000,
+    });
+
     return {
       org,
       owner,
@@ -393,6 +418,8 @@ async function seedTwoOrgs() {
       utility,
       accessCode,
       rentPeriod,
+      sharedItem,
+      unitItem,
     };
   }
 
@@ -430,6 +457,8 @@ function identifiersOf(side: Side): string[] {
     side.utility.id,
     side.accessCode.id,
     side.rentPeriod.id,
+    side.sharedItem.id,
+    side.unitItem.id,
   ];
 }
 
@@ -1739,6 +1768,85 @@ describe("the rent roll paths", () => {
 });
 
 /**
+ * The equipment paths — `src/server/actions/capital-items.ts` — judged as the
+ * building paths are. Both orgs have the same furnace and the same
+ * refrigerator in a unit labelled `A`, so a write keyed on a type, a label or
+ * a unit's label would find one in each; it is the ids that tell.
+ */
+describe("the capital item paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  const roof = { type: "roof-asphalt", scope: "shared", installYear: 2014 };
+  const replaced = { installedOn: "2026-08-02", cost: "$7,420" };
+
+  it("adds to the caller's building, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const theirs = await addCapitalItems(b.building.id, { items: [roof] });
+    expect(theirs.ok).toBe(false);
+    expect(mentionsB(theirs, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect((await addCapitalItems(a.building.id, { items: [roof] })).ok).toBe(
+      true,
+    );
+    expect((await rowsOwnedBy(a.org.id)).capital_items).toHaveLength(3);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses the other org's unit smuggled in as a scope", async () => {
+    // The unit is a lookup into A's building's own units. B's is not one, so
+    // the add is refused whole — the roof beside it is not added either.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const theirs = await rowsOwnedBy(b.org.id);
+    const mine = await rowsOwnedBy(a.org.id);
+
+    const result = await addCapitalItems(a.building.id, {
+      items: [
+        roof,
+        { type: "refrigerator", scope: b.unit.id, installYear: 2019 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
+    expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
+  });
+
+  it("replaces the caller's item, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const item of [b.sharedItem, b.unitItem]) {
+      const theirs = await recordReplacement(item.id, replaced);
+      expect(theirs.ok).toBe(false);
+      expect(mentionsB(theirs, b)).toEqual([]);
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control, and the shared one: its share comes over with it.
+    expect((await recordReplacement(a.sharedItem.id, replaced)).ok).toBe(true);
+    const owned = await rowsOwnedBy(a.org.id);
+    expect(owned.capital_items).toHaveLength(3);
+    expect(owned.capital_item_allocations).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+/**
  * A scoped handle for the owner of `side`'s org, reached the way every domain
  * query will reach one: a signed session, then `getOrgContext()`. Not
  * `forOrg()`, which ESLint keeps out of this file for the reason
@@ -1815,15 +1923,16 @@ describe.each(Object.entries(ORG_OWNED))(
 
       // Three acceptable outcomes, and which one a table gets is the
       // migration's decision rather than this test's: `organizations`,
-      // `contacts`, `building_facts` and `rent_periods` have no DELETE grant
-      // for the scoped role — an org is soft-deleted and the purge is not a
-      // request, a contact is archived, a building's facts are cleared rather
-      // than removed, and a vacant month is marked rather than deleted — so
-      // they are refused before any row is considered. `buildings` is refused
-      // by its units' `restrict`, because every seeded building has one (§7:
-      // archived, not deleted), and `units` by the electric account and the
-      // month of rent on each. The others may delete, and must delete only
-      // A's. A refusal rolls the transaction back, and the snapshot below is
+      // `contacts`, `building_facts`, `rent_periods`, `capital_items` and
+      // `capital_item_allocations` have no DELETE grant for the scoped role —
+      // an org is soft-deleted and the purge is not a request, a contact is
+      // archived, a building's facts are cleared rather than removed, a vacant
+      // month is marked rather than deleted, and equipment is replaced or
+      // removed by its status — so they are refused before any row is
+      // considered. `buildings` is refused by its units' `restrict`, because
+      // every seeded building has one (§7: archived, not deleted), and
+      // `units` by the electric account, the month of rent and the equipment
+      // on each. The others may delete, and must delete only A's. A refusal rolls the transaction back, and the snapshot below is
       // what says B was never touched either way.
       const outcome = await db
         .run((tx) =>
@@ -2031,6 +2140,36 @@ describe("a reference from one org's row to another's", () => {
         sql`update rent_periods set building_id = ${b.building.id}
             where id = ${a.rentPeriod.id}`,
     ],
+    [
+      "an item on another org's building",
+      (a: Side, b: Side) =>
+        sql`insert into capital_items (org_id, building_id, label, install_year, expected_life_years, replacement_cost_cents)
+            values (${a.org.id}, ${b.building.id}, 'Gas furnace', 2009, 20, 480000)`,
+    ],
+    [
+      "an item in another org's unit",
+      (a: Side, b: Side) =>
+        sql`update capital_items set unit_id = ${b.unit.id}
+            where id = ${a.unitItem.id}`,
+    ],
+    [
+      "an item replaced by another org's",
+      (a: Side, b: Side) =>
+        sql`update capital_items set status = 'replaced', replaced_by_id = ${b.unitItem.id}
+            where id = ${a.unitItem.id}`,
+    ],
+    [
+      "a share of another org's item",
+      (a: Side, b: Side) =>
+        sql`insert into capital_item_allocations (org_id, building_id, capital_item_id, unit_id, share_bps)
+            values (${a.org.id}, ${a.building.id}, ${b.sharedItem.id}, ${a.unit.id}, 10000)`,
+    ],
+    [
+      "a share given to another org's unit",
+      (a: Side, b: Side) =>
+        sql`update capital_item_allocations set unit_id = ${b.unit.id}
+            where capital_item_id = ${a.sharedItem.id}`,
+    ],
   ])("refuses %s", async (_, statement) => {
     const { a, b } = await seedTwoOrgs();
     const db = await scopedHandleFor(a);
@@ -2059,5 +2198,36 @@ describe("a reference from one org's row to another's", () => {
     );
 
     expect((await rowsOwnedBy(a.org.id)).rent_periods).toHaveLength(2);
+  });
+
+  // The control for the five equipment cases: a new shared item on A's own
+  // building, split explicitly to A's own unit and replacing A's furnace.
+  // The split's sum is judged at commit, as the scoped role — through the
+  // same policies, which is the claim `0019` makes about it.
+  it("lets an item, a share and a replacement onto the scoped org's own rows", async () => {
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run(async (tx) => {
+      const { rows } = await tx.execute<{ id: string }>(
+        sql`insert into capital_items (org_id, building_id, label, install_year, expected_life_years, replacement_cost_cents, allocation)
+            values (${a.org.id}, ${a.building.id}, 'Boiler', 2026, 25, 590000, 'explicit')
+            returning id`,
+      );
+      const successor = rows[0]!.id;
+
+      await tx.execute(
+        sql`insert into capital_item_allocations (org_id, building_id, capital_item_id, unit_id, share_bps)
+            values (${a.org.id}, ${a.building.id}, ${successor}, ${a.unit.id}, 10000)`,
+      );
+      await tx.execute(
+        sql`update capital_items set status = 'replaced', replaced_by_id = ${successor}
+            where id = ${a.sharedItem.id}`,
+      );
+    });
+
+    const owned = await rowsOwnedBy(a.org.id);
+    expect(owned.capital_items).toHaveLength(3);
+    expect(owned.capital_item_allocations).toHaveLength(2);
   });
 });

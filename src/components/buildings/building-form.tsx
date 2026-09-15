@@ -109,6 +109,7 @@ export function BuildingForm({
   mode,
   initial,
   historic = [],
+  equipped = [],
 }: {
   mode: Mode;
   initial: BuildingFields;
@@ -118,6 +119,11 @@ export function BuildingForm({
    * the remove button.
    */
   historic?: readonly string[];
+  /**
+   * The units with equipment recorded against them, which are retired for
+   * the same reason.
+   */
+  equipped?: readonly string[];
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -458,6 +464,7 @@ export function BuildingForm({
               }
               removable={activeRows > 1 || row.status === "retired"}
               historic={row.id !== null && historic.includes(row.id)}
+              equipped={row.id !== null && equipped.includes(row.id)}
               onChange={(patch) => setRow(index, patch)}
               onRemove={() => removeRow(index)}
             />
@@ -690,6 +697,7 @@ function UnitRow({
   rentChanged,
   removable,
   historic,
+  equipped,
   onChange,
   onRemove,
 }: {
@@ -700,6 +708,8 @@ function UnitRow({
   removable: boolean;
   /** Whether it has rent recorded, and so is retired rather than removed. */
   historic: boolean;
+  /** Whether it has equipment recorded, and so is retired too. */
+  equipped: boolean;
   onChange: (patch: Partial<UnitFields>) => void;
   onRemove: () => void;
 }) {
@@ -717,6 +727,10 @@ function UnitRow({
           {historic ? (
             <span className="block text-xs leading-snug">
               Its months stay on the rent roll.
+            </span>
+          ) : equipped ? (
+            <span className="block text-xs leading-snug">
+              Its equipment stays on the building’s page.
             </span>
           ) : null}
         </span>
@@ -793,9 +807,10 @@ function UnitRow({
           index !== 0 && "sm:pt-0",
         )}
       >
-        {removable && historic ? (
-          // A unit with rent history is never deleted: retiring keeps its
-          // months where they were recorded, and the save refuses a delete.
+        {removable && (historic || equipped) ? (
+          // A unit with rent history or equipment is never deleted: retiring
+          // keeps its months and its equipment where they were recorded, and
+          // the save refuses a delete.
           <Button
             type="button"
             variant="ghost"

@@ -14,7 +14,13 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { cache } from "react";
 import { z } from "zod";
 
-import { buildings, rentPeriods, units } from "@/db/schema";
+import {
+  buildings,
+  capitalItemAllocations,
+  capitalItems,
+  rentPeriods,
+  units,
+} from "@/db/schema";
 import { compareUnitLabels } from "@/lib/buildings";
 import { getOrgContext } from "@/server/org-context";
 
@@ -102,6 +108,11 @@ export type UnitRecord = Pick<
    * offers `Retire` in its place.
    */
   hasRentHistory: boolean;
+  /**
+   * Whether it has equipment of its own, or a share of a shared item split
+   * explicitly — history as much as rent is (§7), so it is retired too.
+   */
+  hasEquipment: boolean;
 };
 
 export type BuildingDetail = {
@@ -167,11 +178,39 @@ export const getBuilding = cache(async function getBuilding(
       );
     const withHistory = new Set(historic.map((row) => row.unitId));
 
+    // And which of them hold equipment, by the building's items and shares.
+    const equipped = new Set(
+      [
+        ...(await tx
+          .selectDistinct({ unitId: capitalItems.unitId })
+          .from(capitalItems)
+          .where(
+            and(
+              eq(capitalItems.orgId, db.orgId),
+              eq(capitalItems.buildingId, building.id),
+            ),
+          )),
+        ...(await tx
+          .selectDistinct({ unitId: capitalItemAllocations.unitId })
+          .from(capitalItemAllocations)
+          .where(
+            and(
+              eq(capitalItemAllocations.orgId, db.orgId),
+              eq(capitalItemAllocations.buildingId, building.id),
+            ),
+          )),
+      ].map((row) => row.unitId),
+    );
+
     // Sorted here rather than in SQL: "Unit 10" after "Unit 9" is a collation
     // Postgres's default does not do, and `compareUnitLabels` is the one the
     // rest of the product uses.
     const unitRecords = rows
-      .map((unit) => ({ ...unit, hasRentHistory: withHistory.has(unit.id) }))
+      .map((unit) => ({
+        ...unit,
+        hasRentHistory: withHistory.has(unit.id),
+        hasEquipment: equipped.has(unit.id),
+      }))
       .sort((a, b) => compareUnitLabels(a.label, b.label));
 
     return { building, units: unitRecords };
