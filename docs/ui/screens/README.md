@@ -233,7 +233,7 @@ specs left it.
 | **Assigning to yourself or a member** — `assignee_contact_id` names only contacts | [#94](https://github.com/hbouwers/capexwise/issues/94) | [Task modal](modal-task-detail.md#the-form); PRD §5's small groups | A nullable `assignee_user_id` beside it, at most one of the two set |
 | ~~**A contact's rate** — `$75 / hr`, `Bid basis`~~ | [#95](https://github.com/hbouwers/capexwise/issues/95) | [Contacts](contacts.md#the-contact-modal), the task modal's rail, the quote wizard | **Settled:** `contacts.rate_note text`, free text ([data-model §6](../../data-model.md)), with #106 |
 | **A planned year and a planned classification** for work not yet done | [#96](https://github.com/hbouwers/capexwise/issues/96) | [Tax planner](tax-planner.md#repair-or-improvement)'s decisions and levers, saving a forecast deferral, F8's `Apply to plan` | Nullable `planned_year` and `planned_classification` on `capital_items`. v1, and it blocks F4's decisions card |
-| **A past month whose occupancy differs from today's** — periods open on the unit's *current* status, so back-filling a month a unit stood empty opens one that should not exist, and a month it was let, while vacant now, opens none | [#97](https://github.com/hbouwers/capexwise/issues/97) | [Rent roll](building-detail.md#units--rent) | A marker on the period that the unit stood empty, left out of both halves of every total. Not a deleted row: periods open on first view ([data-model §4](../../data-model.md)), so the next view would reopen it |
+| ~~**A past month whose occupancy differs from today's**~~ | [#97](https://github.com/hbouwers/capexwise/issues/97) | [Rent roll](building-detail.md#units--rent) | **Settled** with #108 ([data-model §4](../../data-model.md)): a `vacant` flag on the period, left out of both halves of every total, and `Record rent`, which opens a month for a unit with no period with the expected amount typed |
 
 And the rules a screen needs in order to display a figure, proposed here and owned by the module
 that computes them — each wants a unit test before it is trusted:
@@ -245,7 +245,7 @@ that computes them — each wants a unit test before it is trusted:
 | Systems life used | Replacement-cost-weighted mean of age over life, each item capped at 100% | [Portfolio](portfolio.md#your-buildings) |
 | Building flag | Past life, then due soon, then a big-ticket year within three, then healthy | [Portfolio](portfolio.md#your-buildings) |
 | Reserve needed / mo | The smallest level contribution that keeps the reserve at or above zero for ten years | [Forecast](capex-forecast.md#ten-year-capital-plan) |
-| Marking a past month paid | Records it on the period's first day, not today | [Rent roll](building-detail.md#units--rent) |
+| Marking a past month paid | Records it on the period's first day, not today. **Settled** with #108: `paidOn` in `src/lib/rent.ts` | [Rent roll](building-detail.md#units--rent) |
 
 ---
 
