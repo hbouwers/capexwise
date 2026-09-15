@@ -25,6 +25,8 @@ import {
   buildingAccessCodes,
   buildings,
   buildingUtilities,
+  capitalItemAllocations,
+  capitalItems,
   rentPeriods,
   units,
 } from "@/db/schema";
@@ -132,11 +134,12 @@ export async function createBuilding(
  * Removing a unit is a delete, and only a unit with no rent history can be
  * removed: one with months of rent is retired instead (`docs/data-model.md`
  * §7), which the form offers in its place, and a submission that removes one
- * anyway is refused with the units named. Two things on the building's facts
- * hang off a unit as well (§3). A utility account holds the unit back until
- * the account is moved or removed, and the save says which unit. An access
- * code goes with its unit, and is recorded as removed, as a code removed in
- * the facts editor is (ADR-0008).
+ * anyway is refused with the units named. Equipment holds a unit back the
+ * same way — its own items, or its share of a shared one split explicitly
+ * (§5). Two things on the building's facts hang off a unit as well (§3). A
+ * utility account holds the unit back until the account is moved or removed,
+ * and the save says which unit. An access code goes with its unit, and is
+ * recorded as removed, as a code removed in the facts editor is (ADR-0008).
  */
 export async function updateBuilding(
   buildingId: unknown,
@@ -206,6 +209,40 @@ export async function updateBuilding(
         return {
           ok: false,
           errors: { units: unitsWithRent(held.map((unit) => unit.label)) },
+        };
+      }
+
+      // Equipment is history too (§7): a unit's own items, and its share of
+      // a shared one split explicitly. Retiring keeps both where they are.
+      const equipped = [
+        ...(await tx
+          .selectDistinct({ unitId: capitalItems.unitId })
+          .from(capitalItems)
+          .where(
+            and(
+              eq(capitalItems.orgId, db.orgId),
+              inArray(capitalItems.unitId, removedIds),
+            ),
+          )),
+        ...(await tx
+          .selectDistinct({ unitId: capitalItemAllocations.unitId })
+          .from(capitalItemAllocations)
+          .where(
+            and(
+              eq(capitalItemAllocations.orgId, db.orgId),
+              inArray(capitalItemAllocations.unitId, removedIds),
+            ),
+          )),
+      ];
+
+      if (equipped.length > 0) {
+        const held = removed.filter((unit) =>
+          equipped.some((row) => row.unitId === unit.id),
+        );
+
+        return {
+          ok: false,
+          errors: { units: unitsWithEquipment(held.map((unit) => unit.label)) },
         };
       }
 
@@ -340,6 +377,18 @@ function unitsWithRent(labels: readonly string[]): string {
   return labels.length === 1
     ? `Unit ${names} has rent recorded, so it can’t be removed. Retire it instead — its months stay on the rent roll.`
     : `Units ${names} have rent recorded, so they can’t be removed. Retire them instead — their months stay on the rent roll.`;
+}
+
+/**
+ * The units list's message when a unit removed on this form has equipment
+ * recorded against it — its own, or a share of a shared item.
+ */
+function unitsWithEquipment(labels: readonly string[]): string {
+  const names = quotedList(labels);
+
+  return labels.length === 1
+    ? `Unit ${names} has equipment recorded, so it can’t be removed. Retire it instead — its equipment stays on the building’s page.`
+    : `Units ${names} have equipment recorded, so they can’t be removed. Retire them instead — their equipment stays on the building’s page.`;
 }
 
 /**

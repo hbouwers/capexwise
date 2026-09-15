@@ -171,6 +171,8 @@ const { getBuildingFacts } = await import("@/server/queries/building-facts");
 const { markRentPaid, openRentPeriod, saveRentPeriod, unmarkRentPaid } =
   await import("@/server/actions/rent-periods");
 const { getRentRoll } = await import("@/server/queries/rent-periods");
+const { addCapitalItems, recordReplacement } =
+  await import("@/server/actions/capital-items");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1761,6 +1763,85 @@ describe("the rent roll paths", () => {
       ok: true,
     });
     expect((await rowsOwnedBy(a.org.id)).rent_periods).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+/**
+ * The equipment paths — `src/server/actions/capital-items.ts` — judged as the
+ * building paths are. Both orgs have the same furnace and the same
+ * refrigerator in a unit labelled `A`, so a write keyed on a type, a label or
+ * a unit's label would find one in each; it is the ids that tell.
+ */
+describe("the capital item paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  const roof = { type: "roof-asphalt", scope: "shared", installYear: 2014 };
+  const replaced = { installedOn: "2026-08-02", cost: "$7,420" };
+
+  it("adds to the caller's building, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    const theirs = await addCapitalItems(b.building.id, { items: [roof] });
+    expect(theirs.ok).toBe(false);
+    expect(mentionsB(theirs, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect((await addCapitalItems(a.building.id, { items: [roof] })).ok).toBe(
+      true,
+    );
+    expect((await rowsOwnedBy(a.org.id)).capital_items).toHaveLength(3);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("refuses the other org's unit smuggled in as a scope", async () => {
+    // The unit is a lookup into A's building's own units. B's is not one, so
+    // the add is refused whole — the roof beside it is not added either.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const theirs = await rowsOwnedBy(b.org.id);
+    const mine = await rowsOwnedBy(a.org.id);
+
+    const result = await addCapitalItems(a.building.id, {
+      items: [
+        roof,
+        { type: "refrigerator", scope: b.unit.id, installYear: 2019 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mentionsB(result, b)).toEqual([]);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
+    expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
+  });
+
+  it("replaces the caller's item, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const item of [b.sharedItem, b.unitItem]) {
+      const theirs = await recordReplacement(item.id, replaced);
+      expect(theirs.ok).toBe(false);
+      expect(mentionsB(theirs, b)).toEqual([]);
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control, and the shared one: its share comes over with it.
+    expect((await recordReplacement(a.sharedItem.id, replaced)).ok).toBe(true);
+    const owned = await rowsOwnedBy(a.org.id);
+    expect(owned.capital_items).toHaveLength(3);
+    expect(owned.capital_item_allocations).toHaveLength(2);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });

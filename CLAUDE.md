@@ -16,10 +16,13 @@ with the first reference data seeded by a migration — #106; the other three de
 placeholders. A building's facts — collection days, utilities and services, and access codes sealed
 in the application and revealed one at a time — are on its page — #107. Rent is tracked a month at
 a time on the building's rent roll, with the Paid checkoff, a month that stood vacant, and rent
-recorded for a unit that was let then — #108. Capital items, the forecast, the tax planner and the
-rest of what the product is *for* are still unwritten. Rules below that describe
-runtime behaviour describe what the code *will* do — they are the contract to build against, not
-a description of something already working. Anything already true is marked as such.
+recorded for a unit that was let then — #108. The capital item catalogue is seeded with sourced
+national defaults, and capital items and their explicit splits are stored, with the allocation rule,
+adding from the catalogue and recording a replacement behind them — #109; no screen draws them yet.
+The forecast, the tax planner and the rest of what the product is *for* are still unwritten. Rules
+below that describe runtime behaviour describe what the code *will* do — they are the contract to
+build against, not a description of something already working. Anything already true is marked as
+such.
 
 Read `docs/PRD.md` first. It is the product brain and it is current.
 
@@ -213,7 +216,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Typeface | **IBM Plex Sans + IBM Plex Mono**, self-hosted via `next/font`, weights 400/500/600 ([components](docs/ui/components.md) §12). Every number that is a *value* renders in the mono; everything else in the sans. Rejected: the prototype's system stack — Arial and Segoe UI have no Medium, so 45 deliberate 500/600 weights collapse to two on Windows, and their digits are unrelated to the mono's |
 | Expense entry | **In v1** (PRD §12, question 5). Rent periods gave money-in; without money-out the F0 cash flow tile is half a number and the F4 Schedule E runs on assumptions. `transactions` was already fully specified in [data-model](docs/data-model.md) §6, so this cost no schema design — the migration ships with the feature. Still the largest single scope item in v1, and it adds a screen the prototype never drew (#12) |
 | Building vs unit | A **building** is the address; a **unit** is a separately-leased space inside it. Two duplexes are two buildings and four units. Capital items and tasks carry a nullable `unit_id` — null means building-shared (#48). Never call a building a property; three uses of "property" in the docs are a tax or trade sense and are deliberately left alone |
-| Default service lives | **National defaults, user-overridable** (PRD §12, question 4). The fix for regional variance is a per-org override, not a climate-zone question at signup — onboarding speed is already a first-class design problem (#39). Drives the `capital_item_types` seed (#34): one national default per item type, editable per org, with a visible `defaults_updated_at` |
+| Default service lives | **National defaults, user-overridable** (PRD §12, question 4). The fix for regional variance is a per-org override, not a climate-zone question at signup — onboarding speed is already a first-class design problem (#39). Drives the `capital_item_types` seed (#109): one national default per item type, editable per org, with a visible `defaults_updated_at` |
 | Access-code encryption | **AES-256-GCM in the application**, bound to the org, keyed by a per-environment `ACCESS_CODE_KEYS` ([ADR-0008](docs/adr/0008-access-code-encryption.md)). Rejected: `pgcrypto`, which makes the code and the key bound parameters, and Drizzle prints every bound parameter of a failed query; envelope encryption, which buys nothing without a KMS and is the Cloud Run move. Utility `account_ref` stays a four-character stub and is not encrypted |
 | Backups | **Nightly `pg_dump` as `capexwise_reader`, restored and compared on the runner before it is kept, `age`-encrypted, in an S3-compatible bucket outside Neon and GitHub, kept 90 days** ([ADR-0010](docs/adr/0010-backups.md)). Neon's 6-hour history covers the hours since. The reader reads through a read policy on every table rather than bypassing row-level security, so every new table needs its `select` grant and, if it has row-level security, the policy — docs/data-model.md §9. Rejected: Neon's backups alone (6 hours, and not independent), dumping as the owner (every domain table comes out empty), GitHub artifacts |
 | Portfolio forecasting | **In v1** (PRD §12, question 6). The dashboard rollup (F0) was already settled and in v1; the 10-year forecast and reserve projection get the same portfolio view in v1 rather than staying per-building until v1.1 |
