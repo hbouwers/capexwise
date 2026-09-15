@@ -10,7 +10,7 @@
  */
 import "server-only";
 
-import { and, count, desc, eq, isNull, lt, not, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNull, lt, not, sql } from "drizzle-orm";
 
 import { rentPeriods, units } from "@/db/schema";
 import { type CalendarDate, todayIn } from "@/lib/dates";
@@ -158,6 +158,10 @@ export async function getRentRoll(
                 eq(rentPeriods.orgId, db.orgId),
                 eq(rentPeriods.buildingId, building.id),
                 lt(rentPeriods.periodMonth, month),
+                // Only months the switcher can reach, so every line is a
+                // link that lands on its month. One from before an
+                // acquisition date entered later is not this roll's.
+                gte(rentPeriods.periodMonth, range.earliest),
                 isNull(rentPeriods.amountReceivedCents),
                 not(rentPeriods.vacant),
               ),

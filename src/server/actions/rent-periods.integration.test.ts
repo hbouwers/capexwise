@@ -233,6 +233,26 @@ describe("getRentRoll", () => {
     expect(past?.unmarked).toEqual([]);
   });
 
+  it("names no earlier month the switcher cannot reach", async () => {
+    // Opened while the acquisition was not entered, then left behind by it:
+    // a line for three months back would link to a month the switcher clamps
+    // away, and could never be answered.
+    const { org, building, a } = await duplex();
+    await createRentPeriod(org.id, building.id, a.id, {
+      periodMonth: addMonths(thisMonth, -3),
+    });
+    await createRentPeriod(org.id, building.id, a.id, {
+      periodMonth: lastMonth,
+    });
+    await testDb()
+      .update(buildings)
+      .set({ acquiredOn: addMonths(thisMonth, -2) })
+      .where(eq(buildings.id, building.id));
+
+    const roll = await getRentRoll(building.id, undefined);
+    expect(roll?.unmarked).toEqual([{ month: lastMonth, count: 1 }]);
+  });
+
   it("keeps a retired unit's month, and leaves it out where it has none", async () => {
     const { org, building, b } = await duplex();
     await createRentPeriod(org.id, building.id, b.id, {
@@ -517,5 +537,52 @@ describe("updateBuilding, once a unit has rent history", () => {
 
     expect(result).toEqual({ ok: true, buildingId: building.id });
     expect(await periodsOf(a.id)).toHaveLength(1);
+  });
+
+  it("gives the same answer when the unit's first month opens while the save runs", async () => {
+    // The race the check cannot see: A's month is opened by another
+    // connection — a view of the page — and not yet committed when the save
+    // reads A's history. The save's delete then waits on that insert's lock
+    // on A, and meets the committed month as a `restrict`.
+    const { org, building, a, b } = await duplex();
+    const detail = (await getBuilding(building.id))!;
+    const fields = buildingFields(detail.building, detail.units);
+
+    let opened!: () => void;
+    let release!: () => void;
+    const inserted = new Promise<void>((resolve) => (opened = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+
+    const view = testDb().transaction(async (tx) => {
+      await tx.insert(rentPeriods).values({
+        orgId: org.id,
+        buildingId: building.id,
+        unitId: a.id,
+        periodMonth: thisMonth,
+        amountExpectedCents: 230_000,
+      });
+      opened();
+      await held;
+    });
+    await inserted;
+
+    const saving = updateBuilding(building.id, {
+      ...fields,
+      units: fields.units.filter((unit) => unit.id === b.id),
+    });
+    // Long enough for the save to pass its check and reach the delete.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    release();
+    await view;
+
+    expect(await saving).toEqual({
+      ok: false,
+      errors: {
+        units:
+          "A unit you removed has had rent recorded since you opened this form. Reload the page and retire it instead — its months stay on the rent roll.",
+      },
+    });
+    expect(await periodsOf(a.id)).toHaveLength(1);
+    expect((await getBuilding(building.id))?.units).toHaveLength(2);
   });
 });

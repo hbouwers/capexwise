@@ -30,8 +30,13 @@ import {
 } from "@/db/schema";
 import { type UnitValues, validateBuilding } from "@/lib/building-form";
 import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
+import { sqlState } from "@/lib/query-errors";
 import { recordAccessCodeEvent } from "@/server/access-codes";
-import { getOrgContext, type OrgScopedDb } from "@/server/org-context";
+import {
+  getOrgContext,
+  type OrgScopedDb,
+  type OrgScopedTx,
+} from "@/server/org-context";
 
 export type SaveBuildingResult =
   { ok: true; buildingId: string } | { ok: false; errors: FieldErrors };
@@ -49,6 +54,12 @@ const buildingIdSchema = z.uuid();
 function refused(message: string): SaveBuildingResult {
   return { ok: false, errors: { form: message } };
 }
+
+/** `on delete restrict` refused a delete: something still hangs off the row. */
+const RESTRICT_VIOLATION = "23001";
+
+const UNIT_GAINED_RENT =
+  "A unit you removed has had rent recorded since you opened this form. Reload the page and retire it instead — its months stay on the rent roll.";
 
 /**
  * A unit the form added. It has no id yet, and it cannot arrive retired —
@@ -143,7 +154,7 @@ export async function updateBuilding(
 
   const removedCodes: { id: string; buildingId: string }[] = [];
 
-  const result = await db.run(async (tx): Promise<SaveBuildingResult> => {
+  const save = async (tx: OrgScopedTx): Promise<SaveBuildingResult> => {
     // `for update`: two saves of one building serialise here, so neither
     // reconciles its units against a list the other has already changed.
     const [existing] = await tx
@@ -279,7 +290,19 @@ export async function updateBuilding(
     }
 
     return { ok: true, buildingId: existing.id };
-  });
+  };
+
+  // A unit removed here that had a month of rent opened after the check
+  // above — a view of the building's page, or `Record rent`, in between. Its
+  // `restrict` refuses the delete, the transaction wrote nothing, and the
+  // answer is the one the check would have given.
+  const result = await db
+    .run(save)
+    .catch((error: unknown): SaveBuildingResult => {
+      if (sqlState(error) !== RESTRICT_VIOLATION) throw error;
+
+      return { ok: false, errors: { units: UNIT_GAINED_RENT } };
+    });
 
   // After the commit, so a save that failed records nothing.
   if (result.ok) {
