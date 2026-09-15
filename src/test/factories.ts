@@ -19,7 +19,10 @@
  * them, and it takes an `orgId` first like every domain factory does.
  */
 import {
+  buildingAccessCodes,
+  buildingFacts,
   buildings,
+  buildingUtilities,
   contacts,
   contactTags,
   invitations,
@@ -28,8 +31,20 @@ import {
   units,
   users,
 } from "@/db/schema";
+import { parseKeyring, sealAccessCode } from "@/lib/access-code-cipher.mts";
 
 import { testDb } from "./db";
+
+/**
+ * The integration suite's `ACCESS_CODE_KEYS`: base64url of
+ * "integration-suite-not-a-real-key", a shape and not a secret. A test that
+ * reveals a code sets the environment to this, so the application opens what
+ * `createAccessCode` sealed.
+ */
+export const TEST_ACCESS_CODE_KEYS =
+  "1:aW50ZWdyYXRpb24tc3VpdGUtbm90LWEtcmVhbC1rZXk";
+
+const testKeyring = parseKeyring(TEST_ACCESS_CODE_KEYS);
 
 type Organization = typeof organizations.$inferSelect;
 type OrganizationInput = typeof organizations.$inferInsert;
@@ -46,6 +61,12 @@ type UnitInput = typeof units.$inferInsert;
 type Contact = typeof contacts.$inferSelect;
 type ContactInput = typeof contacts.$inferInsert;
 type ContactTag = typeof contactTags.$inferSelect;
+type BuildingFactsRow = typeof buildingFacts.$inferSelect;
+type BuildingFactsInput = typeof buildingFacts.$inferInsert;
+type Utility = typeof buildingUtilities.$inferSelect;
+type UtilityInput = typeof buildingUtilities.$inferInsert;
+type AccessCode = typeof buildingAccessCodes.$inferSelect;
+type AccessCodeInput = typeof buildingAccessCodes.$inferInsert;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -251,4 +272,77 @@ export async function tagContact(
     .returning();
 
   return firstRow(rows, "contact_tags");
+}
+
+/**
+ * A building's collection days. Takes the building as well as the org, both
+ * required, for `createUnit`'s reason.
+ */
+export async function createBuildingFacts(
+  orgId: string,
+  buildingId: string,
+  overrides: Partial<BuildingFactsInput> = {},
+): Promise<BuildingFactsRow> {
+  const rows = await testDb()
+    .insert(buildingFacts)
+    .values({ orgId, buildingId, trashDay: "thu", ...overrides })
+    .returning();
+
+  return firstRow(rows, "building_facts");
+}
+
+/** An owner-paid electric account, building-wide unless a unit is given. */
+export async function createUtility(
+  orgId: string,
+  buildingId: string,
+  overrides: Partial<UtilityInput> = {},
+): Promise<Utility> {
+  const rows = await testDb()
+    .insert(buildingUtilities)
+    .values({
+      orgId,
+      buildingId,
+      kind: "electric",
+      providerName: "AES Indiana",
+      accountRef: "4192",
+      avgMonthlyCents: 18_600,
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "building_utilities");
+}
+
+/**
+ * A code, sealed for `orgId` under the suite's keyring the way the
+ * application seals one — so a test that reveals it through the application
+ * gets `code` back. Written through the harness's connection, which sees past
+ * row-level security and is the only way a test can seal a code for one org
+ * and store it in another org's row.
+ */
+export async function createAccessCode(
+  orgId: string,
+  buildingId: string,
+  {
+    code = "4417#",
+    ...overrides
+  }: Partial<Omit<AccessCodeInput, "secret" | "keyVersion">> & {
+    code?: string;
+  } = {},
+): Promise<AccessCode> {
+  const { secret, keyVersion } = sealAccessCode(testKeyring, orgId, code);
+
+  const rows = await testDb()
+    .insert(buildingAccessCodes)
+    .values({
+      orgId,
+      buildingId,
+      kind: "door",
+      secret,
+      keyVersion,
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "building_access_codes");
 }

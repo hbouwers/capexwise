@@ -82,14 +82,18 @@ import { buildingFields } from "@/lib/building-form";
 import { contactFields } from "@/lib/contact-form";
 import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
 import {
+  createAccessCode,
   createBuilding,
+  createBuildingFacts,
   createContact,
   createInvitation,
   createMembership,
   createOrganization,
   createUnit,
   createUser,
+  createUtility,
   tagContact,
+  TEST_ACCESS_CODE_KEYS,
 } from "@/test/factories";
 import {
   FOREIGN_KEY_VIOLATION,
@@ -137,8 +141,8 @@ process.env.APP_URL = APP_URL;
 process.env.BETTER_AUTH_SECRET = "integration-suite-secret-not-a-real-one";
 process.env.GOOGLE_CLIENT_ID = "integration-suite-client-id";
 process.env.GOOGLE_CLIENT_SECRET = "integration-suite-client-secret";
-// Base64url of "integration-suite-not-a-real-key": a shape, not a secret.
-process.env.ACCESS_CODE_KEYS = "1:aW50ZWdyYXRpb24tc3VpdGUtbm90LWEtcmVhbC1rZXk";
+// The key `createAccessCode` seals with, so a reveal here opens what it wrote.
+process.env.ACCESS_CODE_KEYS = TEST_ACCESS_CODE_KEYS;
 
 // Dynamic, and after the assignments above: a static import is hoisted, and the
 // pool would be built from `.env.local` before the first line of this file ran.
@@ -169,6 +173,9 @@ const ORG_OWNED = {
   units: "org_id",
   contacts: "org_id",
   contact_tags: "org_id",
+  building_facts: "org_id",
+  building_utilities: "org_id",
+  building_access_codes: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -286,7 +293,8 @@ async function policiesFor(role: string): Promise<Record<string, Policy[]>> {
  * probe could not reach it" is never confused with "it was never there".
  *
  * Ordered by the whole row cast to text rather than by `id`, because not every
- * table has one: `contact_tags` is keyed on `(org_id, contact_id, tag)`.
+ * table has one: `contact_tags` is keyed on `(org_id, contact_id, tag)`, and
+ * `building_facts` on its building.
  */
 async function rowsOwnedBy(orgId: string): Promise<Record<string, unknown[]>> {
   const owned: Record<string, unknown[]> = {};
@@ -336,6 +344,19 @@ async function seedTwoOrgs() {
     });
     await tagContact(org.id, contact.id, "plumber");
 
+    // The same facts on both sides: one trash day, one unit's electric
+    // account with the plumber as its contact, and one front-door code with
+    // the same digits — sealed for each org, so neither opens as the other's.
+    await createBuildingFacts(org.id, building.id, { trashDay: "thu" });
+    const utility = await createUtility(org.id, building.id, {
+      unitId: unit.id,
+      contactId: contact.id,
+    });
+    const accessCode = await createAccessCode(org.id, building.id, {
+      label: "Front door",
+      code: "4417#",
+    });
+
     return {
       org,
       owner,
@@ -347,6 +368,8 @@ async function seedTwoOrgs() {
       building,
       unit,
       contact,
+      utility,
+      accessCode,
     };
   }
 
@@ -381,6 +404,8 @@ function identifiersOf(side: Side): string[] {
     side.unit.id,
     side.contact.id,
     side.contact.email!,
+    side.utility.id,
+    side.accessCode.id,
   ];
 }
 
@@ -1515,14 +1540,16 @@ describe.each(Object.entries(ORG_OWNED))(
       const before = await rowsOwnedBy(b.org.id);
 
       // Three acceptable outcomes, and which one a table gets is the
-      // migration's decision rather than this test's: `organizations` and
-      // `contacts` have no DELETE grant for the scoped role — an org is
-      // soft-deleted and the purge is not a request, and a contact is archived
-      // — so they are refused before any row is considered.
+      // migration's decision rather than this test's: `organizations`,
+      // `contacts` and `building_facts` have no DELETE grant for the scoped
+      // role — an org is soft-deleted and the purge is not a request, a
+      // contact is archived, and a building's facts are cleared rather than
+      // removed — so they are refused before any row is considered.
       // `buildings` is refused by its units' `restrict`, because every seeded
-      // building has one (§7: archived, not deleted). The others may delete,
-      // and must delete only A's. A refusal rolls the transaction back, and the
-      // snapshot below is what says B was never touched either way.
+      // building has one (§7: archived, not deleted), and `units` by the
+      // electric account on each. The others may delete, and must delete only
+      // A's. A refusal rolls the transaction back, and the snapshot below is
+      // what says B was never touched either way.
       const outcome = await db
         .run((tx) =>
           tx.execute<{ owner: string }>(
@@ -1648,5 +1675,86 @@ describe("a reference from one org's row to another's", () => {
 
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
     expect((await rowsOwnedBy(a.org.id)).contact_tags).toHaveLength(1);
+  });
+
+  // And the facts tables, whose rows name a building, a unit or a contact.
+  // One control, then each reference pointed at B: facts on B's building, an
+  // account on B's building, unit or contact, and a code on B's building or
+  // unit. The code's secret is A's own, so only the reference is wrong.
+  it("lets facts, a utility and a code onto the scoped org's own rows", async () => {
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run(async (tx) => {
+      await tx.execute(
+        sql`update building_facts set trash_day = 'fri'
+            where building_id = ${a.building.id}`,
+      );
+      await tx.execute(
+        sql`insert into building_utilities (org_id, building_id, unit_id, kind, contact_id)
+            values (${a.org.id}, ${a.building.id}, ${a.unit.id}, 'gas', ${a.contact.id})`,
+      );
+      await tx.execute(
+        sql`insert into building_access_codes (org_id, building_id, unit_id, kind, secret, key_version)
+            select org_id, building_id, ${a.unit.id}, 'lockbox', secret, key_version
+            from building_access_codes where id = ${a.accessCode.id}`,
+      );
+    });
+
+    const owned = await rowsOwnedBy(a.org.id);
+    expect(owned.building_utilities).toHaveLength(2);
+    expect(owned.building_access_codes).toHaveLength(2);
+  });
+
+  it.each([
+    [
+      "facts for another org's building",
+      (a: Side, b: Side) =>
+        sql`insert into building_facts (org_id, building_id)
+            values (${a.org.id}, ${b.building.id})`,
+    ],
+    [
+      "a utility on another org's building",
+      (a: Side, b: Side) =>
+        sql`insert into building_utilities (org_id, building_id, kind)
+            values (${a.org.id}, ${b.building.id}, 'gas')`,
+    ],
+    [
+      "a utility on another org's unit",
+      (a: Side, b: Side) =>
+        sql`insert into building_utilities (org_id, building_id, unit_id, kind)
+            values (${a.org.id}, ${a.building.id}, ${b.unit.id}, 'gas')`,
+    ],
+    [
+      "a utility naming another org's contact",
+      (a: Side, b: Side) =>
+        sql`update building_utilities set contact_id = ${b.contact.id}
+            where id = ${a.utility.id}`,
+    ],
+    [
+      "a code on another org's building",
+      (a: Side, b: Side) =>
+        sql`insert into building_access_codes (org_id, building_id, kind, secret, key_version)
+            select org_id, ${b.building.id}, kind, secret, key_version
+            from building_access_codes where id = ${a.accessCode.id}`,
+    ],
+    [
+      "a code on another org's unit",
+      (a: Side, b: Side) =>
+        sql`update building_access_codes set unit_id = ${b.unit.id}
+            where id = ${a.accessCode.id}`,
+    ],
+  ])("refuses %s", async (_, statement) => {
+    const { a, b } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+    const theirs = await rowsOwnedBy(b.org.id);
+    const mine = await rowsOwnedBy(a.org.id);
+
+    await expect(db.run((tx) => tx.execute(statement(a, b)))).rejects.toSatisfy(
+      rejectsWith(FOREIGN_KEY_VIOLATION),
+    );
+
+    expect(await rowsOwnedBy(b.org.id)).toEqual(theirs);
+    expect(await rowsOwnedBy(a.org.id)).toEqual(mine);
   });
 });

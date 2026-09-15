@@ -7,9 +7,10 @@
 This is the contract the migrations implement. **Section 2 is built**: `organizations` came with
 #17 and its reserve with #92, `users`, `memberships` and `invitations` with #24, and `sessions`,
 `accounts`, `verifications` and `rate_limits` with the provider in #25, and section 9's row-level
-security has covered it since #28. **So are `buildings` and `units`**, the first two tables of
-section 3, with #105, and **`trade_tags`, `contacts` and `contact_tags`** from section 6, with #106.
-Everything else from section 3 on is still prose.
+security has covered it since #28. **So is section 3**: `buildings` and `units` with #105, and
+`building_facts`, `building_utilities` and `building_access_codes` with #107. **So are
+`trade_tags`, `contacts` and `contact_tags`** from section 6, with #106. Everything else from
+section 4 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -366,6 +367,8 @@ create table units (
   updated_at    timestamptz not null default now(),
   constraint units_building foreign key (org_id, building_id)
     references buildings (org_id, id) on delete restrict,
+  -- What a unit-scoped row references, as `buildings_org_and_id` is for units
+  constraint units_org_and_id unique (org_id, id),
   constraint units_org_building_label unique (org_id, building_id, label),
   constraint units_rent_not_negative check (rent_cents >= 0)
 );
@@ -387,8 +390,8 @@ studios merged, a unit converted to storage) without deleting its history.
 
 ```sql
 create table building_facts (
-  building_id       uuid primary key references buildings (id) on delete cascade,
   org_id            uuid not null references organizations (id) on delete cascade,
+  building_id       uuid not null,      -- referenced with its org, below
 
   trash_day         text check (trash_day in
                       ('mon','tue','wed','thu','fri','sat','sun')),
@@ -398,7 +401,11 @@ create table building_facts (
   notes             text,
 
   created_at        timestamptz not null default now(),
-  updated_at        timestamptz not null default now()
+  updated_at        timestamptz not null default now(),
+  -- Led by org_id, as §8 has every index on a domain table
+  constraint building_facts_pkey primary key (org_id, building_id),
+  constraint building_facts_building foreign key (org_id, building_id)
+    references buildings (org_id, id) on delete cascade
 );
 
 create type utility_kind as enum
@@ -407,8 +414,8 @@ create type utility_kind as enum
 create table building_utilities (
   id                 uuid primary key default uuidv7(),
   org_id             uuid not null references organizations (id) on delete cascade,
-  building_id        uuid not null references buildings (id) on delete cascade,
-  unit_id            uuid references units (id) on delete restrict,  -- null = whole building
+  building_id        uuid not null,
+  unit_id            uuid,              -- null = whole building
   kind               utility_kind not null,
   provider_name      text,
   account_ref        text               -- the last four characters, never the account number
@@ -416,9 +423,16 @@ create table building_utilities (
   paid_by            text not null default 'owner'
                        check (paid_by in ('owner', 'tenant')),
   avg_monthly_cents  bigint check (avg_monthly_cents >= 0),
-  contact_id         uuid references contacts (id) on delete set null,
+  contact_id         uuid,              -- the lawn crew, the plow
   created_at         timestamptz not null default now(),
-  updated_at         timestamptz not null default now()
+  updated_at         timestamptz not null default now(),
+  -- Each reference names the org as well as the row (§9, fifth item)
+  constraint building_utilities_building foreign key (org_id, building_id)
+    references buildings (org_id, id) on delete cascade,
+  constraint building_utilities_unit foreign key (org_id, unit_id)
+    references units (org_id, id) on delete restrict,
+  constraint building_utilities_contact foreign key (org_id, contact_id)
+    references contacts (org_id, id) on delete restrict
 );
 ```
 
@@ -426,6 +440,16 @@ Utilities are rows rather than columns on `building_facts`, because the PRD's fa
 per provider with a per-utility average and an owner-paid subtotal — and because a duplex routinely
 has two electric accounts and one water main, which columns cannot express. `paid_by` is what makes
 the owner-paid subtotal computable instead of hand-maintained.
+
+**Four departures from this section's first draft, made with #107.** Every reference to a
+building, a unit or a contact is composite, naming the org, for `units_building`'s reason — which
+is why `units` gained `units_org_and_id`. `building_facts`' key leads with `org_id`, as
+`contact_tags`' does, and since `building_id` is unique on its own it admits one row per building
+exactly as before. And **a utility's contact is `restrict`, not `set null`**, for two reasons. §7
+already says a contact is archived, and deleted only when nothing references it — which is what
+`restrict` enforces. And `set null` on a composite key nulls every column in it, `org_id` included,
+which its `not null` refuses: the first contact deleted with a utility pointing at it would fail
+the delete for a reason nobody meant.
 
 ### Access codes live in their own table
 
@@ -435,8 +459,8 @@ create type access_code_kind as enum ('smart_lock', 'door', 'lockbox', 'garage',
 create table building_access_codes (
   id             uuid primary key default uuidv7(),
   org_id         uuid not null references organizations (id) on delete cascade,
-  building_id    uuid not null references buildings (id) on delete cascade,
-  unit_id        uuid references units (id) on delete cascade,   -- null = building-level
+  building_id    uuid not null,
+  unit_id        uuid,                  -- null = building-level
   kind           access_code_kind not null,
   label          text,
   secret         bytea not null         -- sealed, never text, never logged (ADR-0008)
@@ -445,7 +469,11 @@ create table building_access_codes (
                    check (key_version > 0),
   last_rotated_at timestamptz,          -- when the code at the lock changed, not the key
   created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
+  updated_at     timestamptz not null default now(),
+  constraint building_access_codes_building foreign key (org_id, building_id)
+    references buildings (org_id, id) on delete cascade,
+  constraint building_access_codes_unit foreign key (org_id, unit_id)
+    references units (org_id, id) on delete cascade
 );
 ```
 
@@ -465,7 +493,8 @@ check turns the debug-session plaintext above into a constraint violation instea
 The database never sees a code or a key, which is why the scheme is not `pgcrypto`. `key_version` is
 the version in `ACCESS_CODE_KEYS` that sealed the row, and the ADR has the rotation that re-seals
 rows onto a newer one. `last_rotated_at` is a fact about the lock, not the key, and a rotation does
-not touch it.
+not touch it. Replacing a code in the facts card's editor sets it; adding one does not, because
+nobody said when that code was set at the lock.
 
 The facts card's query never selects `secret`. A reveal opens one row in a server action and
 records that it happened, never what it showed (ADR-0008, `docs/ui/components.md` §9).
@@ -850,7 +879,7 @@ references that are informational.** A `set null` that would lose a fact is a `r
 | **Building** | `restrict` from units, capital items, tasks, rent periods, transactions. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
 | **Unit** | `restrict` from rent periods, capital items, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
 | **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete |
-| **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it, and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
+| **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it — `building_utilities_contact` is `restrict`, which enforces that (§3) — and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
 | **Rent period** | Deletable while `amount_received_cents is null` — an opened-in-error month. Once money is recorded it is edited, not deleted, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
 | **Reference data** (`capital_item_types`, `trade_tags`) | Not deleted. `restrict` from every referencing row, so an entry in use cannot be removed. Retiring one means keeping the row and hiding it from new choices, which needs a column neither table has; it is added with the first entry that has to go |
@@ -1065,7 +1094,7 @@ for by #48, because they are the ones a naive test misses:
   judges the new row's own `org_id`, and a foreign key is checked past row-level security. The
   composite reference of the checklist's fifth item is what refuses it, and the isolation test
   proves it through a scoped handle — first for `units` to `buildings`, at #105, then
-  `contact_tags` to `contacts`, at #106.
+  `contact_tags` to `contacts`, at #106, then every reference the facts tables make, at #107.
 
 ---
 
