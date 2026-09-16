@@ -67,6 +67,20 @@ what the reserve can cover:
   balance higher than the real one. An old balance shows up as a higher monthly need and its
   `as of {date}`, which is the prompt to update it.
 
+Two more were settled with the module itself (#111), in the same direction:
+
+- **An item comes round again.** Once replaced it is new, and due a life after the year it lands,
+  so a five-year smoke detector due this year is in this year's bar and again five years out.
+  Counting each item once would understate every later year and the need with them, and five
+  catalogue types — detectors, carpet, the sump pump, exterior paint, the dishwasher — live eight
+  years or less. A recurrence of an estimated item stays estimated: its year rests on the same
+  guess. Costs are today's; nothing is inflated.
+- **A shortfall no contribution can reach is paid back, not ignored.** This year's replacements
+  come out before the first contribution, and so do next year's when this month is December. If the
+  balance cannot cover them the projection shows that year short whatever is saved, so
+  `Reserve needed / mo` is asked only of the years a contribution reaches — and the shortfall
+  carried into them is what it pays back.
+
 **`YearBarChart`**: ten bars, this year through nine years out. Each bar is the year's replacement
 cost, and **this year's bar includes every replacement already past due**, which is what makes it
 the same set as the dashboard's End of life tile.
@@ -111,8 +125,12 @@ Sorted by cost, largest first.
 Quoted, Flagged and Discretionary each describe a record the product does not have — a quote, a flag,
 a project that is not a replacement — and are left out until something produces them.
 
-When the forecast module widens an estimated item's range, as PRD F2 asks, the note gives it:
-`estimated · 2027–2030`. The bar stays at the point estimate.
+An estimated item's range, as PRD F2 asks, is in the note: `estimated · 2027–2030`. The bar stays
+at the point estimate. **The range is a fifth of the item's life either side of its year, and at
+least one** (#111): the seed puts an unaudited item 60% through its life, so the error in that
+guess scales with the life — a year either way for a detector, four for a roof. It folds like the
+bar, with no end before this year, and moves with a deferral; an item so far past due that the
+whole window is behind us has none.
 
 **`What if?`** is PRD F3's sensitivity: `Defer 1 year`, `Defer 2 years`, `Defer 3 years`. Choosing
 one adds it to `?defer={itemId}:{years}`, and the chart, the figures and the reserve projection
