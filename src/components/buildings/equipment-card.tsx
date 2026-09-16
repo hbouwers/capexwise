@@ -112,12 +112,21 @@ export function EquipmentCard({
   );
   const showScope = scopedUnits.length > 1;
 
+  // The filter the table applies. A unit the page accepted but that offers no
+  // chip — retired, with nothing on it, from a link older than the retirement
+  // — is no filter, as a unit of another building is: filtering to it would
+  // empty the table with nothing pressed to say why. A single-unit building
+  // has no scope to filter by at all.
+  const scope =
+    showScope &&
+    (view.scope === "shared" ||
+      scopedUnits.some((unit) => unit.id === view.scope))
+      ? view.scope
+      : null;
+
   const inScope = (item: EquipmentItem) =>
-    !showScope ||
-    view.scope === null ||
-    (view.scope === "shared"
-      ? item.unitId === null
-      : item.unitId === view.scope);
+    scope === null ||
+    (scope === "shared" ? item.unitId === null : item.unitId === scope);
   const inConfidence = (item: EquipmentItem) =>
     !view.estimatedOnly || item.confidence === "estimated";
 
@@ -166,13 +175,10 @@ export function EquipmentCard({
     : [{ key: "all", label: "", items: sorted(shown) }];
 
   const filterName =
-    view.scope === "shared"
+    scope === "shared"
       ? "Shared"
-      : (scopedUnits.find((unit) => unit.id === view.scope)?.label ?? null);
-  const filteredTo = [
-    showScope ? filterName : null,
-    view.estimatedOnly ? "estimated" : null,
-  ]
+      : (scopedUnits.find((unit) => unit.id === scope)?.label ?? null);
+  const filteredTo = [filterName, view.estimatedOnly ? "estimated" : null]
     .filter(Boolean)
     .join(" ");
 
@@ -206,7 +212,7 @@ export function EquipmentCard({
       <div className="border-b border-border-divider py-3">
         <EquipmentFilter
           scopes={scopes}
-          scope={showScope ? view.scope : null}
+          scope={scope}
           estimatedOnly={view.estimatedOnly}
           estimatedCount={
             items.filter(
