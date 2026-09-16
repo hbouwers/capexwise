@@ -2,8 +2,10 @@
 
 /**
  * The capital items' writes that are rules rather than edits: adding items
- * from the catalogue, and recording a replacement (`docs/data-model.md` §5).
- * The add-equipment modal and the item editor call these (#110). Each starts
+ * from the catalogue and taking the batch back, confirming an estimated item,
+ * and recording a replacement (`docs/data-model.md` §5). The add-equipment
+ * modal and the equipment table call the first three (#110), and the item
+ * editor the last (#125). Each starts
  * with `getOrgContext()`, so the org is the session's, and every id the
  * browser sends — a building, a unit, an item — is looked up inside that org
  * rather than trusted.
@@ -13,7 +15,7 @@
  * refuse it the same way they refuse one that is not there.
  */
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -23,7 +25,10 @@ import {
   capitalItemTypes,
   units,
 } from "@/db/schema";
-import { validateReplacement } from "@/lib/capital-item-form";
+import {
+  validateConfirmation,
+  validateReplacement,
+} from "@/lib/capital-item-form";
 import { rowsForScope, type ScopeChoice } from "@/lib/capital-items";
 import { todayIn, yearOf } from "@/lib/dates";
 import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
@@ -32,6 +37,12 @@ import { getOrgContext } from "@/server/org-context";
 
 export type AddCapitalItemsResult =
   { ok: true; itemIds: string[] } | { ok: false; errors: FieldErrors };
+
+export type UndoAddCapitalItemsResult =
+  { ok: true; removed: number } | { ok: false };
+
+export type ConfirmCapitalItemResult =
+  { ok: true } | { ok: false; errors: FieldErrors };
 
 export type RecordReplacementResult =
   { ok: true; itemId: string } | { ok: false; errors: FieldErrors };
@@ -51,6 +62,10 @@ const UNIT_GONE =
 /** `Each unit` on a building whose every unit has been retired. */
 const NO_UNITS =
   "This building has no units left to add equipment to. Choose Shared instead.";
+
+/** An item confirmed, replaced or removed since the table was drawn. */
+const CONFIRM_NOT_FOUND =
+  "This item could not be confirmed. Reload the page — it may have changed since you opened it.";
 
 /** The item's counterpart to `BUILDING_NOT_FOUND`, replaced or removed too. */
 const ITEM_NOT_FOUND =
@@ -185,6 +200,141 @@ export async function addCapitalItems(
 
     return { ok: true, itemIds: added.map((row) => row.id) };
   });
+}
+
+/**
+ * What Undo sends back: the ids `addCapitalItems` answered with. Twenty-seven
+ * types ticked on a building of a few units is well under the cap.
+ */
+const undoShape = z.array(z.uuid()).min(1).max(2000);
+
+/**
+ * The add toast's Undo (`modal-add-equipment.md`, footer): **removes exactly
+ * the rows that add made**, by the ids it returned — and of those, only the
+ * ones still as the checklist left them: estimated, active, and with no actual
+ * cost. An item confirmed in the seconds since is a fact somebody read off a
+ * label, and stays.
+ *
+ * The same rule is `capital_items_delete_as_added` in `0021`, a restrictive
+ * policy, so a delete that forgot the filter below still could not take an
+ * audited item or a replaced one. The filter is written anyway, for the reason
+ * `src/server/org-context.ts` gives for the org one.
+ *
+ * Only on an active building, like every write here. Answers how many went,
+ * which is fewer than were added when some were confirmed in between.
+ */
+export async function undoAddCapitalItems(
+  buildingId: unknown,
+  itemIds: unknown,
+): Promise<UndoAddCapitalItemsResult> {
+  const { db } = await getOrgContext();
+
+  const id = idSchema.safeParse(buildingId);
+  const ids = undoShape.safeParse(itemIds);
+  if (!id.success || !ids.success) return { ok: false };
+
+  try {
+    return await db.run(async (tx): Promise<UndoAddCapitalItemsResult> => {
+      // `for share`, as the add takes it: the building form waits rather than
+      // retiring a unit under a delete in flight.
+      const [building] = await tx
+        .select({ id: buildings.id })
+        .from(buildings)
+        .where(
+          and(
+            eq(buildings.orgId, db.orgId),
+            eq(buildings.id, id.data),
+            eq(buildings.status, "active"),
+          ),
+        )
+        .for("share");
+
+      if (!building) return { ok: false };
+
+      const removed = await tx
+        .delete(capitalItems)
+        .where(
+          and(
+            eq(capitalItems.orgId, db.orgId),
+            eq(capitalItems.buildingId, building.id),
+            inArray(capitalItems.id, ids.data),
+            eq(capitalItems.confidence, "estimated"),
+            eq(capitalItems.status, "active"),
+            isNull(capitalItems.actualCostCents),
+          ),
+        )
+        .returning({ id: capitalItems.id });
+
+      return { ok: true, removed: removed.length };
+    });
+  } catch (error) {
+    throw withoutParameters(error, "Undoing an add of equipment");
+  }
+}
+
+/**
+ * `Confirm` (`building-detail.md`, Equipment & capital items): the estimated
+ * item becomes `audited`, with the day it went in — which sets its install
+ * year, since the estimate was a guess at that — and what it cost, when known,
+ * as its actual cost. That is the tax basis, not the replacement cost, which
+ * stays the forecast's figure and is the item editor's to change (#125).
+ *
+ * Only an estimated, active item on an active building. An item somebody
+ * confirmed a moment earlier is refused rather than overwritten: two people
+ * reading two labels may have two dates, and the second should see the first's
+ * before replacing it.
+ */
+export async function confirmCapitalItem(
+  itemId: unknown,
+  input: unknown,
+): Promise<ConfirmCapitalItemResult> {
+  const { db } = await getOrgContext();
+
+  const id = idSchema.safeParse(itemId);
+  if (!id.success) return refused(CONFIRM_NOT_FOUND);
+
+  try {
+    return await db.run(async (tx): Promise<ConfirmCapitalItemResult> => {
+      // `for update`, so two confirmations of one item cannot both find it
+      // estimated.
+      const [item] = await tx
+        .select({ id: capitalItems.id, timezone: buildings.timezone })
+        .from(capitalItems)
+        .innerJoin(
+          buildings,
+          and(
+            eq(buildings.orgId, capitalItems.orgId),
+            eq(buildings.id, capitalItems.buildingId),
+          ),
+        )
+        .where(
+          and(
+            eq(capitalItems.orgId, db.orgId),
+            eq(capitalItems.id, id.data),
+            eq(capitalItems.status, "active"),
+            eq(capitalItems.confidence, "estimated"),
+            eq(buildings.status, "active"),
+          ),
+        )
+        .for("update", { of: capitalItems });
+
+      if (!item) return refused(CONFIRM_NOT_FOUND);
+
+      const validated = validateConfirmation(input, todayIn(item.timezone));
+      if (!validated.ok) return validated;
+
+      await tx
+        .update(capitalItems)
+        .set({ ...validated.values, confidence: "audited" })
+        .where(
+          and(eq(capitalItems.orgId, db.orgId), eq(capitalItems.id, item.id)),
+        );
+
+      return { ok: true };
+    });
+  } catch (error) {
+    throw withoutParameters(error, "Confirming an item");
+  }
 }
 
 /**

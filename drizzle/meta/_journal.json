@@ -148,6 +148,13 @@
       "when": 1789476599575,
       "tag": "0020_seed_capital_item_types",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789577442286,
+      "tag": "0021_capital_items_undo",
+      "breakpoints": true
     }
   ]
 }

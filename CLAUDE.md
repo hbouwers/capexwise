@@ -18,7 +18,9 @@ in the application and revealed one at a time — are on its page — #107. Rent
 a time on the building's rent roll, with the Paid checkoff, a month that stood vacant, and rent
 recorded for a unit that was let then — #108. The capital item catalogue is seeded with sourced
 national defaults, and capital items and their explicit splits are stored, with the allocation rule,
-adding from the catalogue and recording a replacement behind them — #109; no screen draws them yet.
+adding from the catalogue and recording a replacement behind them — #109. Equipment is added from the
+catalogue checklist, confirmed, and shown in the building's equipment table, with the install-year
+seed, the replacement year and the life status as tested rules in `src/lib/forecast/` — #110.
 The forecast, the tax planner and the rest of what the product is *for* are still unwritten. Rules
 below that describe runtime behaviour describe what the code *will* do — they are the contract to
 build against, not a description of something already working. Anything already true is marked as

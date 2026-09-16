@@ -240,7 +240,7 @@ that computes them — each wants a unit test before it is trusted:
 
 | Rule | Proposed | Spec |
 | --- | --- | --- |
-| Install-year seed | `max(build_year, this year − round(0.6 × life))` | [Add equipment](modal-add-equipment.md#the-seed) |
+| Install-year seed | `max(build_year, this year − round(0.6 × life))`. **Settled** with #110: `seedInstallYear` in `src/lib/forecast/seed.ts`, which also never seeds a year after this one, for a build year still to come | [Add equipment](modal-add-equipment.md#the-seed) |
 | Big ticket | Replacement cost of $5,000 or more | [Portfolio](portfolio.md#your-buildings) |
 | Systems life used | Replacement-cost-weighted mean of age over life, each item capped at 100% | [Portfolio](portfolio.md#your-buildings) |
 | Building flag | Past life, then due soon, then a big-ticket year within three, then healthy | [Portfolio](portfolio.md#your-buildings) |
