@@ -241,10 +241,11 @@ that computes them — each wants a unit test before it is trusted:
 | Rule | Proposed | Spec |
 | --- | --- | --- |
 | Install-year seed | `max(build_year, this year − round(0.6 × life))`. **Settled** with #110: `seedInstallYear` in `src/lib/forecast/seed.ts`, which also never seeds a year after this one, for a build year still to come | [Add equipment](modal-add-equipment.md#the-seed) |
-| Big ticket | Replacement cost of $5,000 or more | [Portfolio](portfolio.md#your-buildings) |
-| Systems life used | Replacement-cost-weighted mean of age over life, each item capped at 100% | [Portfolio](portfolio.md#your-buildings) |
-| Building flag | Past life, then due soon, then a big-ticket year within three, then healthy | [Portfolio](portfolio.md#your-buildings) |
-| Reserve needed / mo | The smallest level contribution that keeps the reserve at or above zero for ten years. **Timing settled** 2026-09-16: a replacement is paid in January of its year, and contributions since the balance's as-of date are not counted | [Forecast](capex-forecast.md#ten-year-capital-plan) |
+| Big ticket | Replacement cost of $5,000 or more. **Settled** with #111: `BIG_TICKET_CENTS` in `src/lib/forecast/outflow.ts` | [Portfolio](portfolio.md#your-buildings) |
+| Systems life used | Replacement-cost-weighted mean of age over life, each item capped at 100%. **Settled** with #111: `systemsLifeUsedPercent` in `src/lib/forecast/building.ts`, rounded once and exactly, with each item counted the same when none has a cost | [Portfolio](portfolio.md#your-buildings) |
+| Building flag | Past life, then due soon, then a big-ticket year within three, then healthy. **Settled** with #111: `buildingFlag`, beside it. The three years are the three after this one, and the item named is the earliest, then the costliest | [Portfolio](portfolio.md#your-buildings) |
+| Reserve needed / mo | The smallest level contribution that keeps the reserve at or above zero for ten years. **Timing settled** 2026-09-16: a replacement is paid in January of its year, and contributions since the balance's as-of date are not counted. **Settled** with #111: `reserveNeededPerMonthCents` in `src/lib/forecast/reserve.ts`, with items recurring and a shortfall no contribution reaches paid back | [Forecast](capex-forecast.md#ten-year-capital-plan) |
+| Estimated range | **Settled** with #111: a fifth of the life either side of the point year, at least one, folded into this year | [Forecast](capex-forecast.md#the-selected-year) |
 | Marking a past month paid | Records it on the period's first day, not today. **Settled** with #108: `paidOn` in `src/lib/rent.ts` | [Rent roll](building-detail.md#units--rent) |
 
 ---

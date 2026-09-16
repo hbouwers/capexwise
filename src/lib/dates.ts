@@ -156,6 +156,14 @@ export function yearOf(date: CalendarDate): number {
   return parts(date).year;
 }
 
+/**
+ * The month a date falls in, `1` for January: where in this year the reserve
+ * projection starts, and so how many contributions land before next January.
+ */
+export function monthOf(date: CalendarDate): number {
+  return parts(date).month;
+}
+
 const MONTH_NAMES = [
   "January",
   "February",

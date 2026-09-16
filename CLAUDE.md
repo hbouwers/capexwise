@@ -21,10 +21,12 @@ national defaults, and capital items and their explicit splits are stored, with 
 adding from the catalogue and recording a replacement behind them — #109. Equipment is added from the
 catalogue checklist, confirmed, and shown in the building's equipment table, with the install-year
 seed, the replacement year and the life status as tested rules in `src/lib/forecast/` — #110.
-The forecast, the tax planner and the rest of what the product is *for* are still unwritten. Rules
-below that describe runtime behaviour describe what the code *will* do — they are the contract to
-build against, not a description of something already working. Anything already true is marked as
-such.
+The forecast's arithmetic is written and tested there too — ten years of replacements with audited
+and estimated cost apart, the reserve projection and its monthly need, level funding, deferral, and
+the building flag — #111. The forecast screen, the tax planner and the rest of what the product is
+*for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
+do — they are the contract to build against, not a description of something already working.
+Anything already true is marked as such.
 
 Read `docs/PRD.md` first. It is the product brain and it is current.
 
@@ -223,6 +225,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Backups | **Nightly `pg_dump` as `capexwise_reader`, restored and compared on the runner before it is kept, `age`-encrypted, in an S3-compatible bucket outside Neon and GitHub, kept 90 days** ([ADR-0010](docs/adr/0010-backups.md)). Neon's 6-hour history covers the hours since. The reader reads through a read policy on every table rather than bypassing row-level security, so every new table needs its `select` grant and, if it has row-level security, the policy — docs/data-model.md §9. Rejected: Neon's backups alone (6 hours, and not independent), dumping as the owner (every domain table comes out empty), GitHub artifacts |
 | Portfolio forecasting | **In v1** (PRD §12, question 6). The dashboard rollup (F0) was already settled and in v1; the 10-year forecast and reserve projection get the same portfolio view in v1 rather than staying per-building until v1.1 |
 | Reserve timing | **A replacement is paid in January of its year, and contributions since the reserve's as-of date are not counted** (#111, 2026-09-16). Replacements are known by the year and the reserve by the month, so the forecast has to pick a month. Both rules pick the reading that never overstates what the reserve covers: a failure does not wait for December, and CapExWise cannot see the account to know a deposit was made. Rejected: mid-year or year-end payment, and rolling the balance forward by the stated contribution. [capex-forecast.md](docs/ui/screens/capex-forecast.md#ten-year-capital-plan) states them |
+| Forecast recurrence | **An item is due again a life after the year it lands, inside the ten years** (#111). Five catalogue types live eight years or less, so counting each item once understates every later year and the reserve need. A recurrence of an estimated item stays estimated, and costs are today's, not inflated. Rejected: one replacement per item. [capex-forecast.md](docs/ui/screens/capex-forecast.md#ten-year-capital-plan) states it |
 
 All six PRD open questions (#13) are now settled — see PRD §12.
 
