@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/cn";
-import { type CalendarDate, formatDate } from "@/lib/dates";
+import { type CalendarDate, formatDate, shortFormIn } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import {
   daysLate,
@@ -263,7 +263,7 @@ export function UnscheduledTable({
               </Cell>
               <TaskCell
                 title={task.title}
-                note={`added ${formatDate(task.addedOn, "short")}`}
+                note={`added ${formatDate(task.addedOn, shortFormIn(task.addedOn, place.today))}`}
                 folded={folded}
                 className="max-md:pl-5"
               />
@@ -418,7 +418,7 @@ function ScheduledRow({ task, place }: { task: TaskRecord; place: TaskPlace }) {
       <Cell className="text-right max-md:pr-5">
         <DateValue
           date={due}
-          form="short"
+          form={shortFormIn(due, place.today)}
           className="text-sm text-text-primary"
         />
         {note?.kind === "late" ? (
@@ -491,7 +491,10 @@ export function DoneTable({
             const folded: [Fold, string | null][] = [
               ["md", placeText(place)],
               ["xl", assigneeText(task.assignee)],
-              ["md", `done ${formatDate(completedOn, "short")}`],
+              [
+                "md",
+                `done ${formatDate(completedOn, shortFormIn(completedOn, place.today))}`,
+              ],
               ["md", lateText],
             ];
 

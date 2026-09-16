@@ -287,6 +287,15 @@ const MONTHS = [
 export type DateForm = "full" | "short" | "month" | "month-long" | "month-name";
 
 /**
+ * `short` for a date in the same year as `today`, and `full` for any other —
+ * a task list's dates, where `Sep 16` is plain until the job is next year's
+ * and then reads as this one's.
+ */
+export function shortFormIn(date: CalendarDate, today: CalendarDate): DateForm {
+  return yearOf(date) === yearOf(today) ? "short" : "full";
+}
+
+/**
  * Always absolute: every date on this product is a planning date, so "3 days
  * ago" is never the date. Lateness and time-to-due sit *beside* it
  * (`docs/ui/screens/README.md`, Dates).
