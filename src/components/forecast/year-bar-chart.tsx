@@ -77,8 +77,10 @@ export function YearBarChart({
           aria-hidden
           className="flex shrink-0 flex-col justify-between pt-0 pb-6 text-right sm:pt-5"
         >
+          {/* With nothing due in the ten years there is no top to label, and
+              `$0` over `$0` would read as a broken axis. */}
           <span className="numeric text-2xs text-text-muted">
-            {formatMoney(tallest, { form: "compact" })}
+            {tallest > 0 ? formatMoney(tallest, { form: "compact" }) : null}
           </span>
           <span className="numeric text-2xs text-text-muted">$0</span>
         </div>
