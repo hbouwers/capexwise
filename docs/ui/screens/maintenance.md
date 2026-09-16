@@ -124,6 +124,33 @@ Tasks with `status = 'done'`, most recently completed first, the last 12 months 
 
 ---
 
+## As built
+
+#113 built this screen before the task modal (#114). What it settled that the regions above do not
+say:
+
+- **There is no `Add task` button yet, and a title is not yet a link.** Both open the task modal,
+  which is #114. Until then an **inline add row closes the Unscheduled tab** — a title, a building
+  `Select` when there is more than one, and a scope `Select` on a building with more than one unit
+  — and the task it adds waits there for a date. The empty states use that row as their action.
+- **Only active buildings' tasks are shown**, and the building `Select` lists only active
+  buildings, as the forecast's does. An archived or sold building is kept for its history and left
+  out of the portfolio's figures; its recurring tasks stay readable on its own page.
+- **The Status toggle is a `<button aria-pressed>` in the badge's colours**, rather than a
+  `StatusBadge` beside a separate control, so the column stays one word per row. It renders only on
+  a task with an assignee.
+- **From `md` to `xl` a few columns fold as well** — Trade on Unscheduled; Assignee, Repeats and
+  Cost on Scheduled; Assignee on Done — into the note line, as text. With the rail open, seven
+  fixed columns left the task's name a sliver at 1024px.
+- **A date outside this year carries its year** — `May 15, 2027` — and one inside it does not. An
+  annual job's next occurrence is next year's, and `Sep 16` read as this month.
+- **`Show earlier` is `?done=all`**, with `Show the last 12 months` to go back. The window is each
+  task's own building's twelve months, as every figure here is.
+- **A tile's sub-line has a word when its figure is zero**: `nothing late` rather than an `oldest`
+  with no date.
+
+---
+
 ## Changes from the prototype
 
 - **A Done tab**, and the two tiles that link to it — above.
