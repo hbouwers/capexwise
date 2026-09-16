@@ -881,31 +881,55 @@ create type task_priority as enum ('low', 'normal', 'high');
 create table tasks (
   id                  uuid primary key default uuidv7(),
   org_id              uuid not null references organizations (id) on delete cascade,
-  building_id         uuid not null references buildings (id) on delete restrict,
-  unit_id             uuid references units (id) on delete restrict,   -- null = shared
-  capital_item_id     uuid references capital_items (id) on delete set null,
+  building_id         uuid not null,
+  unit_id             uuid,                    -- null = shared
+  capital_item_id     uuid,
 
   title               text not null,
   notes               text,
-  trade_tag           text references trade_tags (slug) on delete set null,
+  trade_tag           text references trade_tags (slug) on delete restrict,
   status              task_status not null default 'unscheduled',
   priority            task_priority not null default 'normal',
   due_date            date,                    -- no clock time, no timezone (ADR-0005)
   completed_on        date,
-  assignee_contact_id uuid references contacts (id) on delete set null,
+  confirmed_on        date,                    -- booked with the assignee (#93)
+  assignee_contact_id uuid,
+  assignee_user_id    uuid,                    -- a member of this org (#94)
   est_cost_cents      bigint check (est_cost_cents >= 0),
   actual_cost_cents   bigint check (actual_cost_cents >= 0),
 
   recurrence_months   integer check (recurrence_months > 0),  -- null = one-off
-  recurrence_parent_id uuid references tasks (id) on delete set null,
+  recurrence_parent_id uuid,
 
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
 
+  constraint tasks_org_building_and_id unique (org_id, building_id, id),
+  constraint tasks_building foreign key (org_id, building_id)
+    references buildings (org_id, id) on delete restrict,
+  constraint tasks_unit foreign key (org_id, building_id, unit_id)
+    references units (org_id, building_id, id) on delete restrict,
+  -- `set null` of the one column: a plain `set null` on a composite key would
+  -- null `org_id` and `building_id` with it
+  constraint tasks_capital_item foreign key (org_id, building_id, capital_item_id)
+    references capital_items (org_id, building_id, id) on delete set null (capital_item_id),
+  constraint tasks_assignee_contact foreign key (org_id, assignee_contact_id)
+    references contacts (org_id, id) on delete set null (assignee_contact_id),
+  constraint tasks_assignee_member foreign key (org_id, assignee_user_id)
+    references memberships (org_id, user_id) on delete set null (assignee_user_id),
+  constraint tasks_recurrence_parent foreign key (org_id, building_id, recurrence_parent_id)
+    references tasks (org_id, building_id, id) on delete set null (recurrence_parent_id),
+
   constraint tasks_scheduled_has_date
     check (status <> 'scheduled' or due_date is not null),
   constraint tasks_done_has_date
-    check (status <> 'done' or completed_on is not null)
+    check (status <> 'done' or completed_on is not null),
+  constraint tasks_one_assignee
+    check (assignee_contact_id is null or assignee_user_id is null),
+  constraint tasks_confirmed_is_booked
+    check (confirmed_on is null
+      or (status in ('scheduled', 'done')
+        and (assignee_contact_id is not null or assignee_user_id is not null)))
 );
 ```
 
@@ -914,8 +938,60 @@ Recurrence materialises the **next** occurrence only, on completion, linked by
 bulk update and makes "open tasks" on the dashboard meaningless. The seasonal rhythm view (F5)
 reads the recurrence rule, not generated rows.
 
-`assignee_contact_id` points at a contact, not a user — the person cleaning the gutters does not
-have an account. That is also why revoking a membership orphans nothing (§7).
+**The next occurrence keeps the schedule, not the day the work got done** (#113). It is the first
+date after the completion that lies a whole number of intervals past the task's due date — past
+its completion date when it had none — each step counted from that date rather than from the step
+before, so a task due on the 31st comes back on the last day of a shorter month and returns to the
+31st after it. A gutter cleaning due September 1 and done on the 20th is next due December 1, and
+one done a quarter late leaves no overdue occurrence behind it. `nextOccurrence()` in
+`src/lib/tasks.ts` is the rule, and its tests are the cases.
+
+**Every reference out of `tasks` names the org** (§9, fifth item), and the capital item, the unit
+and the parent name the building as well, so a task cannot point at another building's equipment.
+Four of them are informational and `set null` — **of the one column**, Postgres 15's
+`set null (column)`, because a plain `set null` on a composite key nulls every column in it,
+`org_id` included. Drizzle cannot say that, so those four are written in the hand-written migration
+beside the generated one. The trade is `restrict`, not the `set null` this section first had: §7's
+rule for reference data, as `contact_tags` has it.
+
+`assignee_contact_id` points at a contact, and the person cleaning the gutters has no account, so
+that stays the vendor's column. **`assignee_user_id` is the other kind of assignee** (#94): a member
+of the org, for the owner-operator who does the work and for the small group that assigns it among
+themselves. At most one of the two is set.
+
+- **It references the membership, not the user** — `(org_id, user_id)`, the key
+  `memberships_org_user` already is. A task can only be assigned to somebody in its org, which a
+  reference to `users` would not say, and a foreign key is checked past row-level security, so the
+  scoped role needs no read of `memberships` to write one.
+- **Revoking the membership unassigns the task**, rather than keeping a former member on it. A task
+  held by somebody who has left is a task nobody is doing, and `Unassigned` says so where
+  `Former member` would not. The task, its history and its cost stay.
+- **v0 offers `Me` only.** Assigning a task to yourself needs only the session's own user; naming
+  *other* members needs a policy on `users`, which §9 leaves to #30, the issue that lists them.
+  Until then a task assigned to another member reads `A member`.
+
+**`confirmed_on` is the day the work was booked with its assignee** (#93), and null while it awaits
+confirmation. A date rather than a boolean, because `Confirmed Sep 3` is worth showing and costs
+nothing; a plain `date`, per ADR-0005.
+
+- **Changing the date or the assignee clears it.** A booking with the old vendor for the old day is
+  not a booking of the new one. The database holds the rule, in the `tasks_clear_confirmation`
+  trigger, so the modal, the scheduled row and anything written later cannot forget it — unless
+  the same statement sets `confirmed_on` itself, which is the modal confirming the new day. A
+  contact deleted or a membership revoked clears it the same way, since both arrive as updates.
+  This is also the prototype's `Rescheduled`, which is history rather than state and is not stored.
+- **Only a scheduled or done task with an assignee can be confirmed** —
+  `tasks_confirmed_is_booked`. An unscheduled task has no day to book and an unassigned one nobody
+  to book it with, so cancelling a task has to clear it too. A done task keeps it, as history.
+- **It is set in two places**: the Scheduled tab's Status column, one click with Undo
+  ([maintenance.md](ui/screens/maintenance.md#scheduled)), and the task modal
+  ([modal-task-detail.md](ui/screens/modal-task-detail.md#the-form)).
+
+**The one delete is Undo on a completion** (#113). Completing a recurring task writes its next
+occurrence, and taking the completion back removes it. The scoped role's `delete` on `tasks` comes
+with a restrictive policy, `tasks_delete_as_materialised`, that admits only a row with a
+`recurrence_parent_id` nobody has touched since it was written (`updated_at = created_at`). Every
+other task is cancelled, never deleted (§7).
 
 ```sql
 create table contacts (
@@ -1016,10 +1092,11 @@ references that are informational.** A `set null` that would lose a fact is a `r
 |---|---|
 | **Organization** | Two-phase. `deleted_at` is set and access stops immediately; a purge job hard-deletes after **30 days**, cascading through every domain table. ADR-0003 notes that restoring one org is a selective export rather than a database restore, which is exactly why the window exists. Export (#45) should be offered at the point of deletion. The purged rows stay in the nightly backups until those expire, 90 days later ([ADR-0010](adr/0010-backups.md)), so an org is gone from every copy 120 days after it is deleted |
 | **User** | The `users` row survives as long as anything references it — `invitations.inviter_id` is `restrict`, and #42's audit log will be too. Account deletion revokes memberships and clears sessions; it does not erase authorship |
-| **Membership (revoked)** | Hard delete of the row. Nothing is orphaned: tasks are assigned to contacts, not users. Blocked if it would leave the org with no owner |
+| **Membership (revoked)** | Hard delete of the row. Nothing is orphaned: a task assigned to the member goes back to unassigned (`set null` of `tasks.assignee_user_id`, #94) and keeps its history. Blocked if it would leave the org with no owner |
 | **Building** | `restrict` from units, capital items, tasks, rent periods, transactions. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
 | **Unit** | `restrict` from rent periods, capital items and their explicit shares, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
 | **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete, and the row that replaced it is held by `restrict` while the old one points at it. The one delete is the add-equipment modal's Undo (#110): the scoped role's `delete` on `capital_items` comes with a restrictive policy, `capital_items_delete_as_added`, that admits only a row still as the checklist left it — `estimated`, `active`, no actual cost. Nothing deletes a share on its own, so there is no grant on `capital_item_allocations`; an item's shares go with it (`cascade`) |
+| **Task** | `status = 'canceled'`, not a delete: a task that will not happen keeps its history, and the task tables leave it out. The one delete is Undo on a completion (#113), which removes the next occurrence the completion wrote — the scoped role's `delete` on `tasks` comes with a restrictive policy, `tasks_delete_as_materialised`, that admits only a row with a `recurrence_parent_id` nobody has touched since it was written. A deleted parent leaves its occurrences in place and unlinked (`set null` of `recurrence_parent_id`) |
 | **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it — `building_utilities_contact` is `restrict`, which enforces that (§3) — and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
 | **Rent period** | Not deleted. A month opened for a unit that stood empty is marked `vacant` (§4), which records it, where a deleted row would be reopened by the next view — so the scoped role holds no `delete` on `rent_periods` until something needs one. Once money is recorded it is edited, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
@@ -1080,6 +1157,12 @@ create index tasks_org_status_due    on tasks (org_id, status, due_date);
 create index tasks_org_building_unit on tasks (org_id, building_id, unit_id);
 create index tasks_org_assignee      on tasks (org_id, assignee_contact_id)
   where assignee_contact_id is not null;
+-- A member's tasks, and what `tasks_assignee_member` finds when a membership is revoked
+create index tasks_org_assignee_user on tasks (org_id, assignee_user_id)
+  where assignee_user_id is not null;
+-- A task's next occurrence, which Undo on a completion looks up by its parent
+create index tasks_org_recurrence_parent on tasks (org_id, recurrence_parent_id)
+  where recurrence_parent_id is not null;
 
 -- Contacts
 create index contacts_org_name  on contacts (org_id, name) where archived_at is null;

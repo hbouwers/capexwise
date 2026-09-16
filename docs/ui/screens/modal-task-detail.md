@@ -41,7 +41,8 @@ Two columns: the form, and a 336px rail of contacts.
 | Building, Scope | New tasks only — a building `Select`, prefilled from the page when there is one, and a scope `Select` (`Shared` or a unit) on a multi-unit building. Fixed once created |
 | Notes | `Textarea`. The prototype renders notes as static text; they are the field most worth editing |
 | Date | Date input. Helper: `Leave empty to keep it unscheduled.` |
-| Assignee | `Select`: `Unassigned`, then contacts with this task's trade, then `Other contacts` |
+| Assignee | `Select`: `Unassigned`, `Me`, then contacts with this task's trade, then `Other contacts` |
+| Confirmed | A `Checkbox`, `Confirmed with {assignee}`, on a scheduled task with an assignee. Checking it records today in the building's zone; changing the date or the assignee in the same save leaves it as checked, and otherwise clears it |
 | Priority | `Select`: High, Normal, Low |
 | Estimated cost | `Money` input |
 | Repeats | `Select`: Once, Monthly, Every 3 months, Every 6 months, Annually, Every 2 years |
@@ -52,9 +53,10 @@ Two columns: the form, and a 336px rail of contacts.
 date makes it unscheduled again. That is the `tasks_scheduled_has_date` constraint, and it replaces
 the prototype's "Save & schedule" button with a field whose helper says what it does.
 
-**"Self" is not an assignee yet.** The prototype offers it, and `assignee_contact_id` can only name a
-contact — a [gap](README.md#gaps-these-specs-found), which the small management groups of PRD §5 need
-filled for member-to-member assignment too. Until it is, the list is contacts only.
+**`Me` is an assignee** — `tasks.assignee_user_id`, a member of the org rather than a contact
+([data-model §6](../../data-model.md), #94). The prototype's `Self`. Other members join the list with
+#30, which gives the scoped role a way to read their names; until then a task assigned to one
+reads `A member` and keeps that assignee unless the field is changed.
 
 ### Relevant contacts
 

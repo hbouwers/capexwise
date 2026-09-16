@@ -76,7 +76,7 @@ Tasks with `status = 'unscheduled'`. High priority first, then oldest first.
 | Building | `fold` | Building name; `ScopeLabel` in the note line |
 | Trade | `fold` | The task's trade |
 | Est. cost | `figure` | `Money` |
-| Assignee | `fold` | The contact's name, or `Unassigned` in `--text-muted` |
+| Assignee | `fold` | The contact's name, `Me` for a task assigned to the viewer, `A member` for another member's until #30 names them, or `Unassigned` in `--text-muted` |
 
 The whole row is the click target through the title link's stretched hit area, which keeps it one
 `<a>` per row rather than a clickable `<tr>`.
@@ -92,19 +92,22 @@ screen; the groups are what make a list of dates scannable.
 | Done | `control` | `Checkbox` — completes the task, with Undo in a toast |
 | Task | `primary` | Title as a link to `?task={id}` |
 | Building | `fold` | Building name; `ScopeLabel` in the note line |
-| Assignee | `fold` | Contact name |
+| Assignee | `fold` | As on Unscheduled |
 | Repeats | `fold` | Frequency, or `Once` |
 | Date | `figure` | `DateValue`, with `{n} days late` in `--status-danger` |
 | Cost | `fold` | Estimated cost |
-| Status | `fold` | `Confirmed` (good) or `Awaiting confirmation` (warning) |
+| Status | `fold` | `Confirmed` (good) or `Awaiting confirmation` (warning), as a toggle. Nothing for an unassigned task |
 
 Checking a task completes it on today's date at its cost estimate. A task that needs its real cost
 or date recorded is completed from the task modal instead, which asks for both.
 
-**`Status` needs a column nothing has yet.** PRD F5 has scheduled tasks carry a confirmation state,
-and `tasks` has no field for it — a [gap](README.md#gaps-these-specs-found). Until it exists the
-column is not rendered. The prototype's third state, "Rescheduled", is history rather than state and
-is not carried forward.
+**`Status` is `tasks.confirmed_on`** ([data-model §6](../../data-model.md), #93): the day the work was
+booked with its assignee. The cell is a toggle — `Awaiting confirmation` records today, in the
+building's zone, and `Confirmed` clears it — with Undo in a toast, the shared rule for one-click
+writes. Its accessible name carries the task's title, because a column of them read out of the
+table all say the same word. An unassigned task has nobody to confirm with and shows nothing
+there. Changing a task's date or assignee clears its confirmation, in the database. The prototype's
+third state, "Rescheduled", is history rather than state and is not carried forward.
 
 ### Done
 
@@ -115,7 +118,7 @@ Tasks with `status = 'done'`, most recently completed first, the last 12 months 
 | --- | --- | --- |
 | Task | `primary` | Title as a link to `?task={id}` |
 | Building | `fold` | Building name; `ScopeLabel` in the note line |
-| Assignee | `fold` | Contact name |
+| Assignee | `fold` | As on Unscheduled |
 | Completed | `fold` | `DateValue`, and `{n} days late` if it was |
 | Cost | `figure` | Actual cost, or `—` |
 
