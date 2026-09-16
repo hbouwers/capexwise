@@ -151,6 +151,87 @@ export function addMonths(date: CalendarDate, months: number): CalendarDate {
   return `${String(Math.floor(index / 12)).padStart(4, "0")}-${shifted}-01`;
 }
 
+/**
+ * The same day `months` later — earlier for a negative number — or the last
+ * day of that month when it is shorter: January 31 and one month is February
+ * 28, or 29. A task's schedule steps by it (`nextOccurrence` in
+ * `src/lib/tasks.ts`), always from the day it started rather than from the
+ * step before, which is what brings the 31st back after a short month.
+ */
+export function addMonthsKeepingDay(
+  date: CalendarDate,
+  months: number,
+): CalendarDate {
+  const { day } = parts(date);
+  const first = addMonths(date, months);
+  const { year, month } = parts(first);
+
+  return `${first.slice(0, 8)}${String(Math.min(day, daysIn(year, month))).padStart(2, "0")}`;
+}
+
+/**
+ * Days since 1970-01-01 on the proleptic Gregorian calendar — a count, not an
+ * instant, so no timezone is involved. Howard Hinnant's `days_from_civil`.
+ */
+function dayNumber(date: CalendarDate): number {
+  const { year, month, day } = parts(date);
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yearOfEra = y - era * 400;
+  const dayOfYear =
+    Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  const dayOfEra =
+    yearOfEra * 365 +
+    Math.floor(yearOfEra / 4) -
+    Math.floor(yearOfEra / 100) +
+    dayOfYear;
+
+  return era * 146097 + dayOfEra - 719468;
+}
+
+/** `dayNumber`'s inverse: Hinnant's `civil_from_days`. */
+function fromDayNumber(days: number): CalendarDate {
+  const z = days + 719468;
+  const era = Math.floor(z / 146097);
+  const dayOfEra = z - era * 146097;
+  const yearOfEra = Math.floor(
+    (dayOfEra -
+      Math.floor(dayOfEra / 1460) +
+      Math.floor(dayOfEra / 36524) -
+      Math.floor(dayOfEra / 146096)) /
+      365,
+  );
+  const dayOfYear =
+    dayOfEra -
+    (365 * yearOfEra + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100));
+  const mp = Math.floor((5 * dayOfYear + 2) / 153);
+  const day = dayOfYear - Math.floor((153 * mp + 2) / 5) + 1;
+  const month = mp < 10 ? mp + 3 : mp - 9;
+  const year = yearOfEra + era * 400 + (month <= 2 ? 1 : 0);
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * The day `days` after the date, or before it for a negative number: the end
+ * of Maintenance's `Next 30 days`.
+ */
+export function addDays(date: CalendarDate, days: number): CalendarDate {
+  if (!Number.isSafeInteger(days)) {
+    throw new RangeError(`Expected a whole number of days, got ${days}.`);
+  }
+
+  return fromDayNumber(dayNumber(date) + days);
+}
+
+/**
+ * How many days `to` is after `from` — negative when it is before. `8 days
+ * late` is `daysBetween(dueDate, today)`.
+ */
+export function daysBetween(from: CalendarDate, to: CalendarDate): number {
+  return dayNumber(to) - dayNumber(from);
+}
+
 /** The year a date falls in: the forecast's "this year", from `todayIn`. */
 export function yearOf(date: CalendarDate): number {
   return parts(date).year;
