@@ -171,8 +171,12 @@ const { getBuildingFacts } = await import("@/server/queries/building-facts");
 const { markRentPaid, openRentPeriod, saveRentPeriod, unmarkRentPaid } =
   await import("@/server/actions/rent-periods");
 const { getRentRoll } = await import("@/server/queries/rent-periods");
-const { addCapitalItems, recordReplacement } =
-  await import("@/server/actions/capital-items");
+const {
+  addCapitalItems,
+  confirmCapitalItem,
+  recordReplacement,
+  undoAddCapitalItems,
+} = await import("@/server/actions/capital-items");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1844,6 +1848,56 @@ describe("the capital item paths", () => {
     expect(owned.capital_item_allocations).toHaveLength(2);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
+
+  it("confirms the caller's item, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+    const confirmation = { installedOn: "2008-11-20", cost: "$4,100" };
+
+    for (const item of [b.sharedItem, b.unitItem]) {
+      const theirs = await confirmCapitalItem(item.id, confirmation);
+      expect(theirs.ok).toBe(false);
+      expect(mentionsB(theirs, b)).toEqual([]);
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect(await confirmCapitalItem(a.sharedItem.id, confirmation)).toEqual({
+      ok: true,
+    });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("undoes an add in the caller's building, and removes none of the other org's", async () => {
+    // B's ids sent twice over: once with B's building, which is not the
+    // caller's to name, and once with A's, where B's items are not found. The
+    // ids are the whole of what Undo is told, so they are the thing to smuggle.
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+    const theirIds = [b.sharedItem.id, b.unitItem.id];
+
+    const viaTheirs = await undoAddCapitalItems(b.building.id, theirIds);
+    expect(viaTheirs).toEqual({ ok: false });
+    expect(await undoAddCapitalItems(a.building.id, theirIds)).toEqual({
+      ok: true,
+      removed: 0,
+    });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: A's own items, as the checklist left them, do go — the
+    // shared one's share with it.
+    expect(
+      await undoAddCapitalItems(a.building.id, [
+        a.sharedItem.id,
+        a.unitItem.id,
+      ]),
+    ).toEqual({ ok: true, removed: 2 });
+    const owned = await rowsOwnedBy(a.org.id);
+    expect(owned.capital_items ?? []).toHaveLength(0);
+    expect(owned.capital_item_allocations ?? []).toHaveLength(0);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
 });
 
 /**
@@ -1923,13 +1977,14 @@ describe.each(Object.entries(ORG_OWNED))(
 
       // Three acceptable outcomes, and which one a table gets is the
       // migration's decision rather than this test's: `organizations`,
-      // `contacts`, `building_facts`, `rent_periods`, `capital_items` and
+      // `contacts`, `building_facts`, `rent_periods` and
       // `capital_item_allocations` have no DELETE grant for the scoped role —
       // an org is soft-deleted and the purge is not a request, a contact is
       // archived, a building's facts are cleared rather than removed, a vacant
-      // month is marked rather than deleted, and equipment is replaced or
-      // removed by its status — so they are refused before any row is
-      // considered. `buildings` is refused by its units' `restrict`, because
+      // month is marked rather than deleted, and a share goes with its item —
+      // so they are refused before any row is considered. `capital_items` may
+      // be deleted only as the add-equipment checklist left it, for its Undo
+      // (`0021`), which every seeded item is. `buildings` is refused by its units' `restrict`, because
       // every seeded building has one (§7: archived, not deleted), and
       // `units` by the electric account, the month of rent and the equipment
       // on each. The others may delete, and must delete only A's. A refusal rolls the transaction back, and the snapshot below is

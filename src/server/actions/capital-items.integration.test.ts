@@ -49,8 +49,13 @@ process.env.GOOGLE_CLIENT_SECRET = "integration-suite-client-secret";
 // Dynamic, and after the assignments above, for the reason the isolation test
 // gives.
 const { getAuth } = await import("@/server/auth");
-const { addCapitalItems, recordReplacement } =
-  await import("@/server/actions/capital-items");
+const {
+  addCapitalItems,
+  confirmCapitalItem,
+  recordReplacement,
+  undoAddCapitalItems,
+} = await import("@/server/actions/capital-items");
+const { getOrgContext } = await import("@/server/org-context");
 const { updateBuilding } = await import("@/server/actions/buildings");
 const { getBuilding } = await import("@/server/queries/buildings");
 
@@ -474,6 +479,206 @@ describe("recordReplacement", () => {
 
     expect((await recordReplacement(old.id, replaced)).ok).toBe(false);
     expect(await itemsOf(building.id)).toEqual([old]);
+  });
+});
+
+describe("undoAddCapitalItems", () => {
+  it("removes exactly the rows the add made", async () => {
+    const { org, building } = await duplex();
+    const before = await createCapitalItem(org.id, building.id);
+
+    const added = await addCapitalItems(building.id, {
+      items: [
+        { type: "refrigerator", scope: "each", installYear: 2019 },
+        { type: "roof-asphalt", scope: "shared", installYear: 2014 },
+      ],
+    });
+    if (!added.ok) throw new Error("The add was refused.");
+    expect(added.itemIds).toHaveLength(3);
+
+    expect(await undoAddCapitalItems(building.id, added.itemIds)).toEqual({
+      ok: true,
+      removed: 3,
+    });
+    expect(await itemsOf(building.id)).toEqual([before]);
+  });
+
+  it("leaves an item confirmed since the add", async () => {
+    const { building } = await duplex();
+    const added = await addCapitalItems(building.id, {
+      items: [{ type: "refrigerator", scope: "each", installYear: 2019 }],
+    });
+    if (!added.ok) throw new Error("The add was refused.");
+    const [confirmed, untouched] = added.itemIds as [string, string];
+
+    expect(
+      await confirmCapitalItem(confirmed, {
+        installedOn: "2018-05-14",
+        cost: "",
+      }),
+    ).toEqual({ ok: true });
+
+    expect(await undoAddCapitalItems(building.id, added.itemIds)).toEqual({
+      ok: true,
+      removed: 1,
+    });
+    expect((await itemsOf(building.id)).map((item) => item.id)).toEqual([
+      confirmed,
+    ]);
+    expect(await itemsOf(building.id)).not.toContainEqual(
+      expect.objectContaining({ id: untouched }),
+    );
+  });
+
+  it("takes nothing from another building by its ids", async () => {
+    const { org, building } = await duplex();
+    const other = await createBuilding(org.id, { timezone: ZONE });
+    const theirs = await createCapitalItem(org.id, other.id);
+
+    expect(await undoAddCapitalItems(building.id, [theirs.id])).toEqual({
+      ok: true,
+      removed: 0,
+    });
+    expect(await itemsOf(other.id)).toEqual([theirs]);
+  });
+
+  it("removes nothing on an archived building", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+    await testDb()
+      .update(buildings)
+      .set({ status: "archived" })
+      .where(eq(buildings.id, building.id));
+
+    expect(await undoAddCapitalItems(building.id, [item.id])).toEqual({
+      ok: false,
+    });
+    expect(await itemsOf(building.id)).toEqual([item]);
+  });
+
+  it("refuses a list the toast could not have sent", async () => {
+    const { building } = await duplex();
+
+    expect(await undoAddCapitalItems(building.id, [])).toEqual({ ok: false });
+    expect(await undoAddCapitalItems(building.id, ["not-an-id"])).toEqual({
+      ok: false,
+    });
+  });
+});
+
+describe("capital_items_delete_as_added", () => {
+  it("lets the scoped role delete an item only while it is as the checklist left it", async () => {
+    // The restrictive policy in `0021`, driven through the scoped handle with
+    // no filter of its own — the delete an action that forgot its conditions
+    // would run. Only the estimated, active item with no cost goes.
+    const { org, building } = await duplex();
+    const asAdded = await createCapitalItem(org.id, building.id);
+    const audited = await createCapitalItem(org.id, building.id, {
+      confidence: "audited",
+      installYear: 2011,
+      installDate: "2011-03-09",
+    });
+    const costed = await createCapitalItem(org.id, building.id, {
+      actualCostCents: 410_000,
+    });
+    const removed = await createCapitalItem(org.id, building.id, {
+      status: "removed",
+    });
+
+    const { db } = await getOrgContext();
+    const deleted = await db.run((tx) =>
+      tx
+        .delete(capitalItems)
+        .where(eq(capitalItems.buildingId, building.id))
+        .returning({ id: capitalItems.id }),
+    );
+
+    expect(deleted).toEqual([{ id: asAdded.id }]);
+    expect(await itemsOf(building.id)).toEqual([audited, costed, removed]);
+  });
+});
+
+describe("confirmCapitalItem", () => {
+  it("marks the item audited, from the day it went in, with its cost as its basis", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id, {
+      installYear: 2014,
+      replacementCostCents: 480_000,
+    });
+
+    expect(
+      await confirmCapitalItem(item.id, {
+        installedOn: "2011-03-09",
+        cost: "$4,180",
+      }),
+    ).toEqual({ ok: true });
+
+    expect(await itemRow(item.id)).toEqual({
+      ...item,
+      confidence: "audited",
+      installDate: "2011-03-09",
+      installYear: 2011,
+      actualCostCents: 418_000,
+      // The forecast's figure is the editor's to change, not Confirm's.
+      replacementCostCents: 480_000,
+      updatedAt: expect.any(Date),
+    });
+  });
+
+  it("says what is wrong with the form, and writes nothing", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+
+    expect(
+      await confirmCapitalItem(item.id, { installedOn: "", cost: "lots" }),
+    ).toEqual({
+      ok: false,
+      errors: {
+        installedOn: "Enter the day it was installed.",
+        cost: "Enter an amount in dollars, like 1,250.",
+      },
+    });
+    expect(await itemRow(item.id)).toEqual(item);
+  });
+
+  it("confirms an item once, and not one replaced or removed", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+    const gone = await createCapitalItem(org.id, building.id, {
+      status: "removed",
+    });
+    const confirmation = { installedOn: "2010-06-01", cost: "" };
+
+    expect((await confirmCapitalItem(item.id, confirmation)).ok).toBe(true);
+    const once = await itemRow(item.id);
+
+    expect(
+      await confirmCapitalItem(item.id, {
+        installedOn: "2012-01-01",
+        cost: "",
+      }),
+    ).toEqual({
+      ok: false,
+      errors: {
+        form: "This item could not be confirmed. Reload the page — it may have changed since you opened it.",
+      },
+    });
+    expect(await itemRow(item.id)).toEqual(once);
+    expect((await confirmCapitalItem(gone.id, confirmation)).ok).toBe(false);
+  });
+
+  it("confirms nothing on an archived building", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+    await testDb()
+      .update(buildings)
+      .set({ status: "archived" })
+      .where(eq(buildings.id, building.id));
+
+    expect(
+      (await confirmCapitalItem(item.id, { installedOn: today, cost: "" })).ok,
+    ).toBe(false);
+    expect(await itemRow(item.id)).toEqual(item);
   });
 });
 
