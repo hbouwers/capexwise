@@ -168,6 +168,31 @@ than inventing a share:
 
 ---
 
+## As built
+
+#112 built this screen. What it settled that the regions above do not say:
+
+- **Across the portfolio, "today" is the latest of the buildings' todays** (`forecastToday` in
+  `src/lib/forecast/params.ts`). An org has no timezone, and on the night the year turns in one
+  building and not another, a replacement due in the new year is due somewhere already. With a
+  building selected it is that building's today. `Update reserve` holds the as-of date to the same
+  day.
+- **With a building selected, the second figure is level funding** and no year is marked short,
+  for the reason the rail gives: the reserve is the org's, and a building has no share of it.
+- **`?defer=` is `{itemId}:{years}`, comma-separated.** Choosing a building clears it, because a
+  deferral names an item and the items change with the building. `What if?` is a radio group with
+  `As forecast` first, so the menu shows which deferral is applied and takes it back; only an item's
+  next replacement offers it, since the ones after follow it.
+- **A selected or short year tints its estimated segment too** — the dashed border in the state's
+  colour over a pale fill — or a year resting wholly on estimates could show neither.
+- **The low-point sentence names items as `Roof at Sumner St`.** The example's `the Sumner roof`
+  lowercases a label, which an `AC condenser` does not survive; past two items it adds
+  `with {n} more items`.
+- **The year's table folds on its own width, 36rem**, not at `md`: beside the rail at 1024px the
+  column is 347px, narrower than a phone.
+
+---
+
 ## Changes from the prototype
 
 - **The chart's binary is "reserve runs short"**, not "over $30k", and bars split audited from

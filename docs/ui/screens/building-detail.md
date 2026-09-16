@@ -234,6 +234,10 @@ items by name (`AC condenser, washer, carpet`), and compact `Money`. A year with
 The prototype skips empty years and shows 2029 then 2031. The same component on the portfolio shows
 five consecutive years, so this one does too — and a year with nothing due is information.
 
+**As built (#112), it stands full width where the recurring tasks' band will be**, until #113 gives
+it a band to sit in. A year's items are named largest first, with a repeated label counted —
+`Dishwasher ×2` — for an item added to each unit.
+
 The prototype's caption, `Set aside $640/mo here … You are banking $400`, needs a per-building
 contribution nobody stores. The need half is the summary's third tile; the banking half is a
 [gap](README.md#gaps-these-specs-found).
