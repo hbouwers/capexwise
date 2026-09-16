@@ -54,6 +54,19 @@ export function frequencyLabel(recurrenceMonths: number | null): string {
   return `Every ${recurrenceMonths} months`;
 }
 
+/**
+ * Maintenance's tabs, in `?tab=` (`maintenance.md`). Here rather than beside
+ * the tabs, because the page reads it on the server and a client module's
+ * exports reach a Server Component only as references to render.
+ */
+export const MAINTENANCE_TABS = ["unscheduled", "scheduled", "done"] as const;
+
+export type MaintenanceTab = (typeof MAINTENANCE_TABS)[number];
+
+export function maintenanceTab(value: string | null): MaintenanceTab {
+  return MAINTENANCE_TABS.find((tab) => tab === value) ?? "unscheduled";
+}
+
 export const PRIORITY_LABELS = {
   high: "High",
   normal: "Normal",

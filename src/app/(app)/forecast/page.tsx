@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { BuildingSelect } from "@/components/forecast/building-select";
 import {
   CapitalPlanCard,
   type EstimatedIn,
 } from "@/components/forecast/capital-plan-card";
+import { BuildingSelect } from "@/components/building-select";
 import { ReserveCard } from "@/components/forecast/reserve-card";
 import { type ItemPlace, YearTable } from "@/components/forecast/year-table";
 import { EmptyState } from "@/components/empty-state";
@@ -67,6 +67,8 @@ export default async function ForecastPage({
       <BuildingSelect
         buildings={inputs.buildings.map(({ id, name }) => ({ id, name }))}
         selected={building?.id ?? null}
+        // A deferral names an item of the building it was made on.
+        clears={["defer"]}
       />
     ) : null;
 
