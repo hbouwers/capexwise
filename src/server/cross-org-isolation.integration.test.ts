@@ -177,6 +177,7 @@ const {
   recordReplacement,
   undoAddCapitalItems,
 } = await import("@/server/actions/capital-items");
+const { listEquipment } = await import("@/server/queries/capital-items");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1790,6 +1791,19 @@ describe("the capital item paths", () => {
 
   const roof = { type: "roof-asphalt", scope: "shared", installYear: 2014 };
   const replaced = { installedOn: "2026-08-02", cost: "$7,420" };
+
+  it("reads the caller's equipment, and none of the other org's by its building's id", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const mine = await listEquipment(a.building.id);
+    expect(mine.map((item) => item.id).sort()).toEqual(
+      [a.sharedItem.id, a.unitItem.id].sort(),
+    );
+    expect(mentionsB(mine, b)).toEqual([]);
+
+    expect(await listEquipment(b.building.id)).toEqual([]);
+  });
 
   it("adds to the caller's building, and refuses the other org's", async () => {
     const { a, b } = await seedTwoOrgs();

@@ -3,8 +3,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * A building's page while it loads: the header, the summary's badge and tile,
- * a three-row units table and the facts card's four groups, at the heights they
- * render at
+ * a three-row units table, the facts card's four groups and eight rows of
+ * equipment, at the heights they render at
  * (`docs/ui/screens/building-detail.md`, states). Each region that joins the
  * page adds its own rows here.
  */
@@ -41,6 +41,13 @@ export default function BuildingLoading() {
                 </div>
               ))}
             </div>
+          </div>
+          <div className="flex flex-col gap-px overflow-hidden rounded-lg border border-border-card">
+            <Skeleton className="h-16 rounded-none" />
+            <Skeleton className="h-13 rounded-none opacity-80" />
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((row) => (
+              <Skeleton key={row} className="h-14 rounded-none opacity-60" />
+            ))}
           </div>
         </div>
       </PageBody>

@@ -166,3 +166,16 @@ export function rowsForScope(
     ? [{ unitId: choice.unitId, allocation: "building_only" }]
     : null;
 }
+
+/**
+ * What a catalogue group is called: the checklist's group headings, and an
+ * item's category in the equipment table. Keyed by `item_group`, whose check
+ * constraint lists the same five.
+ */
+export const CAPITAL_ITEM_GROUP_LABELS: Record<string, string> = {
+  kitchen: "Kitchen",
+  laundry: "Laundry",
+  hvac_water: "HVAC & water",
+  envelope: "Envelope",
+  interior_systems: "Interior & systems",
+};
