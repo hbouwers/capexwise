@@ -179,6 +179,10 @@ const {
   undoAddCapitalItems,
 } = await import("@/server/actions/capital-items");
 const { listEquipment } = await import("@/server/queries/capital-items");
+const { addTask, completeTask, setTaskConfirmation, undoCompleteTask } =
+  await import("@/server/actions/tasks");
+const { getMaintenanceInputs, getRecurringTasks } =
+  await import("@/server/queries/tasks");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -1934,6 +1938,82 @@ describe("the capital item paths", () => {
     const owned = await rowsOwnedBy(a.org.id);
     expect(owned.capital_items ?? []).toHaveLength(0);
     expect(owned.capital_item_allocations ?? []).toHaveLength(0);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+describe("the task paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  const job = (buildingId: string, scope = "shared") => ({
+    title: "Replace the porch light",
+    buildingId,
+    scope,
+    recurrence: "",
+  });
+
+  it("reads the caller's tasks, and none of the other org's by its building's id", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const mine = await getMaintenanceInputs();
+    expect(mine.tasks.map((task) => task.id).sort()).toEqual(
+      [a.sharedTask.id, a.unitTask.id].sort(),
+    );
+    expect(mentionsB(mine, b)).toEqual([]);
+
+    const theirs = await getRecurringTasks(b.building.id);
+    expect(theirs).toEqual({ open: [], done: [] });
+  });
+
+  it("adds to the caller's building, and refuses the other org's building and unit", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const input of [job(b.building.id), job(a.building.id, b.unit.id)]) {
+      const refused = await addTask(input);
+      expect(refused.ok).toBe(false);
+      expect(mentionsB(refused, b)).toEqual([]);
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    expect((await addTask(job(a.building.id, a.unit.id))).ok).toBe(true);
+    expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(3);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("completes, confirms and undoes the caller's task, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const task of [b.sharedTask, b.unitTask]) {
+      expect(await completeTask(task.id)).toEqual({ ok: false });
+      expect(await setTaskConfirmation(task.id, null)).toEqual({ ok: false });
+      expect(await undoCompleteTask(task.id, null)).toEqual({ ok: false });
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: A's recurring gutters, unconfirmed, completed — writing
+    // their next occurrence — and taken back.
+    expect(await setTaskConfirmation(a.sharedTask.id, null)).toMatchObject({
+      ok: true,
+    });
+    const completed = await completeTask(a.sharedTask.id);
+    expect(completed).toMatchObject({ ok: true });
+    expect(mentionsB(completed, b)).toEqual([]);
+    expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(3);
+    expect(await undoCompleteTask(a.sharedTask.id, null)).toEqual({ ok: true });
+    expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(2);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });
