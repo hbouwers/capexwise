@@ -244,7 +244,7 @@ that computes them — each wants a unit test before it is trusted:
 | Big ticket | Replacement cost of $5,000 or more | [Portfolio](portfolio.md#your-buildings) |
 | Systems life used | Replacement-cost-weighted mean of age over life, each item capped at 100% | [Portfolio](portfolio.md#your-buildings) |
 | Building flag | Past life, then due soon, then a big-ticket year within three, then healthy | [Portfolio](portfolio.md#your-buildings) |
-| Reserve needed / mo | The smallest level contribution that keeps the reserve at or above zero for ten years | [Forecast](capex-forecast.md#ten-year-capital-plan) |
+| Reserve needed / mo | The smallest level contribution that keeps the reserve at or above zero for ten years. **Timing settled** 2026-09-16: a replacement is paid in January of its year, and contributions since the balance's as-of date are not counted | [Forecast](capex-forecast.md#ten-year-capital-plan) |
 | Marking a past month paid | Records it on the period's first day, not today. **Settled** with #108: `paidOn` in `src/lib/rent.ts` | [Rent roll](building-detail.md#units--rent) |
 
 ---

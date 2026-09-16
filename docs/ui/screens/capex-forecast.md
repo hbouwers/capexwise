@@ -52,10 +52,20 @@ The last two need the org's reserve, three columns on `organizations`
 ([data-model §2](../../data-model.md), #92). Until one is entered, the second figure is level
 funding — the total over 120 months, labelled `to fund the next ten years evenly` as on
 [the building page](building-detail.md#summary) — and the third is not rendered. The "needed" rule
-is forecast-module logic, proposed here. Two things its tests have to pin down, because the
-reserve is kept by the month and replacements are known only by the year: when in its year a
-replacement is paid for, and whether the months since the balance's as-of date count as
-contributed.
+is forecast-module logic. The reserve is kept by the month and replacements are known only by the
+year, so two timing rules were settled on 2026-09-16, both toward the reading that never overstates
+what the reserve can cover:
+
+- **A replacement is paid in January of its year**, before that January's contribution. A roof due
+  in 2028 is covered only by what was saved through December 2027. It can fail in February, and a
+  December assumption would call the year covered on twelve deposits that may never arrive in time.
+  This year's replacements, past-due ones included, come out of the balance at the start of the
+  projection.
+- **Contributions since the balance's as-of date are not counted.** The projection starts from the
+  balance as entered, and the first contribution is the month after this one. CapExWise cannot see
+  the account, and a deposit skipped or a repair paid out of the reserve would make a counted
+  balance higher than the real one. An old balance shows up as a higher monthly need and its
+  `as of {date}`, which is the prompt to update it.
 
 **`YearBarChart`**: ten bars, this year through nine years out. Each bar is the year's replacement
 cost, and **this year's bar includes every replacement already past due**, which is what makes it
