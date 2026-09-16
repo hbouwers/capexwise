@@ -33,6 +33,7 @@ import {
   memberships,
   organizations,
   rentPeriods,
+  tasks,
   units,
   users,
 } from "@/db/schema";
@@ -77,6 +78,8 @@ type RentPeriodInput = typeof rentPeriods.$inferInsert;
 type CapitalItem = typeof capitalItems.$inferSelect;
 type CapitalItemInput = typeof capitalItems.$inferInsert;
 type CapitalItemAllocation = typeof capitalItemAllocations.$inferSelect;
+type Task = typeof tasks.$inferSelect;
+type TaskInput = typeof tasks.$inferInsert;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -450,4 +453,34 @@ export async function splitCapitalItem(
       )
       .returning();
   });
+}
+
+/**
+ * Gutters cleaned every three months, due September 1 and not yet booked — the
+ * building's, unless a `unitId` is given. Takes the building as well as the
+ * org, both required, for `createUnit`'s reason.
+ *
+ * Written straight to the table, not through an action, so a test says
+ * exactly what the row holds.
+ */
+export async function createTask(
+  orgId: string,
+  buildingId: string,
+  overrides: Partial<TaskInput> = {},
+): Promise<Task> {
+  const rows = await testDb()
+    .insert(tasks)
+    .values({
+      orgId,
+      buildingId,
+      title: "Clean the gutters",
+      status: "scheduled",
+      dueDate: "2026-09-01",
+      estCostCents: 18_000,
+      recurrenceMonths: 3,
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "tasks");
 }

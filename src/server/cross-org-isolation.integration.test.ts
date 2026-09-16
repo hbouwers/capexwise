@@ -97,6 +97,7 @@ import {
   createMembership,
   createOrganization,
   createRentPeriod,
+  createTask,
   createUnit,
   createUser,
   createUtility,
@@ -201,6 +202,7 @@ const ORG_OWNED = {
   rent_periods: "org_id",
   capital_items: "org_id",
   capital_item_allocations: "org_id",
+  tasks: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -409,6 +411,24 @@ async function seedTwoOrgs() {
       replacementCostCents: 160_000,
     });
 
+    // Both scopes again, and both kinds of assignee: gutters on the shared
+    // furnace's building, booked with the plumber, and a unit A job the owner
+    // is doing themselves (#94). A lookup keyed on the title or the date would
+    // find one in each org.
+    const sharedTask = await createTask(org.id, building.id, {
+      capitalItemId: sharedItem.id,
+      assigneeContactId: contact.id,
+      confirmedOn: "2026-08-28",
+    });
+    const unitTask = await createTask(org.id, building.id, {
+      unitId: unit.id,
+      title: "Recaulk the tub",
+      status: "unscheduled",
+      dueDate: null,
+      recurrenceMonths: null,
+      assigneeUserId: owner.id,
+    });
+
     return {
       org,
       owner,
@@ -425,6 +445,8 @@ async function seedTwoOrgs() {
       rentPeriod,
       sharedItem,
       unitItem,
+      sharedTask,
+      unitTask,
     };
   }
 
@@ -464,6 +486,8 @@ function identifiersOf(side: Side): string[] {
     side.rentPeriod.id,
     side.sharedItem.id,
     side.unitItem.id,
+    side.sharedTask.id,
+    side.unitTask.id,
   ];
 }
 
@@ -1998,7 +2022,8 @@ describe.each(Object.entries(ORG_OWNED))(
       // month is marked rather than deleted, and a share goes with its item —
       // so they are refused before any row is considered. `capital_items` may
       // be deleted only as the add-equipment checklist left it, for its Undo
-      // (`0021`), which every seeded item is. `buildings` is refused by its units' `restrict`, because
+      // (`0021`), which every seeded item is, and `tasks` only as an
+      // occurrence a completion wrote (`0023`), which no seeded task is. `buildings` is refused by its units' `restrict`, because
       // every seeded building has one (§7: archived, not deleted), and
       // `units` by the electric account, the month of rent and the equipment
       // on each. The others may delete, and must delete only A's. A refusal rolls the transaction back, and the snapshot below is
@@ -2239,6 +2264,44 @@ describe("a reference from one org's row to another's", () => {
         sql`update capital_item_allocations set unit_id = ${b.unit.id}
             where capital_item_id = ${a.sharedItem.id}`,
     ],
+    [
+      "a task on another org's building",
+      (a: Side, b: Side) =>
+        sql`insert into tasks (org_id, building_id, title)
+            values (${a.org.id}, ${b.building.id}, 'Clean the gutters')`,
+    ],
+    [
+      "a task in another org's unit",
+      (a: Side, b: Side) =>
+        sql`update tasks set unit_id = ${b.unit.id}
+            where id = ${a.unitTask.id}`,
+    ],
+    [
+      "a task on another org's equipment",
+      (a: Side, b: Side) =>
+        sql`update tasks set capital_item_id = ${b.sharedItem.id}
+            where id = ${a.sharedTask.id}`,
+    ],
+    [
+      "a task assigned to another org's contact",
+      (a: Side, b: Side) =>
+        sql`update tasks set assignee_contact_id = ${b.contact.id}
+            where id = ${a.sharedTask.id}`,
+    ],
+    [
+      // B's owner is a real user and a real member — of B. The reference is
+      // to the membership, so naming them from A is refused.
+      "a task assigned to another org's member",
+      (a: Side, b: Side) =>
+        sql`update tasks set assignee_user_id = ${b.owner.id}
+            where id = ${a.unitTask.id}`,
+    ],
+    [
+      "a task recurring from another org's",
+      (a: Side, b: Side) =>
+        sql`update tasks set recurrence_parent_id = ${b.sharedTask.id}
+            where id = ${a.unitTask.id}`,
+    ],
   ])("refuses %s", async (_, statement) => {
     const { a, b } = await seedTwoOrgs();
     const db = await scopedHandleFor(a);
@@ -2298,5 +2361,22 @@ describe("a reference from one org's row to another's", () => {
     const owned = await rowsOwnedBy(a.org.id);
     expect(owned.capital_items).toHaveLength(3);
     expect(owned.capital_item_allocations).toHaveLength(2);
+  });
+
+  // The control for the six task cases: a new task on A's own building and
+  // unit, on A's equipment, assigned to A's member — the person in both orgs,
+  // who is A's member too — and recurring from A's gutters.
+  it("lets a task onto the scoped org's own rows", async () => {
+    const { a, shared } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run((tx) =>
+      tx.execute(
+        sql`insert into tasks (org_id, building_id, unit_id, capital_item_id, assignee_user_id, recurrence_parent_id, title)
+            values (${a.org.id}, ${a.building.id}, ${a.unit.id}, ${a.unitItem.id}, ${shared.id}, ${a.sharedTask.id}, 'Clean the coils')`,
+      ),
+    );
+
+    expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(3);
   });
 });
