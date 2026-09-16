@@ -23,8 +23,10 @@ catalogue checklist, confirmed, and shown in the building's equipment table, wit
 seed, the replacement year and the life status as tested rules in `src/lib/forecast/` — #110.
 The forecast's arithmetic is written and tested there too — ten years of replacements with audited
 and estimated cost apart, the reserve projection and its monthly need, level funding, deferral, and
-the building flag — #111. The forecast screen, the tax planner and the rest of what the product is
-*for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
+the building flag — #111. The forecast page reads it at `/forecast`, portfolio-wide or by building,
+with `What if?` deferral and the reserve entered through `Update reserve`, and the building page's
+capital tiles and replacement runway read the same module — #112. The tax planner and the rest of
+what the product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
 

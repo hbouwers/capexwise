@@ -10,6 +10,7 @@ import {
 } from "@/components/buildings/equipment-card";
 import { RentRollCard } from "@/components/buildings/rent-roll";
 import { Money } from "@/components/money";
+import { RunwayList } from "@/components/runway-list";
 import { PageBody, PageHeader } from "@/components/shell/page-header";
 import { StatTile, StatTiles } from "@/components/stat-tile";
 import { StatusBadge } from "@/components/status-badge";
@@ -21,6 +22,13 @@ import {
   unitCount,
 } from "@/lib/buildings";
 import { todayIn, yearOf } from "@/lib/dates";
+import { lifeStatus, replacementYear } from "@/lib/forecast/life";
+import {
+  type ForecastItem,
+  levelFundingPerMonthCents,
+  outflowByYear,
+  replacements,
+} from "@/lib/forecast/outflow";
 import { getBuildingFacts } from "@/server/queries/building-facts";
 import { getBuilding } from "@/server/queries/buildings";
 import { getCatalogue, listEquipment } from "@/server/queries/capital-items";
@@ -30,10 +38,11 @@ import { getRentRoll } from "@/server/queries/rent-periods";
 /**
  * A building's page (`docs/ui/screens/building-detail.md`): its header, the
  * Summary's `Rent / mo` tile, the rent roll for the month in `?month=`, its
- * facts, and its equipment, filtered by `?scope=` and `?confidence=`. The
- * recurring tasks come with the issue that stores them, and the Summary's
- * capital tiles and the replacement runway with the forecast (#111), whose
- * module they read.
+ * facts, its replacement runway, and its equipment, filtered by `?scope=` and
+ * `?confidence=`. The recurring tasks come with the issue that stores them
+ * (#113). The capital tiles and the runway read `src/lib/forecast/`, the
+ * module the forecast page reads, so the two pages cannot disagree about a
+ * year.
  *
  * `getBuilding()` answers `null` for an id that does not exist, one that is not
  * an id, and one in another org, and all three are the same 404.
@@ -86,6 +95,21 @@ export default async function BuildingPage({
 
   const today = todayIn(building.timezone);
   const thisYear = yearOf(today);
+
+  // Everything on the list is in service; the forecast reads the same fields.
+  const forecastItems: ForecastItem[] = equipment.map((item) => ({
+    ...item,
+    status: "active",
+  }));
+  const years = outflowByYear(replacements(forecastItems, thisYear), thisYear);
+  // `CapEx through {next year}`: each item's own next replacement, past-due
+  // ones included — not its recurrences, which the ten-year tile counts.
+  const dueSoon = equipment.filter(
+    (item) => replacementYear(item) <= thisYear + 1,
+  );
+  const pastLife = dueSoon.filter(
+    (item) => lifeStatus(item, thisYear) === "past-life",
+  ).length;
 
   const tracked: Record<string, number> = {};
   for (const item of equipment) {
@@ -161,6 +185,29 @@ export default async function BuildingPage({
                 sub={`${occupied.length} of ${unitCount(units.length)} occupied`}
                 href="#units"
               />
+              <StatTile
+                label={`CapEx through ${thisYear + 1}`}
+                figure={
+                  <Money
+                    cents={dueSoon.reduce(
+                      (sum, item) => sum + item.replacementCostCents,
+                      0,
+                    )}
+                  />
+                }
+                sub={`${dueSoon.length === 1 ? "1 item" : `${dueSoon.length} items`}, ${pastLife} past life`}
+                href="#equipment"
+              />
+              <StatTile
+                label="Ten-year need / mo"
+                figure={<Money cents={levelFundingPerMonthCents(years)} />}
+                sub="to fund the next ten years evenly"
+                // The forecast lists active buildings only, so an archived
+                // or sold one's filter would open the whole portfolio.
+                href={
+                  editable ? `/forecast?building=${building.id}` : "#equipment"
+                }
+              />
             </StatTiles>
           </section>
 
@@ -183,6 +230,29 @@ export default async function BuildingPage({
             }))}
           />
 
+          {/* The spec puts the runway in the recurring tasks' rail. Until those
+              are stored (#113) there is no band to put it beside, so it
+              stands on its own where the band will be. */}
+          <section
+            aria-labelledby="runway-heading"
+            className="overflow-hidden rounded-lg border border-border-card bg-surface-card"
+          >
+            <h2
+              id="runway-heading"
+              className="border-b border-border-divider px-5 py-4 text-md leading-tight font-semibold text-text-primary"
+            >
+              Replacement runway
+            </h2>
+            <RunwayList
+              rows={years.slice(0, 5).map((bar) => ({
+                year: bar.year,
+                items: runwayItems(bar.replacements.map((r) => r.item.label)),
+                cents: bar.totalCents,
+                href: `/forecast?building=${building.id}&year=${bar.year}`,
+              }))}
+            />
+          </section>
+
           <EquipmentCard
             items={equipment}
             units={detail.units.map((unit) => ({
@@ -202,6 +272,21 @@ export default async function BuildingPage({
       </PageBody>
     </>
   );
+}
+
+/**
+ * A runway year's items by name, largest first as the forecast sorts them:
+ * `Furnace, Dishwasher ×2`. Null for a year with nothing due.
+ */
+function runwayItems(labels: readonly string[]): string | null {
+  if (labels.length === 0) return null;
+
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+
+  return [...counts]
+    .map(([label, count]) => (count === 1 ? label : `${label} ×${count}`))
+    .join(", ");
 }
 
 /**
