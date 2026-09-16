@@ -202,7 +202,11 @@ export default async function BuildingPage({
                 label="Ten-year need / mo"
                 figure={<Money cents={levelFundingPerMonthCents(years)} />}
                 sub="to fund the next ten years evenly"
-                href={`/forecast?building=${building.id}`}
+                // The forecast lists active buildings only, so an archived
+                // or sold one's filter would open the whole portfolio.
+                href={
+                  editable ? `/forecast?building=${building.id}` : "#equipment"
+                }
               />
             </StatTiles>
           </section>
