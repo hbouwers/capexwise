@@ -169,6 +169,13 @@
       "when": 1789599804427,
       "tag": "0023_tasks_row_level_security",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789655318611,
+      "tag": "0024_users_is_anonymous",
+      "breakpoints": true
     }
   ]
 }

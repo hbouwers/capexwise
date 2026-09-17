@@ -38,6 +38,11 @@ export const users = pgTable("users", {
   // ours, and neither of these is load-bearing for anything in the product.
   name: text("name"),
   image: text("image"),
+  // A demo visitor (ADR-0011): Better Auth's anonymous plugin writes the row
+  // with a placeholder address on `.invalid`, which can receive nothing, and
+  // sets this. The nightly reset deletes every row that has it, so a visitor
+  // is never a person the database keeps.
+  isAnonymous: boolean("is_anonymous").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

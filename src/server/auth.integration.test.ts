@@ -323,3 +323,84 @@ describe("an account that already belongs somewhere", () => {
     expect(membership?.role).toBe("member");
   });
 });
+
+describe("a demo visitor (ADR-0011)", () => {
+  /** The endpoint the demo button posts to, as a browser on this origin would. */
+  async function visit(ip: string) {
+    return await getAuth().handler(
+      new Request("http://localhost:3000/api/auth/sign-in/anonymous", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost:3000",
+          "content-type": "application/json",
+          "x-forwarded-for": ip,
+        },
+        body: "{}",
+      }),
+    );
+  }
+
+  it("signs in as an anonymous account that is a member of the demo and nothing else", async () => {
+    const demo = await createOrganization({ isDemo: true, slug: "demo" });
+
+    const response = await visit("203.0.113.20");
+    expect(response.status).toBe(200);
+
+    const [visitor] = await testDb()
+      .select()
+      .from(users)
+      .where(eq(users.isAnonymous, true));
+
+    expect(visitor?.email).toMatch(/\.invalid$/);
+    expect(
+      await testDb()
+        .select({ orgId: memberships.orgId, role: memberships.role })
+        .from(memberships)
+        .where(eq(memberships.userId, visitor!.id)),
+    ).toEqual([{ orgId: demo.id, role: "member" }]);
+
+    // No org of its own: an anonymous account that got one would be a free
+    // unit per click.
+    expect(await testDb().select().from(organizations)).toHaveLength(1);
+
+    const [session] = await testDb()
+      .select()
+      .from(sessions)
+      .where(eq(sessions.userId, visitor!.id));
+
+    expect(session?.activeOrgId).toBe(demo.id);
+  });
+
+  it("is refused, writing nothing, where there is no demo", async () => {
+    const response = await visit("203.0.113.21");
+    expect(response.status).toBe(404);
+
+    expect(await testDb().select().from(users)).toEqual([]);
+    expect(await testDb().select().from(sessions)).toEqual([]);
+  });
+
+  it("is refused where the demo org is soft-deleted", async () => {
+    await createOrganization({
+      isDemo: true,
+      slug: "demo",
+      deletedAt: new Date(),
+    });
+
+    const response = await visit("203.0.113.23");
+    expect(response.status).toBe(404);
+
+    expect(await testDb().select().from(users)).toEqual([]);
+  });
+
+  it("is rate limited per address", async () => {
+    await createOrganization({ isDemo: true, slug: "demo" });
+
+    const statuses = [];
+    for (let i = 0; i < 6; i++) {
+      statuses.push((await visit("203.0.113.22")).status);
+    }
+
+    expect(statuses.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
+    expect(statuses[5]).toBe(429);
+  });
+});
