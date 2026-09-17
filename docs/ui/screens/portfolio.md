@@ -76,6 +76,12 @@ both sides.
 
 Calling the v0 figure "cash flow" would put a number labelled net on a page that only knows gross.
 
+**Viewing the portfolio opens the current month** on every active building, through the rent
+roll's `ensureRentPeriods` ([data-model §4](../../data-model.md)), each in its own zone. Without it a
+building nobody had opened this month would read `No rent expected` and add nothing to the expected
+half — a zero that is really an unopened month. It opens no earlier month, and nothing on an
+archived or sold building. #115 settled it.
+
 ### Your buildings
 
 `id="buildings"`, a section heading `Your buildings`, and a grid of `BuildingCard`. One column, and
@@ -85,7 +91,9 @@ two when the column is at least 36rem wide (`@xl:grid-cols-2` on an `@container`
 **Archived and sold buildings are not in this grid**, because they are not in the portfolio's
 figures. They follow it in a section of their own — `Archived`, or `Archived and sold` when any are
 sold — as the same card with the status as its flag, so each stays one click from the edit form
-that restores it. The spec was silent on where they go; #105 settled it.
+that restores it. The spec was silent on where they go; #105 settled it. **Their cards carry no
+stats and no life bar** (#115): a `Tasks due` on a building the portfolio's figures leave out would
+be a number nothing else on the page counts.
 
 Each card is one `<a>` to `/buildings/{id}` — there is nothing else interactive inside it, which is
 what makes a whole-card link legitimate.
@@ -107,6 +115,9 @@ match wins:
 2. Any active item at 85% of life or more → `{n} due soon`, warning
 3. A big-ticket replacement in the next three years → `{item} {year}`, warning
 4. Otherwise → `Healthy`, good
+
+**A building with no equipment in service has no flag** (#115). `Healthy` there would be a verdict on
+systems nobody has entered; its life bar already reads `No equipment yet`.
 
 **Big ticket** is a replacement cost of $5,000 or more. That is a forecast-module constant,
 proposed here because the prototype has no consistent one — it tags a $6,800 furnace big-ticket and
@@ -130,7 +141,9 @@ one keeps this layout.
 ### Replacement runway
 
 A `Card` with a `RunwayList` of the next five calendar years, starting this year: year, a `Meter`
-scaled to the largest of the five, and the year's total in compact `Money`. Each row is a link to
+scaled to the largest of the five, and the year's total in compact `Money`. The building page's
+runway names each year's items where this one draws the meter — every building's items would not
+fit a row — so `RunwayList` takes `meter` rather than being two components. Each row is a link to
 `/forecast?year={year}`, and a footer link `Open the forecast` goes to `/forecast`.
 
 The prototype titles this "Big-ticket runway" and sums every replacement in the year, big-ticket or
