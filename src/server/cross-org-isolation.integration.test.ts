@@ -86,6 +86,7 @@ import {
 import { buildingFields } from "@/lib/building-form";
 import { contactFields } from "@/lib/contact-form";
 import { addMonths, firstOfMonth, todayIn } from "@/lib/dates";
+import { emptyTaskFields, type TaskFields } from "@/lib/task-form";
 import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
 import {
   createAccessCode,
@@ -179,9 +180,16 @@ const {
   undoAddCapitalItems,
 } = await import("@/server/actions/capital-items");
 const { listEquipment } = await import("@/server/queries/capital-items");
-const { addTask, completeTask, setTaskConfirmation, undoCompleteTask } =
-  await import("@/server/actions/tasks");
-const { getMaintenanceInputs, getRecurringTasks } =
+const {
+  addTask,
+  cancelTask,
+  completeTask,
+  createTask: createTaskFromModal,
+  setTaskConfirmation,
+  undoCompleteTask,
+  updateTask,
+} = await import("@/server/actions/tasks");
+const { getMaintenanceInputs, getRecurringTasks, getTaskModal } =
   await import("@/server/queries/tasks");
 
 /**
@@ -2014,6 +2022,72 @@ describe("the task paths", () => {
     expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(3);
     expect(await undoCompleteTask(a.sharedTask.id, null)).toEqual({ ok: true });
     expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(2);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("opens and saves the caller's task in the modal, and not the other org's or anything it names", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const task of [b.sharedTask, b.unitTask]) {
+      expect(await getTaskModal(task.id, null)).toEqual({ kind: "not-found" });
+    }
+    const opened = await getTaskModal(a.sharedTask.id, b.building.id);
+    expect(opened).toMatchObject({ kind: "edit" });
+    expect(mentionsB(opened, b)).toEqual([]);
+    const offered = await getTaskModal("new", b.building.id);
+    expect(offered).toMatchObject({ kind: "new", buildingId: null });
+    expect(mentionsB(offered, b)).toEqual([]);
+
+    const fields = (overrides: Partial<TaskFields> = {}): TaskFields => ({
+      ...emptyTaskFields(a.building.id),
+      title: "Replace the porch light",
+      ...overrides,
+    });
+
+    // B's task, a new task naming B's building, unit, contact or equipment,
+    // and A's task naming B's contact or equipment — its building and scope
+    // are fixed once created, and a save does not read them.
+    for (const task of [b.sharedTask, b.unitTask]) {
+      expect((await updateTask(task.id, fields())).ok).toBe(false);
+      expect(await cancelTask(task.id)).toEqual({ ok: false });
+      expect(
+        await completeTask(task.id, { completedOn: "2026-09-01", cost: "" }),
+      ).toEqual({ ok: false });
+    }
+    for (const overrides of [
+      { buildingId: b.building.id },
+      { scope: b.unit.id },
+      { assignee: b.contact.id },
+      { equipment: b.sharedItem.id },
+    ]) {
+      const created = await createTaskFromModal(fields(overrides));
+      expect(created.ok).toBe(false);
+      expect(mentionsB(created, b)).toEqual([]);
+    }
+    for (const overrides of [
+      { assignee: b.contact.id },
+      { equipment: b.sharedItem.id },
+    ]) {
+      expect((await updateTask(a.unitTask.id, fields(overrides))).ok).toBe(
+        false,
+      );
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: A's own, added, saved and cancelled.
+    expect(
+      await createTaskFromModal(fields({ assignee: a.contact.id })),
+    ).toMatchObject({ ok: true });
+    expect(
+      await updateTask(
+        a.unitTask.id,
+        fields({ equipment: a.unitItem.id, assignee: "me" }),
+      ),
+    ).toMatchObject({ ok: true });
+    expect(await cancelTask(a.unitTask.id)).toEqual({ ok: true });
+    expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(3);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });

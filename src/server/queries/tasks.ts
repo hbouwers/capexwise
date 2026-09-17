@@ -1,18 +1,39 @@
 /**
  * The tasks' reads: every open and recent task across the portfolio for
- * Maintenance, and a building's recurring tasks for its page
- * (`docs/ui/screens/maintenance.md`, `building-detail.md`). Server-only, and
- * each starts from `getOrgContext()`.
+ * Maintenance, a building's recurring tasks for its page, and the one task the
+ * modal opens (`docs/ui/screens/maintenance.md`, `building-detail.md`,
+ * `modal-task-detail.md`). Server-only, and each starts from
+ * `getOrgContext()`.
  */
 import "server-only";
 
-import { and, eq, inArray, isNotNull, ne, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
+import { z } from "zod";
 
-import { buildings, contacts, tasks, tradeTags, units } from "@/db/schema";
+import {
+  buildings,
+  capitalItems,
+  contacts,
+  tasks,
+  tradeTags,
+  units,
+} from "@/db/schema";
 import { buildingName, compareUnitLabels } from "@/lib/buildings";
+import type { TradeChoice } from "@/lib/contacts";
 import type { CalendarDate } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
+import type { StoredTask } from "@/lib/task-form";
 import type { Priority } from "@/lib/tasks";
+import { listContacts, listTradeTags } from "@/server/queries/contacts";
 import { getOrgContext, type OrgScopedTx } from "@/server/org-context";
 
 /**
@@ -236,6 +257,257 @@ export async function getRecurringTasks(
       done: rows
         .filter((row) => row.status === "done" && row.completedOn !== null)
         .map((row) => ({ completedOn: row.completedOn! })),
+    };
+  });
+}
+
+/** A building the task modal can place a task on, and what its fields offer. */
+export type TaskModalBuilding = TaskBuilding & {
+  /**
+   * Its capital items in service, for the Equipment `Select` — and, on an
+   * existing task, the item it names even once that is replaced or removed.
+   */
+  equipment: {
+    id: string;
+    label: string;
+    unitId: string | null;
+    inService: boolean;
+  }[];
+};
+
+/** A contact, as the assignee `Select` and the rail read it. */
+export type TaskModalContact = {
+  id: string;
+  name: string;
+  company: string | null;
+  phone: string | null;
+  rateNote: string | null;
+  /** Slugs, in the trade list's order. */
+  trades: string[];
+  archived: boolean;
+};
+
+/** One task, as the modal opens it. */
+export type TaskDetail = StoredTask & {
+  id: string;
+  status: "unscheduled" | "scheduled" | "done" | "canceled";
+  unitLabel: string | null;
+  tradeLabel: string | null;
+  addedOn: CalendarDate;
+};
+
+type TaskModalLists = {
+  contacts: TaskModalContact[];
+  trades: TradeChoice[];
+};
+
+/**
+ * What `?task=` opens (`docs/ui/screens/modal-task-detail.md`):
+ *
+ * - **`new`**: the active buildings a task can go on — the page's building
+ *   first chosen when it is one of them. Nothing, with no active building.
+ * - **an id**: the task and its building, **read-only** when the task is
+ *   cancelled or its building is archived or sold — kept for their history,
+ *   as every other write here refuses them.
+ * - **`not-found`**: an id that is not one, does not exist, or is another
+ *   org's, alike — so a URL cannot be used to learn which ids exist.
+ */
+export type TaskModal =
+  | ({
+      kind: "new";
+      buildings: TaskModalBuilding[];
+      buildingId: string | null;
+    } & TaskModalLists)
+  | ({
+      kind: "edit";
+      task: TaskDetail;
+      building: TaskModalBuilding & { status: "active" | "archived" | "sold" };
+      readOnly: boolean;
+    } & TaskModalLists)
+  | { kind: "not-found" };
+
+const taskIdSchema = z.uuid();
+
+export async function getTaskModal(
+  param: string | null,
+  pageBuildingId: string | null,
+): Promise<TaskModal | null> {
+  if (param === null) return null;
+  if (param !== "new" && !taskIdSchema.safeParse(param).success) {
+    return { kind: "not-found" };
+  }
+
+  const { db, user } = await getOrgContext();
+  const [contactRecords, trades] = await Promise.all([
+    listContacts(),
+    listTradeTags(),
+  ]);
+  const lists: TaskModalLists = {
+    trades,
+    contacts: contactRecords.map((contact) => ({
+      id: contact.id,
+      name: contact.name,
+      company: contact.company,
+      phone: contact.phone,
+      rateNote: contact.rateNote,
+      trades: contact.trades,
+      archived: contact.archivedAt !== null,
+    })),
+  };
+
+  return await db.run(async (tx): Promise<TaskModal | null> => {
+    const task =
+      param === "new"
+        ? null
+        : ((
+            await tx
+              .select({
+                id: tasks.id,
+                buildingId: tasks.buildingId,
+                unitId: tasks.unitId,
+                unitLabel: units.label,
+                title: tasks.title,
+                notes: tasks.notes,
+                tradeTag: tasks.tradeTag,
+                tradeLabel: tradeTags.label,
+                status: tasks.status,
+                priority: tasks.priority,
+                dueDate: tasks.dueDate,
+                completedOn: tasks.completedOn,
+                confirmedOn: tasks.confirmedOn,
+                assigneeContactId: tasks.assigneeContactId,
+                assigneeUserId: tasks.assigneeUserId,
+                estCostCents: tasks.estCostCents,
+                actualCostCents: tasks.actualCostCents,
+                recurrenceMonths: tasks.recurrenceMonths,
+                capitalItemId: tasks.capitalItemId,
+                addedOn: sql<CalendarDate>`to_char(${tasks.createdAt} at time zone ${buildings.timezone}, 'YYYY-MM-DD')`,
+              })
+              .from(tasks)
+              .innerJoin(
+                buildings,
+                and(
+                  eq(buildings.orgId, tasks.orgId),
+                  eq(buildings.id, tasks.buildingId),
+                ),
+              )
+              .leftJoin(
+                units,
+                and(eq(units.orgId, tasks.orgId), eq(units.id, tasks.unitId)),
+              )
+              .leftJoin(tradeTags, eq(tradeTags.slug, tasks.tradeTag))
+              .where(and(eq(tasks.orgId, db.orgId), eq(tasks.id, param)))
+          )[0] ?? null);
+
+    if (param !== "new" && task === null) return { kind: "not-found" };
+
+    const buildingRows = await tx
+      .select({
+        id: buildings.id,
+        label: buildings.label,
+        addressLine1: buildings.addressLine1,
+        timezone: buildings.timezone,
+        status: buildings.status,
+      })
+      .from(buildings)
+      .where(
+        and(
+          eq(buildings.orgId, db.orgId),
+          task === null
+            ? eq(buildings.status, "active")
+            : eq(buildings.id, task.buildingId),
+        ),
+      );
+
+    if (buildingRows.length === 0) return null;
+
+    const ids = buildingRows.map((row) => row.id);
+    const unitRows = await tx
+      .select({
+        id: units.id,
+        buildingId: units.buildingId,
+        label: units.label,
+      })
+      .from(units)
+      .where(
+        and(
+          eq(units.orgId, db.orgId),
+          inArray(units.buildingId, ids),
+          ne(units.status, "retired"),
+        ),
+      );
+    const itemRows = await tx
+      .select({
+        id: capitalItems.id,
+        buildingId: capitalItems.buildingId,
+        unitId: capitalItems.unitId,
+        label: capitalItems.label,
+        status: capitalItems.status,
+      })
+      .from(capitalItems)
+      .where(
+        and(
+          eq(capitalItems.orgId, db.orgId),
+          inArray(capitalItems.buildingId, ids),
+          task?.capitalItemId
+            ? or(
+                eq(capitalItems.status, "active"),
+                eq(capitalItems.id, task.capitalItemId),
+              )
+            : eq(capitalItems.status, "active"),
+        ),
+      );
+
+    const modalBuildings = buildingRows
+      .map((row) => ({
+        id: row.id,
+        name: buildingName(row),
+        timezone: row.timezone,
+        status: row.status,
+        units: unitRows
+          .filter((unit) => unit.buildingId === row.id)
+          .map(({ id, label }) => ({ id, label }))
+          .sort((a, b) => compareUnitLabels(a.label, b.label)),
+        equipment: itemRows
+          .filter((item) => item.buildingId === row.id)
+          .map((item) => ({
+            id: item.id,
+            label: item.label,
+            unitId: item.unitId,
+            inService: item.status === "active",
+          }))
+          .sort((a, b) => compareUnitLabels(a.label, b.label)),
+      }))
+      .sort((a, b) => compareUnitLabels(a.name, b.name));
+
+    if (task === null) {
+      return {
+        kind: "new",
+        buildings: modalBuildings,
+        buildingId: ids.includes(pageBuildingId ?? "") ? pageBuildingId : null,
+        ...lists,
+      };
+    }
+
+    const building = modalBuildings[0]!;
+    const { assigneeUserId, ...rest } = task;
+
+    return {
+      kind: "edit",
+      task: {
+        ...rest,
+        assigneeKind:
+          task.assigneeContactId !== null
+            ? "contact"
+            : assigneeUserId === null
+              ? null
+              : assigneeUserId === user.id
+                ? "me"
+                : "member",
+      },
+      building,
+      readOnly: task.status === "canceled" || building.status !== "active",
+      ...lists,
     };
   });
 }
