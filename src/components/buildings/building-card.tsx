@@ -97,20 +97,26 @@ export function BuildingCard({
  * systems nobody has entered.
  */
 function Flag({ flag }: { flag: BuildingFlag }) {
+  if (flag.kind === "big-ticket") {
+    // `Badge` is `inline-flex`, where `truncate` on the badge itself clips
+    // with no ellipsis. The label is its own span so it shortens with one,
+    // and the year sits beside it at full width — the year is the news.
+    return (
+      <StatusBadge variant="warning" className="max-w-[45%]">
+        <span className="min-w-0 truncate">{flag.item.label}</span>
+        <span className="shrink-0">{flag.year}</span>
+      </StatusBadge>
+    );
+  }
+
   const [variant, text] =
     flag.kind === "past-life"
       ? (["danger", `${flag.count} past life`] as const)
       : flag.kind === "due-soon"
         ? (["warning", `${flag.count} due soon`] as const)
-        : flag.kind === "big-ticket"
-          ? (["warning", `${flag.item.label} ${flag.year}`] as const)
-          : (["good", "Healthy"] as const);
+        : (["good", "Healthy"] as const);
 
-  return (
-    <StatusBadge variant={variant} className="max-w-[45%] shrink-0 truncate">
-      {text}
-    </StatusBadge>
-  );
+  return <StatusBadge variant={variant}>{text}</StatusBadge>;
 }
 
 function Figures({ figures }: { figures: BuildingCardFigures }) {
