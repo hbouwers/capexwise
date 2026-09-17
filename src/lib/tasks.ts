@@ -67,6 +67,31 @@ export function maintenanceTab(value: string | null): MaintenanceTab {
   return MAINTENANCE_TABS.find((tab) => tab === value) ?? "unscheduled";
 }
 
+/**
+ * A page's URL with the task modal open on a task — an id, or `new` — or, with
+ * `null`, closed (`docs/ui/screens/modal-task-detail.md`). Every other param
+ * the page had is kept in its order, so the modal opens over the tab and the
+ * filter it was opened from and closing it goes back to them.
+ */
+export function taskHref(
+  pathname: string,
+  query: Record<string, string | string[] | undefined>,
+  task: string | null,
+): string {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(query)) {
+    if (key === "task" || value === undefined) continue;
+    for (const one of Array.isArray(value) ? value : [value]) {
+      params.append(key, one);
+    }
+  }
+  if (task !== null) params.set("task", task);
+
+  const search = params.toString();
+  return search ? `${pathname}?${search}` : pathname;
+}
+
 export const PRIORITY_LABELS = {
   high: "High",
   normal: "Normal",

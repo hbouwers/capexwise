@@ -17,8 +17,29 @@ import {
   nextOccurrence,
   scheduleGroup,
   seasonalCounts,
+  taskHref,
   type TileTask,
 } from "@/lib/tasks";
+
+describe("taskHref", () => {
+  it("opens the modal over the page's tab and filter, and closes back to them", () => {
+    const query = { building: "b1", tab: "scheduled" };
+
+    expect(taskHref("/maintenance", query, "t1")).toBe(
+      "/maintenance?building=b1&tab=scheduled&task=t1",
+    );
+    expect(taskHref("/maintenance", { ...query, task: "t1" }, null)).toBe(
+      "/maintenance?building=b1&tab=scheduled",
+    );
+  });
+
+  it("replaces a task already open rather than adding a second", () => {
+    expect(taskHref("/maintenance", { task: ["t1", "t2"] }, "new")).toBe(
+      "/maintenance?task=new",
+    );
+    expect(taskHref("/maintenance", { task: "t1" }, null)).toBe("/maintenance");
+  });
+});
 
 describe("nextOccurrence", () => {
   it("is one interval after the due date when the work is done on the day", () => {
