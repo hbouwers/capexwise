@@ -4,6 +4,7 @@ import { Money } from "@/components/money";
 import { ScopeLabel } from "@/components/scope-label";
 import { AddTaskForm } from "@/components/tasks/add-task-form";
 import { CheckoffRow } from "@/components/tasks/task-controls";
+import { TaskTitle } from "@/components/tasks/task-tables";
 import {
   TaskScopeFilter,
   TaskScopeFilterClear,
@@ -38,7 +39,8 @@ const SPANS = [
  * `?taskScope=`, soonest first within each group.
  *
  * Checking a row completes this occurrence and writes the next; the row comes
- * back with its new date. **The inline add row closes the table**, and on an
+ * back with its new date. A title opens the task in the task modal, which is
+ * where its frequency and date change. **The inline add row closes the table**, and on an
  * empty table it is the action. An archived or sold building shows the table
  * with neither.
  */
@@ -49,6 +51,7 @@ export function RecurringTasksCard({
   today,
   editable,
   building,
+  hrefFor,
 }: {
   recurring: RecurringTasks;
   /** Every unit, retired ones included, in label order. */
@@ -58,6 +61,8 @@ export function RecurringTasksCard({
   today: CalendarDate;
   editable: boolean;
   building: { id: string; name: string };
+  /** The page's URL with the task modal open on a task. */
+  hrefFor: (taskId: string) => string;
 }) {
   const tasks = recurring.open;
 
@@ -212,6 +217,7 @@ export function RecurringTasksCard({
                   task={task}
                   today={today}
                   editable={editable}
+                  href={hrefFor(task.id)}
                 />
               ))}
             </TableBody>
@@ -222,15 +228,11 @@ export function RecurringTasksCard({
       {editable ? (
         <div className="border-t border-border-divider">
           <AddTaskForm
-            mode="recurring"
-            buildings={[
-              {
-                id: building.id,
-                name: building.name,
-                units: units.filter((unit) => !unit.retired),
-              },
-            ]}
-            buildingId={building.id}
+            building={{
+              id: building.id,
+              name: building.name,
+              units: units.filter((unit) => !unit.retired),
+            }}
           />
         </div>
       ) : null}
@@ -252,10 +254,12 @@ function Row({
   task,
   today,
   editable,
+  href,
 }: {
   task: TaskRecord;
   today: CalendarDate;
   editable: boolean;
+  href: string;
 }) {
   const firstLine = task.notes?.split("\n")[0]?.trim() || null;
   const note = task.dueDate ? dueNote(task.dueDate, today) : null;
@@ -271,9 +275,7 @@ function Row({
       <TableCell
         className={cn("align-top whitespace-normal", !editable && "pl-5")}
       >
-        <span className="block text-sm font-medium text-text-primary">
-          {task.title}
-        </span>
+        <TaskTitle href={href}>{task.title}</TaskTitle>
         {firstLine ? (
           <span className="block truncate text-2xs leading-snug text-text-muted">
             {firstLine}

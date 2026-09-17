@@ -32,6 +32,7 @@ export function Modal({
   onOpenChange,
   title,
   description,
+  meta,
   width,
   footer,
   children,
@@ -40,6 +41,8 @@ export function Modal({
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
+  /** Under the title and the description: a row of chips, as the task modal has. */
+  meta?: ReactNode;
   /** From `md` up. The spec gives each modal's: 560px, 900px, 920px. */
   width: string;
   footer: ReactNode;
@@ -70,6 +73,7 @@ export function Modal({
                 {description}
               </DialogDescription>
             ) : null}
+            {meta}
           </div>
           <DialogClose asChild>
             <Button variant="ghost" size="icon-sm" className="-mt-1 -mr-2">

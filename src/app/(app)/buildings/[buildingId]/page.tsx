@@ -16,6 +16,8 @@ import { StatTile, StatTiles } from "@/components/stat-tile";
 import { StatusBadge } from "@/components/status-badge";
 import { RecurringTasksCard } from "@/components/tasks/recurring-tasks-card";
 import { SeasonalStrip } from "@/components/tasks/seasonal-strip";
+import { TaskDetailModal } from "@/components/tasks/task-detail-modal";
+import { TaskNotFound } from "@/components/tasks/task-not-found";
 import { Button } from "@/components/ui/button";
 import {
   buildingName,
@@ -31,20 +33,20 @@ import {
   outflowByYear,
   replacements,
 } from "@/lib/forecast/outflow";
-import { seasonalCounts } from "@/lib/tasks";
+import { seasonalCounts, taskHref } from "@/lib/tasks";
 import { getBuildingFacts } from "@/server/queries/building-facts";
 import { getBuilding } from "@/server/queries/buildings";
 import { getCatalogue, listEquipment } from "@/server/queries/capital-items";
 import { listContacts } from "@/server/queries/contacts";
 import { getRentRoll } from "@/server/queries/rent-periods";
-import { getRecurringTasks } from "@/server/queries/tasks";
+import { getRecurringTasks, getTaskModal } from "@/server/queries/tasks";
 
 /**
  * A building's page (`docs/ui/screens/building-detail.md`): its header, the
  * Summary's `Rent / mo` tile, the rent roll for the month in `?month=`, its
  * facts, its recurring tasks — filtered by `?taskScope=` — beside their
  * seasonal rhythm and the replacement runway, and its equipment, filtered by
- * `?scope=` and `?confidence=`. The capital tiles and the runway read `src/lib/forecast/`, the
+ * `?scope=` and `?confidence=`. `?task=` opens the task modal over it. The capital tiles and the runway read `src/lib/forecast/`, the
  * module the forecast page reads, so the two pages cannot disagree about a
  * year.
  *
@@ -71,7 +73,7 @@ export default async function BuildingPage({
   const { building } = detail;
   const query = await searchParams;
   const editable = building.status === "active";
-  const [facts, contacts, roll, equipment, catalogue, recurring] =
+  const [facts, contacts, roll, equipment, catalogue, recurring, modal] =
     await Promise.all([
       getBuildingFacts(building.id),
       listContacts(),
@@ -80,6 +82,10 @@ export default async function BuildingPage({
       // The checklist is only offered on an active building.
       editable ? getCatalogue() : null,
       getRecurringTasks(building.id),
+      getTaskModal(
+        typeof query.task === "string" ? query.task : null,
+        building.id,
+      ),
     ]);
   // Read through `getBuilding`, which has just found the building.
   if (!roll) notFound();
@@ -100,6 +106,8 @@ export default async function BuildingPage({
     .join(" · ");
 
   const today = todayIn(building.timezone);
+  const pathname = `/buildings/${building.id}`;
+  const hrefFor = (task: string) => taskHref(pathname, query, task);
   const thisYear = yearOf(today);
 
   // Everything on the list is in service; the forecast reads the same fields.
@@ -161,6 +169,8 @@ export default async function BuildingPage({
       />
       <PageBody>
         <div className="flex flex-col gap-6">
+          {modal?.kind === "not-found" ? <TaskNotFound /> : null}
+
           <Link
             href="/"
             className="self-start text-xs text-text-tertiary underline-offset-4 hover:text-text-primary hover:underline"
@@ -250,6 +260,7 @@ export default async function BuildingPage({
               today={today}
               editable={editable}
               building={{ id: building.id, name: buildingName(building) }}
+              hrefFor={hrefFor}
             />
 
             {/* The rail, which follows the recurring tasks below `lg`. */}
@@ -312,6 +323,16 @@ export default async function BuildingPage({
             )}
           />
         </div>
+        {modal && modal.kind !== "not-found" ? (
+          <TaskDetailModal
+            key={query.task as string}
+            modal={modal}
+            today={
+              modal.kind === "edit" ? todayIn(modal.building.timezone) : today
+            }
+            closeHref={taskHref(pathname, query, null)}
+          />
+        ) : null}
       </PageBody>
     </>
   );
