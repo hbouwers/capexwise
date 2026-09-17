@@ -30,44 +30,27 @@ type Building = {
 const SAVE_FAILED = "Couldn’t add the task. Try again.";
 
 /**
- * An inline add row (`docs/ui/screens/maintenance.md`, `building-detail.md`):
- * a title and `Add task`, with what else the row needs to place the task.
+ * The building page's inline add row (`docs/ui/screens/building-detail.md`):
+ * a title, a frequency, and `Add task`. The task is first due one interval
+ * from today, which the toast says; the task modal changes it.
  *
- * - **`one-off`**, on Maintenance: a building `Select` when there is more
- *   than one to choose from, and the task waits on the Unscheduled tab for a
- *   date. The task modal gives it one (#114).
- * - **`recurring`**, on a building's page: a frequency, and the task is first
- *   due one interval from today, which the toast says.
- *
- * Either offers a scope on a building with more than one unit, `Shared` by
- * default. After an add the title clears and keeps the focus, so a list of
- * jobs goes in one after another.
+ * A scope on a building with more than one unit, `Shared` by default. After an
+ * add the title clears and keeps the focus, so a list of jobs goes in one
+ * after another.
  */
-export function AddTaskForm({
-  mode,
-  buildings,
-  buildingId,
-}: {
-  mode: "one-off" | "recurring";
-  /** Every building a task can be added to — one, on a building's page. */
-  buildings: Building[];
-  /** The building to start with: the page's filter, or its building. */
-  buildingId: string | null;
-}) {
+export function AddTaskForm({ building }: { building: Building }) {
   const router = useRouter();
   const id = useId();
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<FieldErrors>({});
   const [fields, setFields] = useState<NewTaskFields>({
     title: "",
-    buildingId: buildingId ?? (buildings.length === 1 ? buildings[0]!.id : ""),
+    buildingId: building.id,
     scope: "shared",
-    recurrence: mode === "recurring" ? "12" : "",
+    recurrence: "12",
   });
 
-  const building = buildings.find((b) => b.id === fields.buildingId) ?? null;
-  const chooseBuilding = mode === "one-off" && buildings.length > 1;
-  const chooseScope = building !== null && building.units.length > 1;
+  const chooseScope = building.units.length > 1;
 
   function change(next: Partial<NewTaskFields>) {
     setFields((current) => ({ ...current, ...next }));
@@ -120,13 +103,13 @@ export function AddTaskForm({
     <form
       onSubmit={submit}
       noValidate
-      aria-label={mode === "recurring" ? "Add a recurring task" : "Add a task"}
+      aria-label="Add a recurring task"
       className="flex flex-col gap-2 px-5 py-4"
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start">
         <Field
           name={name("title")}
-          label={mode === "recurring" ? "Recurring task" : "Task"}
+          label="Recurring task"
           error={errors.title}
           className="md:flex-1"
         >
@@ -136,72 +119,33 @@ export function AddTaskForm({
               name="title"
               value={fields.title}
               onChange={(event) => change({ title: event.target.value })}
-              placeholder={
-                mode === "recurring"
-                  ? "Add a recurring task — e.g. seal the driveway"
-                  : "Add a task — e.g. replace the porch light"
-              }
+              placeholder="Add a recurring task — e.g. seal the driveway"
               autoComplete="off"
             />
           )}
         </Field>
 
-        {chooseBuilding ? (
-          <Field
-            name={name("building")}
-            label="Building"
-            error={errors.buildingId}
-            className="md:w-52"
-          >
-            {(control) => (
-              <Select
-                value={fields.buildingId}
-                // A unit belongs to one building, so choosing another starts
-                // the scope over.
-                onValueChange={(next) =>
-                  change({ buildingId: next, scope: "shared" })
-                }
-              >
-                <SelectTrigger {...control} className="w-full">
-                  <SelectValue placeholder="Choose a building">
-                    {building?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  {buildings.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </Field>
-        ) : null}
-
-        {mode === "recurring" ? (
-          <Field name={name("frequency")} label="Repeats" className="md:w-44">
-            {(control) => (
-              <Select
-                value={fields.recurrence}
-                onValueChange={(next) => change({ recurrence: next })}
-              >
-                <SelectTrigger {...control} className="w-full">
-                  <SelectValue>
-                    {frequencyLabel(Number(fields.recurrence))}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  {FREQUENCIES.map((months) => (
-                    <SelectItem key={months} value={String(months)}>
-                      {frequencyLabel(months)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </Field>
-        ) : null}
+        <Field name={name("frequency")} label="Repeats" className="md:w-44">
+          {(control) => (
+            <Select
+              value={fields.recurrence}
+              onValueChange={(next) => change({ recurrence: next })}
+            >
+              <SelectTrigger {...control} className="w-full">
+                <SelectValue>
+                  {frequencyLabel(Number(fields.recurrence))}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent position="popper">
+                {FREQUENCIES.map((months) => (
+                  <SelectItem key={months} value={String(months)}>
+                    {frequencyLabel(months)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
 
         {chooseScope ? (
           <Field name={name("scope")} label="Scope" className="md:w-36">

@@ -1,12 +1,13 @@
 "use server";
 
 /**
- * The tasks' one-click writes (`docs/ui/screens/maintenance.md`,
- * `building-detail.md`): the two inline add rows, checking a task done and
- * taking it back, and the Scheduled tab's confirmation toggle. Editing a task
- * in full is the task modal's (#114). Each starts with `getOrgContext()`, so
- * the org is the session's, and every id the browser sends — a building, a
- * unit, a task — is looked up inside that org rather than trusted.
+ * The tasks' writes: the one-click ones (`docs/ui/screens/maintenance.md`,
+ * `building-detail.md`) — the inline add row, checking a task done and taking
+ * it back, and the Scheduled tab's confirmation toggle — and the task modal's
+ * (`modal-task-detail.md`): adding a task, saving one, `Mark done` and `Cancel
+ * task`. Each starts with `getOrgContext()`, so the org is the session's, and
+ * every id the browser sends — a building, a unit, a task, a contact, an item
+ * — is looked up inside that org rather than trusted.
  *
  * **Only an active building's tasks are written to.** An archived or sold
  * building is kept for its history and shown without controls, and these
@@ -16,14 +17,28 @@
  * because it is the day a completion or a confirmation records.
  */
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 
-import { buildings, tasks, units } from "@/db/schema";
+import {
+  buildings,
+  capitalItems,
+  contacts,
+  tasks,
+  tradeTags,
+  units,
+} from "@/db/schema";
 import { type CalendarDate, isCalendarDate, todayIn } from "@/lib/dates";
 import { type FieldErrors } from "@/lib/forms";
 import type { Cents } from "@/lib/money";
-import { validateNewTask } from "@/lib/task-form";
+import {
+  assigneeField,
+  confirmationOn,
+  type TaskValues,
+  validateCompletion,
+  validateNewTask,
+  validateTask,
+} from "@/lib/task-form";
 import { firstDueDate, nextOccurrence } from "@/lib/tasks";
 import { withoutParameters } from "@/lib/query-errors";
 import { getOrgContext, type OrgScopedTx } from "@/server/org-context";
@@ -42,7 +57,7 @@ export type CompleteTaskResult =
       previousActualCostCents: Cents | null;
       next: { id: string; dueDate: CalendarDate } | null;
     }
-  | { ok: false };
+  | { ok: false; errors?: FieldErrors };
 
 export type TaskWriteResult = { ok: true } | { ok: false };
 
@@ -63,11 +78,11 @@ function refused(message: string): { ok: false; errors: FieldErrors } {
 }
 
 /**
- * An inline add row. Maintenance's adds a one-off, **unscheduled** — it is
- * work waiting for a date. The building page's adds a recurring task,
- * **scheduled one interval from today**, and the answer carries that date for
- * the toast. Either may name a unit of the building that is not retired, or
- * be the building's own.
+ * The building page's inline add row: a recurring task, **scheduled one
+ * interval from today**, and the answer carries that date for the toast. Given
+ * no interval it adds a one-off, **unscheduled**, waiting for a date. Either
+ * may name a unit of the building that is not retired, or be the building's
+ * own.
  *
  * Only on an active building. A failed write is re-thrown with its SQLSTATE
  * only: a title is free text, and may name a tenant.
@@ -181,12 +196,18 @@ async function lockTask(tx: OrgScopedTx, orgId: string, taskId: string) {
  * yet confirmed, pointing back at this one. Only that one — never a year of
  * them (§6).
  *
+ * **The task modal's `Mark done` says both** (`modal-task-detail.md`, footer):
+ * `completion` is its short form — the day, today or earlier, and the cost,
+ * where empty records none — and a form it cannot accept answers with the
+ * message per field. The next occurrence is counted from that day.
+ *
  * Only an open task. A second click, or one on a task somebody finished
  * meanwhile, is refused rather than repeated, so its Undo cannot reopen
  * somebody else's completion.
  */
 export async function completeTask(
   taskId: unknown,
+  completion?: unknown,
 ): Promise<CompleteTaskResult> {
   const { db } = await getOrgContext();
 
@@ -201,13 +222,17 @@ export async function completeTask(
       const { task } = locked;
       const today = todayIn(locked.timezone);
 
+      let completedOn = today;
+      let actualCostCents = task.actualCostCents ?? task.estCostCents;
+      if (completion !== undefined) {
+        const checked = validateCompletion(completion, today);
+        if (!checked.ok) return { ok: false, errors: checked.errors };
+        ({ completedOn, actualCostCents } = checked.values);
+      }
+
       await tx
         .update(tasks)
-        .set({
-          status: "done",
-          completedOn: today,
-          actualCostCents: task.actualCostCents ?? task.estCostCents,
-        })
+        .set({ status: "done", completedOn, actualCostCents })
         .where(and(eq(tasks.orgId, db.orgId), eq(tasks.id, task.id)));
 
       if (task.recurrenceMonths === null) {
@@ -220,7 +245,7 @@ export async function completeTask(
 
       const dueDate = nextOccurrence({
         dueDate: task.dueDate,
-        completedOn: today,
+        completedOn,
         recurrenceMonths: task.recurrenceMonths,
       });
 
@@ -404,5 +429,364 @@ export async function setTaskConfirmation(
     });
   } catch (error) {
     throw withoutParameters(error, "Confirming a task");
+  }
+}
+
+export type SaveTaskResult =
+  { ok: true; taskId: string } | { ok: false; errors: FieldErrors };
+
+/**
+ * Something the form named has gone since the modal opened: a contact
+ * archived, an item replaced, a unit retired, the building archived.
+ */
+const SOMETHING_CHANGED =
+  "Couldn’t save the task. Reload the page — something it names may have changed since you opened it.";
+
+/** The two assignee columns, as the modal's choice sets them. */
+type AssigneeColumns = {
+  assigneeContactId: string | null;
+  assigneeUserId: string | null;
+};
+
+/**
+ * Everything the modal's form names, looked up inside the org and the task's
+ * building before it is written, so a stale page is a refusal rather than a
+ * failed constraint:
+ *
+ * - **a trade** on the list;
+ * - **a contact** in the book and not archived — or the one the task already
+ *   has, which archiving does not take off it;
+ * - **a member**: `Me` is the session's own membership, and `A member` only
+ *   keeps the other member the task already has, since v0 cannot name one;
+ * - **an item** of this building in service — or the one the task already
+ *   names, which a replacement leaves on it.
+ *
+ * Answers the assignee's columns, or null to refuse.
+ */
+async function checkReferences(
+  tx: OrgScopedTx,
+  orgId: string,
+  viewerId: string,
+  buildingId: string,
+  values: TaskValues,
+  current: {
+    assigneeContactId: string | null;
+    assigneeUserId: string | null;
+    capitalItemId: string | null;
+  } | null,
+): Promise<AssigneeColumns | null> {
+  if (values.tradeTag !== null) {
+    const [trade] = await tx
+      .select({ slug: tradeTags.slug })
+      .from(tradeTags)
+      .where(eq(tradeTags.slug, values.tradeTag));
+    if (!trade) return null;
+  }
+
+  if (
+    values.capitalItemId !== null &&
+    values.capitalItemId !== current?.capitalItemId
+  ) {
+    const [item] = await tx
+      .select({ id: capitalItems.id })
+      .from(capitalItems)
+      .where(
+        and(
+          eq(capitalItems.orgId, orgId),
+          eq(capitalItems.buildingId, buildingId),
+          eq(capitalItems.id, values.capitalItemId),
+          eq(capitalItems.status, "active"),
+        ),
+      );
+    if (!item) return null;
+  }
+
+  const { assignee } = values;
+  if (assignee === null) {
+    return { assigneeContactId: null, assigneeUserId: null };
+  }
+  if (assignee.kind === "me") {
+    return { assigneeContactId: null, assigneeUserId: viewerId };
+  }
+  if (assignee.kind === "member") {
+    const kept = current?.assigneeUserId ?? null;
+    if (kept === null || kept === viewerId) return null;
+    return { assigneeContactId: null, assigneeUserId: kept };
+  }
+
+  if (assignee.contactId !== current?.assigneeContactId) {
+    const [contact] = await tx
+      .select({ id: contacts.id })
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.orgId, orgId),
+          eq(contacts.id, assignee.contactId),
+          isNull(contacts.archivedAt),
+        ),
+      );
+    if (!contact) return null;
+  }
+  return { assigneeContactId: assignee.contactId, assigneeUserId: null };
+}
+
+/** The assignee `Select`'s value for what a row holds, as the viewer sees it. */
+function assigneeOfRow(row: AssigneeColumns, viewerId: string): string {
+  return assigneeField({
+    assigneeContactId: row.assigneeContactId,
+    assigneeKind:
+      row.assigneeContactId !== null
+        ? "contact"
+        : row.assigneeUserId === null
+          ? null
+          : row.assigneeUserId === viewerId
+            ? "me"
+            : "member",
+  });
+}
+
+/**
+ * The task modal's `?task=new` (`modal-task-detail.md`): a task on an active
+ * building — its own, or one of its units that is not retired — with the whole
+ * form. **The date sets the status**: scheduled with one, unscheduled without.
+ * A recurring task with no date waits unscheduled like any other, and is
+ * first due whenever it is given one.
+ */
+export async function createTask(input: unknown): Promise<SaveTaskResult> {
+  const { db, user } = await getOrgContext();
+
+  const validated = validateTask(input, { kind: "new" });
+  if (!validated.ok) return validated;
+
+  const { values } = validated;
+
+  try {
+    return await db.run(async (tx): Promise<SaveTaskResult> => {
+      // `for share`, for `addTask`'s reason.
+      const [building] = await tx
+        .select({ id: buildings.id, timezone: buildings.timezone })
+        .from(buildings)
+        .where(
+          and(
+            eq(buildings.orgId, db.orgId),
+            eq(buildings.id, values.buildingId!),
+            eq(buildings.status, "active"),
+          ),
+        )
+        .for("share");
+
+      if (!building) return refused(SOMETHING_CHANGED);
+
+      if (values.unitId !== null) {
+        const [unit] = await tx
+          .select({ id: units.id })
+          .from(units)
+          .where(
+            and(
+              eq(units.orgId, db.orgId),
+              eq(units.buildingId, building.id),
+              eq(units.id, values.unitId),
+              ne(units.status, "retired"),
+            ),
+          );
+
+        if (!unit) return refused(SOMETHING_CHANGED);
+      }
+
+      const assignee = await checkReferences(
+        tx,
+        db.orgId,
+        user.id,
+        building.id,
+        values,
+        null,
+      );
+      if (!assignee) return refused(SOMETHING_CHANGED);
+
+      const confirmedOn = confirmationOn(
+        null,
+        {
+          confirmed: values.confirmed,
+          dueDate: values.dueDate,
+          assignee: assigneeOfRow(assignee, user.id),
+        },
+        todayIn(building.timezone),
+      );
+
+      const [added] = await tx
+        .insert(tasks)
+        .values({
+          orgId: db.orgId,
+          buildingId: building.id,
+          unitId: values.unitId,
+          capitalItemId: values.capitalItemId,
+          title: values.title,
+          notes: values.notes,
+          tradeTag: values.tradeTag,
+          status: values.dueDate === null ? "unscheduled" : "scheduled",
+          priority: values.priority,
+          dueDate: values.dueDate,
+          confirmedOn,
+          ...assignee,
+          estCostCents: values.estCostCents,
+          recurrenceMonths: values.recurrenceMonths,
+        })
+        .returning({ id: tasks.id });
+
+      if (!added) throw new Error("Inserting a task returned no row.");
+
+      return { ok: true, taskId: added.id };
+    });
+  } catch (error) {
+    throw withoutParameters(error, "Creating a task");
+  }
+}
+
+/**
+ * The task modal's `Save` (`modal-task-detail.md`, the form). Its building and
+ * scope are fixed once it is created.
+ *
+ * - **An open task's date sets its status**: a date schedules it and clearing
+ *   the date unschedules it — `tasks_scheduled_has_date`, as a field.
+ * - **Its confirmation follows `confirmationOn`**: kept for the booking that
+ *   was confirmed, today for a new booking confirmed in the same save, and
+ *   otherwise cleared. `tasks_clear_confirmation` clears a confirmation on a
+ *   rebooking unless the statement changes `confirmed_on` too — which a
+ *   booking confirmed earlier today, rebooked and confirmed again, does not:
+ *   it writes the value it had. So that confirmation is written again on its
+ *   own.
+ * - **A done task** keeps its status, and saves when it was done and what it
+ *   cost in place of a date and a repeat. Its confirmation is history, and is
+ *   left to the database — cleared only if the assignee changes.
+ *
+ * Only a task that is not cancelled, on an active building, as every write
+ * here.
+ */
+export async function updateTask(
+  taskId: unknown,
+  input: unknown,
+): Promise<SaveTaskResult> {
+  const { db, user } = await getOrgContext();
+
+  const id = idSchema.safeParse(taskId);
+  if (!id.success) return refused(SOMETHING_CHANGED);
+
+  try {
+    return await db.run(async (tx): Promise<SaveTaskResult> => {
+      const locked = await lockTask(tx, db.orgId, id.data);
+      if (!locked) return refused(SOMETHING_CHANGED);
+
+      const { task } = locked;
+      const today = todayIn(locked.timezone);
+      const done = task.status === "done";
+
+      const validated = validateTask(
+        input,
+        done ? { kind: "done", today } : { kind: "open" },
+      );
+      if (!validated.ok) return validated;
+
+      const { values } = validated;
+
+      const assignee = await checkReferences(
+        tx,
+        db.orgId,
+        user.id,
+        task.buildingId,
+        values,
+        task,
+      );
+      if (!assignee) return refused(SOMETHING_CHANGED);
+
+      const common = {
+        title: values.title,
+        notes: values.notes,
+        tradeTag: values.tradeTag,
+        priority: values.priority,
+        capitalItemId: values.capitalItemId,
+        estCostCents: values.estCostCents,
+        ...assignee,
+      };
+      const where = and(eq(tasks.orgId, db.orgId), eq(tasks.id, task.id));
+
+      if (done) {
+        await tx
+          .update(tasks)
+          .set({
+            ...common,
+            completedOn: values.completedOn,
+            actualCostCents: values.actualCostCents,
+          })
+          .where(where);
+
+        return { ok: true, taskId: task.id };
+      }
+
+      const confirmedOn = confirmationOn(
+        {
+          confirmedOn: task.confirmedOn,
+          dueDate: task.dueDate,
+          assignee: assigneeOfRow(task, user.id),
+        },
+        {
+          confirmed: values.confirmed,
+          dueDate: values.dueDate,
+          assignee: assigneeOfRow(assignee, user.id),
+        },
+        today,
+      );
+
+      const [written] = await tx
+        .update(tasks)
+        .set({
+          ...common,
+          status: values.dueDate === null ? "unscheduled" : "scheduled",
+          dueDate: values.dueDate,
+          recurrenceMonths: values.recurrenceMonths,
+          confirmedOn,
+        })
+        .where(where)
+        .returning({ confirmedOn: tasks.confirmedOn });
+
+      if (confirmedOn !== null && written?.confirmedOn === null) {
+        await tx.update(tasks).set({ confirmedOn }).where(where);
+      }
+
+      return { ok: true, taskId: task.id };
+    });
+  } catch (error) {
+    throw withoutParameters(error, "Saving a task");
+  }
+}
+
+/**
+ * The task modal's `Cancel task` (`modal-task-detail.md`, footer): work that
+ * will not happen. The task is kept, with its history, and the task tables
+ * leave it out; a recurring one writes no next occurrence. Its confirmation
+ * goes with it, since a cancelled task is booked with nobody
+ * (`tasks_confirmed_is_booked`).
+ *
+ * Only an open task: a done one happened, and stays done.
+ */
+export async function cancelTask(taskId: unknown): Promise<TaskWriteResult> {
+  const { db } = await getOrgContext();
+
+  const id = idSchema.safeParse(taskId);
+  if (!id.success) return { ok: false };
+
+  try {
+    return await db.run(async (tx): Promise<TaskWriteResult> => {
+      const locked = await lockTask(tx, db.orgId, id.data);
+      if (!locked || locked.task.status === "done") return { ok: false };
+
+      await tx
+        .update(tasks)
+        .set({ status: "canceled", confirmedOn: null })
+        .where(and(eq(tasks.orgId, db.orgId), eq(tasks.id, locked.task.id)));
+
+      return { ok: true };
+    });
+  } catch (error) {
+    throw withoutParameters(error, "Cancelling a task");
   }
 }

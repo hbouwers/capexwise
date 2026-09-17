@@ -137,17 +137,40 @@ function Cell({
 }
 
 /**
- * The `primary` cell: the title — plain text until the task modal makes it a
- * link to `?task={id}` (#114) — a note line at every width, and the folded
- * columns' text beneath it below `md`.
+ * A task's title, as the link that opens it in the task modal. Not scrolled:
+ * the modal opens over the row it was opened from.
+ */
+export function TaskTitle({
+  href,
+  children,
+}: {
+  href: string;
+  children: string;
+}) {
+  return (
+    <Link
+      href={href}
+      scroll={false}
+      className="block text-sm font-medium text-text-primary underline-offset-4 hover:underline"
+    >
+      {children}
+    </Link>
+  );
+}
+
+/**
+ * The `primary` cell: the title, as a link to `?task={id}`, a note line at
+ * every width, and the folded columns' text beneath it below `md`.
  */
 function TaskCell({
   title,
+  href,
   note,
   folded,
   className,
 }: {
   title: string;
+  href: string;
   note?: string | null;
   /** Each hidden column's text, in column order, and the width it folds at. */
   folded: [Fold, string | null][];
@@ -162,9 +185,7 @@ function TaskCell({
 
   return (
     <Cell className={className}>
-      <span className="block text-sm font-medium text-text-primary">
-        {title}
-      </span>
+      <TaskTitle href={href}>{title}</TaskTitle>
       {note ? (
         <span className="block text-2xs leading-snug text-text-muted">
           {note}
@@ -206,14 +227,17 @@ export function EmptyTab({ children }: { children: string }) {
 /**
  * Unscheduled: work waiting for a date, high priority first and then oldest
  * first. Nothing here can be checked off — a job with no date is completed
- * from the task modal, which asks when (#114).
+ * from the task modal, which asks when.
  */
 export function UnscheduledTable({
   tasks,
   places,
+  hrefFor,
 }: {
   tasks: TaskRecord[];
   places: Map<string, TaskPlace>;
+  /** The page's URL with the task modal open on a task. */
+  hrefFor: (taskId: string) => string;
 }) {
   const order = { high: 0, normal: 1, low: 2 } as const;
   const rows = [...tasks].sort(
@@ -263,6 +287,7 @@ export function UnscheduledTable({
               </Cell>
               <TaskCell
                 title={task.title}
+                href={hrefFor(task.id)}
                 note={`added ${formatDate(task.addedOn, shortFormIn(task.addedOn, place.today))}`}
                 folded={folded}
                 className="max-md:pl-5"
@@ -322,9 +347,11 @@ const SPANS = [
 export function ScheduledTable({
   groups,
   places,
+  hrefFor,
 }: {
   groups: ScheduledGroups;
   places: Map<string, TaskPlace>;
+  hrefFor: (taskId: string) => string;
 }) {
   return (
     <Table className="table-fixed">
@@ -374,6 +401,7 @@ export function ScheduledTable({
                 key={task.id}
                 task={task}
                 place={places.get(task.id)!}
+                href={hrefFor(task.id)}
               />
             ))}
           </TableBody>
@@ -383,7 +411,15 @@ export function ScheduledTable({
   );
 }
 
-function ScheduledRow({ task, place }: { task: TaskRecord; place: TaskPlace }) {
+function ScheduledRow({
+  task,
+  place,
+  href,
+}: {
+  task: TaskRecord;
+  place: TaskPlace;
+  href: string;
+}) {
   const due = task.dueDate!;
   const note = dueNote(due, place.today, 0);
   const assigned = task.assignee !== null;
@@ -403,7 +439,7 @@ function ScheduledRow({ task, place }: { task: TaskRecord; place: TaskPlace }) {
 
   return (
     <CheckoffRow taskId={task.id} title={task.title} spans={SPANS}>
-      <TaskCell title={task.title} folded={folded} />
+      <TaskCell title={task.title} href={href} folded={folded} />
       <Cell fold="md">
         <BuildingValue place={place} />
       </Cell>
@@ -450,10 +486,12 @@ function ScheduledRow({ task, place }: { task: TaskRecord; place: TaskPlace }) {
 export function DoneTable({
   tasks,
   places,
+  hrefFor,
   footer,
 }: {
   tasks: TaskRecord[];
   places: Map<string, TaskPlace>;
+  hrefFor: (taskId: string) => string;
   /** `Show earlier`, or `Show the last 12 months`, beneath the table. */
   footer: ReactNode;
 }) {
@@ -503,7 +541,12 @@ export function DoneTable({
                 key={task.id}
                 className="border-border-divider hover:bg-hover-fill-subtle"
               >
-                <TaskCell title={task.title} folded={folded} className="pl-5" />
+                <TaskCell
+                  title={task.title}
+                  href={hrefFor(task.id)}
+                  folded={folded}
+                  className="pl-5"
+                />
                 <Cell fold="md">
                   <BuildingValue place={place} />
                 </Cell>

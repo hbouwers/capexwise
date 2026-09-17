@@ -1,7 +1,8 @@
 /**
- * What the task writes do inside one org: the two add rows, a completion that
+ * What the task writes do inside one org: the add row, a completion that
  * writes the next occurrence and an Undo that takes it back only while nobody
- * has touched it, and the confirmation toggle. The reads' assignees and
+ * has touched it, the confirmation toggle, and the task modal's add, save,
+ * Mark done and Cancel task. The reads' assignees and
  * filters are here too. The cross-org half is the isolation test's.
  *
  * Driven as the pages drive them — a signed session, then the function — as
@@ -13,10 +14,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildings, tasks } from "@/db/schema";
 import { addMonthsKeepingDay, todayIn } from "@/lib/dates";
+import { emptyTaskFields, ME, MEMBER, type TaskFields } from "@/lib/task-form";
 import { nextOccurrence } from "@/lib/tasks";
 import { applicationDatabaseUrl, testDb } from "@/test/db";
 import {
   createBuilding,
+  createCapitalItem,
   createContact,
   createMembership,
   createOrganization,
@@ -40,9 +43,16 @@ process.env.GOOGLE_CLIENT_SECRET = "integration-suite-client-secret";
 // Dynamic, and after the assignments above, for the reason the isolation test
 // gives.
 const { getAuth } = await import("@/server/auth");
-const { addTask, completeTask, setTaskConfirmation, undoCompleteTask } =
-  await import("@/server/actions/tasks");
-const { getMaintenanceInputs, getRecurringTasks } =
+const {
+  addTask,
+  cancelTask,
+  completeTask,
+  createTask: saveNewTask,
+  setTaskConfirmation,
+  undoCompleteTask,
+  updateTask,
+} = await import("@/server/actions/tasks");
+const { getMaintenanceInputs, getRecurringTasks, getTaskModal } =
   await import("@/server/queries/tasks");
 
 const ZONE = "America/Indiana/Indianapolis";
@@ -453,5 +463,381 @@ describe("the task reads", () => {
     expect(recurring.open.map((row) => row.title)).toEqual(["Gutters"]);
     expect(recurring.open[0]?.addedOn).toBe(today);
     expect(recurring.done).toEqual([{ completedOn: "2026-06-02" }]);
+  });
+});
+
+/** The task modal's form, filled in for gutters with nothing else chosen. */
+function form(overrides: Partial<TaskFields> = {}): TaskFields {
+  return {
+    ...emptyTaskFields(null),
+    title: "Clean the gutters",
+    ...overrides,
+  };
+}
+
+describe("createTask, from the task modal", () => {
+  it("adds a booked task with the whole form, confirmed today", async () => {
+    const { org, building, a, plumber } = await duplex();
+    const item = await createCapitalItem(org.id, building.id, {
+      unitId: a.id,
+      typeSlug: "dishwasher",
+      label: "Dishwasher",
+    });
+
+    const result = await saveNewTask(
+      form({
+        buildingId: building.id,
+        scope: a.id,
+        notes: "Leaks at the door seal",
+        dueDate: "2026-10-01",
+        assignee: plumber.id,
+        confirmed: true,
+        priority: "high",
+        estCost: "$240",
+        recurrence: "12",
+        trade: "appliance-repair",
+        equipment: item.id,
+      }),
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(await tasksOf(building.id)).toMatchObject([
+      {
+        unitId: a.id,
+        capitalItemId: item.id,
+        title: "Clean the gutters",
+        notes: "Leaks at the door seal",
+        tradeTag: "appliance-repair",
+        status: "scheduled",
+        priority: "high",
+        dueDate: "2026-10-01",
+        assigneeContactId: plumber.id,
+        assigneeUserId: null,
+        confirmedOn: today,
+        estCostCents: 24_000,
+        recurrenceMonths: 12,
+      },
+    ]);
+  });
+
+  it("leaves a task with no date unscheduled, and unconfirmed however the box was left", async () => {
+    const { owner, building } = await duplex();
+
+    await saveNewTask(
+      form({ buildingId: building.id, assignee: ME, confirmed: true }),
+    );
+
+    expect(await tasksOf(building.id)).toMatchObject([
+      {
+        status: "unscheduled",
+        dueDate: null,
+        assigneeUserId: owner.id,
+        confirmedOn: null,
+      },
+    ]);
+  });
+
+  it("refuses what the form names that is not there to name, and adds nothing", async () => {
+    const { org, building, c } = await duplex();
+    const archived = await createContact(org.id, { archivedAt: new Date() });
+    const next = await createBuilding(org.id, { addressLine1: "18 E 10th St" });
+    const elsewhere = await createCapitalItem(org.id, next.id);
+
+    for (const overrides of [
+      { assignee: archived.id },
+      { assignee: MEMBER },
+      { equipment: elsewhere.id },
+      { trade: "not-a-trade" },
+      { scope: c.id },
+    ]) {
+      const result = await saveNewTask(
+        form({ buildingId: building.id, ...overrides }),
+      );
+      expect(result.ok).toBe(false);
+    }
+
+    expect(await tasksOf(building.id)).toEqual([]);
+  });
+});
+
+describe("updateTask", () => {
+  it("schedules a task given a date, and unschedules it when the date is cleared", async () => {
+    const { org, building } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      status: "unscheduled",
+      dueDate: null,
+    });
+
+    await updateTask(task.id, form({ dueDate: "2026-11-02", recurrence: "3" }));
+    expect((await tasksOf(building.id))[0]).toMatchObject({
+      status: "scheduled",
+      dueDate: "2026-11-02",
+    });
+
+    await updateTask(task.id, form({ recurrence: "3" }));
+    expect((await tasksOf(building.id))[0]).toMatchObject({
+      status: "unscheduled",
+      dueDate: null,
+    });
+  });
+
+  it("keeps a confirmation for the booking it was, and records today for a new one", async () => {
+    const { org, building, plumber } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      assigneeContactId: plumber.id,
+      confirmedOn: "2026-08-28",
+    });
+    const booked = form({
+      dueDate: "2026-09-01",
+      assignee: plumber.id,
+      confirmed: true,
+      recurrence: "3",
+    });
+    const confirmedOn = async () =>
+      (await tasksOf(building.id))[0]?.confirmedOn;
+
+    await updateTask(task.id, { ...booked, notes: "Bring the long ladder" });
+    expect(await confirmedOn()).toBe("2026-08-28");
+
+    await updateTask(task.id, { ...booked, dueDate: "2026-09-08" });
+    expect(await confirmedOn()).toBe(today);
+
+    // Confirmed today, rebooked, and confirmed again in the same save: the
+    // value written is the one it had, which the trigger alone would clear.
+    await updateTask(task.id, { ...booked, dueDate: "2026-09-15" });
+    expect(await confirmedOn()).toBe(today);
+
+    await updateTask(task.id, {
+      ...booked,
+      dueDate: "2026-09-22",
+      confirmed: false,
+    });
+    expect(await confirmedOn()).toBeNull();
+  });
+
+  it("keeps an archived contact or another member the task already has", async () => {
+    const { org, building } = await duplex();
+    const retired = await createContact(org.id, { archivedAt: new Date() });
+    const colleague = await createUser();
+    await createMembership(org.id, colleague.id);
+    const withContact = await createTask(org.id, building.id, {
+      assigneeContactId: retired.id,
+    });
+    const withMember = await createTask(org.id, building.id, {
+      assigneeUserId: colleague.id,
+    });
+    const unassigned = await createTask(org.id, building.id);
+
+    const keep = form({ dueDate: "2026-09-01", recurrence: "3" });
+    expect(
+      await updateTask(withContact.id, { ...keep, assignee: retired.id }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await updateTask(withMember.id, { ...keep, assignee: MEMBER }),
+    ).toMatchObject({ ok: true });
+    // Neither can be chosen for a task that does not have them.
+    expect(
+      (await updateTask(unassigned.id, { ...keep, assignee: retired.id })).ok,
+    ).toBe(false);
+    expect(
+      (await updateTask(unassigned.id, { ...keep, assignee: MEMBER })).ok,
+    ).toBe(false);
+
+    expect(
+      (await tasksOf(building.id)).map((row) => [
+        row.assigneeContactId,
+        row.assigneeUserId,
+      ]),
+    ).toEqual([
+      [retired.id, null],
+      [null, colleague.id],
+      [null, null],
+    ]);
+  });
+
+  it("saves a done task's completion and cost, and keeps it done", async () => {
+    const { org, building } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      status: "done",
+      completedOn: "2026-09-02",
+      actualCostCents: 18_000,
+    });
+
+    expect(
+      await updateTask(
+        task.id,
+        form({ completedOn: "2026-09-03", actualCost: "212.50" }),
+      ),
+    ).toMatchObject({ ok: true });
+    expect((await tasksOf(building.id))[0]).toMatchObject({
+      status: "done",
+      dueDate: "2026-09-01",
+      recurrenceMonths: 3,
+      completedOn: "2026-09-03",
+      actualCostCents: 21_250,
+    });
+
+    expect(
+      await updateTask(
+        task.id,
+        form({ completedOn: addMonthsKeepingDay(today, 1) }),
+      ),
+    ).toEqual({
+      ok: false,
+      errors: { completedOn: "Enter today’s date or an earlier one." },
+    });
+  });
+
+  it("refuses a cancelled task and one on an archived building", async () => {
+    const { org, building } = await duplex();
+    const cancelled = await createTask(org.id, building.id, {
+      status: "canceled",
+    });
+    const archived = await createBuilding(org.id, { status: "archived" });
+    const kept = await createTask(org.id, archived.id);
+
+    for (const task of [cancelled, kept]) {
+      expect((await updateTask(task.id, form({ title: "Renamed" }))).ok).toBe(
+        false,
+      );
+    }
+    expect((await tasksOf(building.id))[0]?.title).toBe("Clean the gutters");
+  });
+});
+
+describe("completeTask, from Mark done", () => {
+  it("records the day and cost given, and counts the next occurrence from that day", async () => {
+    const { org, building } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      dueDate: "2026-06-01",
+    });
+
+    const result = await completeTask(task.id, {
+      completedOn: "2026-06-20",
+      cost: "",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      next: { dueDate: "2026-09-01" },
+    });
+    expect((await tasksOf(building.id))[0]).toMatchObject({
+      status: "done",
+      completedOn: "2026-06-20",
+      actualCostCents: null,
+    });
+  });
+
+  it("says what to change, and completes nothing", async () => {
+    const { org, building } = await duplex();
+    const task = await createTask(org.id, building.id);
+
+    expect(
+      await completeTask(task.id, {
+        completedOn: addMonthsKeepingDay(today, 1),
+        cost: "180",
+      }),
+    ).toEqual({
+      ok: false,
+      errors: { completedOn: "Enter today’s date or an earlier one." },
+    });
+    expect(await tasksOf(building.id)).toMatchObject([{ status: "scheduled" }]);
+  });
+});
+
+describe("cancelTask", () => {
+  it("cancels an open task with its confirmation, and writes no next occurrence", async () => {
+    const { org, building, plumber } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      assigneeContactId: plumber.id,
+      confirmedOn: "2026-08-28",
+    });
+
+    expect(await cancelTask(task.id)).toEqual({ ok: true });
+    expect(await tasksOf(building.id)).toMatchObject([
+      { status: "canceled", confirmedOn: null },
+    ]);
+    expect(await cancelTask(task.id)).toEqual({ ok: false });
+  });
+
+  it("refuses a done task", async () => {
+    const { org, building } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      status: "done",
+      completedOn: "2026-09-02",
+    });
+
+    expect(await cancelTask(task.id)).toEqual({ ok: false });
+    expect((await tasksOf(building.id))[0]?.status).toBe("done");
+  });
+});
+
+describe("getTaskModal", () => {
+  it("opens nothing without the param, and not-found for an id that is not a task", async () => {
+    await duplex();
+
+    expect(await getTaskModal(null, null)).toBeNull();
+    expect(await getTaskModal("not-an-id", null)).toEqual({
+      kind: "not-found",
+    });
+    expect(
+      await getTaskModal("0199a8a0-0000-7000-8000-000000000009", null),
+    ).toEqual({ kind: "not-found" });
+  });
+
+  it("offers a new task the active buildings, starting on the page's", async () => {
+    const { org, building } = await duplex();
+    await createBuilding(org.id, { status: "archived" });
+
+    const modal = await getTaskModal("new", building.id);
+
+    expect(modal).toMatchObject({ kind: "new", buildingId: building.id });
+    if (modal?.kind !== "new") throw new Error("Not a new task.");
+    expect(modal.buildings.map((row) => row.id)).toEqual([building.id]);
+  });
+
+  it("opens a task with its building's equipment, keeping an item no longer in service", async () => {
+    const { org, owner, building } = await duplex();
+    const furnace = await createCapitalItem(org.id, building.id);
+    const gone = await createCapitalItem(org.id, building.id, {
+      typeSlug: "dishwasher",
+      label: "Dishwasher",
+      status: "removed",
+    });
+    await createCapitalItem(org.id, building.id, {
+      typeSlug: "refrigerator",
+      label: "Refrigerator",
+      status: "removed",
+    });
+    const task = await createTask(org.id, building.id, {
+      capitalItemId: gone.id,
+      assigneeUserId: owner.id,
+    });
+
+    const modal = await getTaskModal(task.id, null);
+
+    if (modal?.kind !== "edit") throw new Error("Not an existing task.");
+    expect(modal.readOnly).toBe(false);
+    expect(modal.task).toMatchObject({ id: task.id, assigneeKind: "me" });
+    expect(modal.building.equipment).toEqual([
+      { id: gone.id, label: "Dishwasher", unitId: null, inService: false },
+      { id: furnace.id, label: "Gas furnace", unitId: null, inService: true },
+    ]);
+  });
+
+  it("opens a cancelled task, and one on an archived building, read-only", async () => {
+    const { org, building } = await duplex();
+    const cancelled = await createTask(org.id, building.id, {
+      status: "canceled",
+    });
+    const archived = await createBuilding(org.id, { status: "archived" });
+    const kept = await createTask(org.id, archived.id);
+
+    for (const task of [cancelled, kept]) {
+      expect(await getTaskModal(task.id, null)).toMatchObject({
+        kind: "edit",
+        readOnly: true,
+      });
+    }
   });
 });

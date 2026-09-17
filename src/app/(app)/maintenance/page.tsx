@@ -7,8 +7,9 @@ import { Money } from "@/components/money";
 import { Numeric } from "@/components/numeric";
 import { PageBody, PageHeader } from "@/components/shell/page-header";
 import { StatTile, StatTiles } from "@/components/stat-tile";
-import { AddTaskForm } from "@/components/tasks/add-task-form";
 import { MaintenanceTabs } from "@/components/tasks/maintenance-tabs";
+import { TaskDetailModal } from "@/components/tasks/task-detail-modal";
+import { TaskNotFound } from "@/components/tasks/task-not-found";
 import {
   DoneTable,
   EmptyTab,
@@ -26,13 +27,15 @@ import {
   maintenanceFigures,
   maintenanceTab,
   scheduleGroup,
+  taskHref,
 } from "@/lib/tasks";
-import { getMaintenanceInputs } from "@/server/queries/tasks";
+import { getMaintenanceInputs, getTaskModal } from "@/server/queries/tasks";
 
 /**
  * Maintenance (`docs/ui/screens/maintenance.md`), PRD F5: every task across
  * the portfolio — what is waiting for a date, what is booked, and what got
- * done — or one building's, in `?building=`.
+ * done — or one building's, in `?building=`. `?task=` opens the task modal
+ * over it, and `Add task` opens it on a new one.
  *
  * **Every figure is counted from the rows on this page**, by the rules in
  * `src/lib/tasks.ts`, and each task against today where its own building is
@@ -56,6 +59,8 @@ export default async function MaintenancePage({
 
   const building =
     inputs.buildings.find((b) => b.id === param(query.building)) ?? null;
+  const modal = await getTaskModal(param(query.task), building?.id ?? null);
+  const hrefFor = (task: string) => taskHref("/maintenance", query, task);
   const tab = maintenanceTab(param(query.tab));
   const allDone = param(query.done) === "all";
 
@@ -101,25 +106,54 @@ export default async function MaintenancePage({
       />
     ) : null;
 
-  const addForm = (
-    <AddTaskForm
-      // Remounted with the filter, so the building it starts with follows it.
-      key={building?.id ?? "all"}
-      mode="one-off"
-      buildings={inputs.buildings}
-      buildingId={building?.id ?? null}
-    />
+  // With the filter's building filled in, when there is one.
+  const addTask = (
+    <Button asChild>
+      <Link href={hrefFor("new")} scroll={false}>
+        Add task
+      </Link>
+    </Button>
   );
 
   const header = (
-    <PageHeader title={TITLE} subtitle={SUBTITLE} actions={select} />
+    <PageHeader
+      title={TITLE}
+      subtitle={SUBTITLE}
+      actions={
+        inputs.buildings.length > 0 ? (
+          <>
+            {select}
+            {addTask}
+          </>
+        ) : null
+      }
+    />
   );
+
+  const taskModal =
+    modal && modal.kind !== "not-found" ? (
+      <TaskDetailModal
+        // A fresh modal per task, so nothing typed for one carries over.
+        key={param(query.task)}
+        modal={modal}
+        today={todayIn(
+          modal.kind === "edit"
+            ? modal.building.timezone
+            : modal.buildings[0]!.timezone,
+          now,
+        )}
+        closeHref={taskHref("/maintenance", query, null)}
+      />
+    ) : null;
+  const notFound = modal?.kind === "not-found" ? <TaskNotFound /> : null;
 
   if (inputs.buildings.length === 0) {
     return (
       <>
         {header}
         <PageBody>
+          {notFound}
+          {taskModal}
           <EmptyState
             title="Nothing on the list"
             body="Tasks belong to a building. Add one, and its work is listed here."
@@ -171,16 +205,19 @@ export default async function MaintenancePage({
         {unscheduled.length === 0 ? (
           <EmptyTab>Nothing waiting for a date.</EmptyTab>
         ) : (
-          <UnscheduledTable tasks={unscheduled} places={places} />
+          <UnscheduledTable
+            tasks={unscheduled}
+            places={places}
+            hrefFor={hrefFor}
+          />
         )}
-        <div className="border-t border-border-divider">{addForm}</div>
       </>,
     ),
     scheduled: card(
       scheduled.length === 0 ? (
         <EmptyTab>Nothing booked.</EmptyTab>
       ) : (
-        <ScheduledTable groups={groups} places={places} />
+        <ScheduledTable groups={groups} places={places} hrefFor={hrefFor} />
       ),
     ),
     done: card(
@@ -197,6 +234,7 @@ export default async function MaintenancePage({
         <DoneTable
           tasks={shownDone}
           places={places}
+          hrefFor={hrefFor}
           footer={
             allDone ? (
               earlier > 0 ? (
@@ -257,29 +295,30 @@ export default async function MaintenancePage({
       {header}
       <PageBody>
         <div className="flex flex-col gap-6">
+          {notFound}
           {tiles}
 
           {inputs.tasks.length === 0 ? (
-            <EmptyCard
+            <EmptyState
               title="Nothing on the list"
               body="Add work that needs doing. Recurring jobs live on each building’s page."
-            >
-              {addForm}
-            </EmptyCard>
+              action={addTask}
+            />
           ) : building !== null && tasks.length === 0 ? (
-            <EmptyCard
+            <EmptyState
               title={`No tasks at ${building.name}`}
               body="Nothing waiting, booked or done here. Add a job, or look across every building."
-              after={
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/maintenance" scroll={false}>
-                    Show all buildings
-                  </Link>
-                </Button>
+              action={
+                <div className="flex flex-wrap gap-2 sm:justify-center">
+                  {addTask}
+                  <Button variant="outline" asChild>
+                    <Link href="/maintenance" scroll={false}>
+                      Show all buildings
+                    </Link>
+                  </Button>
+                </div>
               }
-            >
-              {addForm}
-            </EmptyCard>
+            />
           ) : (
             <MaintenanceTabs
               tab={tab}
@@ -291,39 +330,8 @@ export default async function MaintenancePage({
             />
           )}
         </div>
+        {taskModal}
       </PageBody>
     </>
-  );
-}
-
-/**
- * The page's empty states (`maintenance.md`, states): `EmptyState`'s title
- * and line, with the add row as the action — here the row *is* the action, and
- * a button that only moved the focus to it would be one more step.
- */
-function EmptyCard({
-  title,
-  body,
-  after,
-  children,
-}: {
-  title: string;
-  body: string;
-  after?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-border-card bg-surface-card">
-      <div className="flex flex-col items-start gap-3 px-5 pt-8 sm:items-center sm:px-8 sm:pt-12 sm:text-center">
-        <h2 className="text-md leading-tight font-semibold text-text-primary">
-          {title}
-        </h2>
-        <p className="max-w-prose text-sm leading-normal text-text-tertiary">
-          {body}
-        </p>
-        {after}
-      </div>
-      <div className="mx-auto max-w-3xl pb-4 sm:pb-8">{children}</div>
-    </section>
   );
 }
