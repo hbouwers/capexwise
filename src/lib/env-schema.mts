@@ -126,6 +126,24 @@ export const serverEnvSchema = z.object({
   }),
 
   /**
+   * The bearer token the nightly demo reset is called with (#34, ADR-0011).
+   * Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` when the project
+   * has this variable, and Cloud Scheduler can be told to send the same header,
+   * so the route checks one thing wherever it runs.
+   *
+   * Optional, and absent means the reset is off: `/api/cron/demo-reset`
+   * answers 404 to everybody. That is the right default for every environment
+   * but the one that hosts the demo — locally and in CI there is nothing to
+   * call it — and a route that is open because a secret was forgotten is the
+   * failure this avoids. 32 characters for the reason `BETTER_AUTH_SECRET`
+   * has them.
+   */
+  CRON_SECRET: z
+    .string()
+    .min(32, { message: "must be at least 32 characters" })
+    .optional(),
+
+  /**
    * Which Vercel environment this is. Vercel sets it on every deployment, and
    * nothing sets it anywhere else — locally, in CI and in the container it is
    * absent, which is why it is optional.
