@@ -10,11 +10,28 @@
  */
 import "server-only";
 
-import { and, count, desc, eq, gte, isNull, lt, not, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  not,
+  sql,
+} from "drizzle-orm";
 
-import { rentPeriods, units } from "@/db/schema";
-import { type CalendarDate, todayIn } from "@/lib/dates";
-import { chooseMonth, type MonthRange, rentRollMonths } from "@/lib/rent";
+import { buildings, rentPeriods, units } from "@/db/schema";
+import { type CalendarDate, firstOfMonth, todayIn, yearOf } from "@/lib/dates";
+import type { Cents } from "@/lib/money";
+import {
+  chooseMonth,
+  type MonthRange,
+  rentRollMonths,
+  rentTotals,
+} from "@/lib/rent";
 import { getOrgContext, type OrgScopedTx } from "@/server/org-context";
 import { getBuilding, type UnitRecord } from "@/server/queries/buildings";
 
@@ -182,4 +199,100 @@ export async function getRentRoll(
     .map((unit) => ({ unit, period: byUnit.get(unit.id) ?? null }));
 
   return { month, range, today, editable, rows, unmarked };
+}
+
+/** One building's rent, as the portfolio's tile and its card read it. */
+export type BuildingRent = {
+  /** The current month where the building is. */
+  month: CalendarDate;
+  /** The month's totals, by `rentTotals` — a vacant month in neither half. */
+  expectedCents: Cents;
+  receivedCents: Cents;
+  /** Received for this year's months, January through this one. */
+  receivedThisYearCents: Cents;
+};
+
+/**
+ * The portfolio's rent (`docs/ui/screens/portfolio.md`, Rent received and each
+ * card's `Rent {Mon}`), keyed by building id: every active building's current
+ * month, and what its months this year took in.
+ *
+ * **Viewing the portfolio views the current month**, so it opens that month
+ * for every active building through `ensureRentPeriods`, as the rent roll
+ * does (`docs/data-model.md` §4). Without it, a building nobody had opened
+ * this month would read `No rent expected` on its card and add nothing to
+ * the tile's expected half — a zero that is really an unopened month. It opens
+ * nothing else: no earlier month, since a view of the portfolio is not a view
+ * of those, and nothing on an archived or sold building, which the figures
+ * leave out.
+ *
+ * Each building's month is its own, in its own zone (ADR-0005), all read from
+ * one instant.
+ */
+export async function getPortfolioRent(
+  now: Date = new Date(),
+): Promise<Map<string, BuildingRent>> {
+  const { db } = await getOrgContext();
+
+  return await db.run(async (tx) => {
+    const active = await tx
+      .select({ id: buildings.id, timezone: buildings.timezone })
+      .from(buildings)
+      .where(
+        and(eq(buildings.orgId, db.orgId), eq(buildings.status, "active")),
+      );
+
+    const months = new Map(
+      active.map((building) => [
+        building.id,
+        firstOfMonth(todayIn(building.timezone, now)),
+      ]),
+    );
+    if (months.size === 0) return new Map();
+
+    for (const [buildingId, month] of months) {
+      await ensureRentPeriods(tx, db.orgId, buildingId, month);
+    }
+
+    // The earliest January any of them is in, which is every building's on
+    // all but the night the year turns in one zone and not another.
+    const since = [...months.values()]
+      .map((month) => `${yearOf(month)}-01-01`)
+      .reduce((earliest, first) => (first < earliest ? first : earliest));
+
+    const periods = await tx
+      .select({
+        buildingId: rentPeriods.buildingId,
+        periodMonth: rentPeriods.periodMonth,
+        amountExpectedCents: rentPeriods.amountExpectedCents,
+        amountReceivedCents: rentPeriods.amountReceivedCents,
+        vacant: rentPeriods.vacant,
+      })
+      .from(rentPeriods)
+      .where(
+        and(
+          eq(rentPeriods.orgId, db.orgId),
+          inArray(rentPeriods.buildingId, [...months.keys()]),
+          gte(rentPeriods.periodMonth, since),
+        ),
+      );
+
+    const rent = new Map<string, BuildingRent>();
+    for (const [buildingId, month] of months) {
+      const own = periods.filter(
+        (period) =>
+          period.buildingId === buildingId &&
+          yearOf(period.periodMonth) === yearOf(month) &&
+          period.periodMonth <= month,
+      );
+
+      rent.set(buildingId, {
+        month,
+        ...rentTotals(own.filter((period) => period.periodMonth === month)),
+        receivedThisYearCents: rentTotals(own).receivedCents,
+      });
+    }
+
+    return rent;
+  });
 }
