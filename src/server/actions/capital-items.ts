@@ -1,21 +1,20 @@
 "use server";
 
 /**
- * The capital items' writes that are rules rather than edits: adding items
- * from the catalogue and taking the batch back, confirming an estimated item,
- * and recording a replacement (`docs/data-model.md` §5). The add-equipment
- * modal and the equipment table call the first three (#110), and the item
- * editor the last (#125). Each starts
- * with `getOrgContext()`, so the org is the session's, and every id the
- * browser sends — a building, a unit, an item — is looked up inside that org
- * rather than trusted.
+ * The capital items' writes (`docs/data-model.md` §5): adding items from the
+ * catalogue and taking the batch back, confirming an estimated item, and — the
+ * item editor's — editing one, recording its replacement, and removing it. The
+ * add-equipment modal and the equipment table call the first three (#110), and
+ * the item editor the rest (#125). Each starts with `getOrgContext()`, so the
+ * org is the session's, and every id the browser sends — a building, a unit,
+ * an item — is looked up inside that org rather than trusted.
  *
  * **Only an active building's equipment is written to.** An archived or sold
  * building is kept for its history and shown without controls, and these
  * refuse it the same way they refuse one that is not there.
  */
 
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -26,6 +25,7 @@ import {
   units,
 } from "@/db/schema";
 import {
+  validateCapitalItem,
   validateConfirmation,
   validateReplacement,
 } from "@/lib/capital-item-form";
@@ -46,6 +46,12 @@ export type ConfirmCapitalItemResult =
 
 export type RecordReplacementResult =
   { ok: true; itemId: string } | { ok: false; errors: FieldErrors };
+
+export type UpdateCapitalItemResult =
+  { ok: true } | { ok: false; errors: FieldErrors };
+
+export type RemoveCapitalItemResult =
+  { ok: true } | { ok: false; errors: FieldErrors };
 
 /**
  * One message for a building that is not there, one that is another org's,
@@ -448,5 +454,179 @@ export async function recordReplacement(
     });
   } catch (error) {
     throw withoutParameters(error, "Recording a replacement");
+  }
+}
+
+/** An item edited or removed since the editor opened — replaced, or gone. */
+const EDIT_NOT_FOUND =
+  "This item could not be saved. Reload the page — it may have changed since you opened it.";
+
+const REMOVE_NOT_FOUND =
+  "This item could not be removed. Reload the page — it may have changed since you opened it.";
+
+/** The editor's scope names a unit retired or removed since the page was drawn. */
+const SCOPE_GONE =
+  "That unit is no longer part of this building. Choose another, or Shared.";
+
+/** A shared item whose cost is split by hand, asked to become one unit's. */
+const SPLIT_STAYS_SHARED =
+  "This item’s cost is split across units by hand, so it stays shared.";
+
+/**
+ * The item editor's `Save`: the item's own fields, under
+ * `validateCapitalItem`'s rules. **Only an active item on an active building**
+ * — a replaced item has a successor and a removed one is gone, and both are
+ * history the editor shows read-only.
+ *
+ * The scope is resolved against the building's units here, never trusted: a
+ * unit must be one of this building's, and not retired unless it is the unit
+ * the item is on already — a retired unit keeps what it has, and gets nothing
+ * new. The allocation follows the scope (§5): a unit-scoped item is
+ * `building_only`, and a shared one keeps its rule, or takes `by_unit_count`
+ * when it has just become shared. **An explicit split stays shared**: moving
+ * it onto a unit would have to drop its shares, and nothing deletes a share on
+ * its own (§7) — the scoped role holds no `delete` on them. Nothing in the
+ * product writes a split yet; whatever does will own moving one.
+ *
+ * An audited item switched to estimated loses its date and keeps its year —
+ * the year was the date's, and a guess is what is left of a date somebody no
+ * longer stands behind. The basis, `actual_cost_cents`, is whatever the form
+ * says in either case.
+ */
+export async function updateCapitalItem(
+  itemId: unknown,
+  input: unknown,
+): Promise<UpdateCapitalItemResult> {
+  const { db } = await getOrgContext();
+
+  const id = idSchema.safeParse(itemId);
+  if (!id.success) return refused(EDIT_NOT_FOUND);
+
+  try {
+    return await db.run(async (tx): Promise<UpdateCapitalItemResult> => {
+      // `for update`, so a replacement and an edit of one item cannot both
+      // find it active.
+      const [found] = await tx
+        .select({ item: capitalItems, timezone: buildings.timezone })
+        .from(capitalItems)
+        .innerJoin(
+          buildings,
+          and(
+            eq(buildings.orgId, capitalItems.orgId),
+            eq(buildings.id, capitalItems.buildingId),
+          ),
+        )
+        .where(
+          and(
+            eq(capitalItems.orgId, db.orgId),
+            eq(capitalItems.id, id.data),
+            eq(capitalItems.status, "active"),
+            eq(buildings.status, "active"),
+          ),
+        )
+        .for("update", { of: capitalItems });
+
+      if (!found) return refused(EDIT_NOT_FOUND);
+
+      const old = found.item;
+
+      const validated = validateCapitalItem(input, todayIn(found.timezone));
+      if (!validated.ok) return validated;
+
+      const { unitId, ...values } = validated.values;
+
+      if (unitId !== null && unitId !== old.unitId) {
+        const [unit] = await tx
+          .select({ id: units.id })
+          .from(units)
+          .where(
+            and(
+              eq(units.orgId, db.orgId),
+              eq(units.buildingId, old.buildingId),
+              eq(units.id, unitId),
+              ne(units.status, "retired"),
+            ),
+          );
+
+        if (!unit) return { ok: false, errors: { scope: SCOPE_GONE } };
+      }
+
+      if (unitId !== null && old.allocation === "explicit") {
+        return { ok: false, errors: { scope: SPLIT_STAYS_SHARED } };
+      }
+
+      const allocation =
+        unitId !== null
+          ? "building_only"
+          : old.unitId !== null
+            ? "by_unit_count"
+            : old.allocation;
+
+      await tx
+        .update(capitalItems)
+        .set({ ...values, unitId, allocation })
+        .where(
+          and(eq(capitalItems.orgId, db.orgId), eq(capitalItems.id, old.id)),
+        );
+
+      return { ok: true };
+    });
+  } catch (error) {
+    throw withoutParameters(error, "Saving an item");
+  }
+}
+
+/**
+ * The item editor's `Remove`: the item is gone and nothing took its place, so
+ * it is marked `removed` and leaves the table and the forecast (§5). Not a
+ * delete — its year and its cost are still the depreciation schedule's (#44),
+ * and `Show replaced and removed` brings it back to read.
+ *
+ * Only an active item on an active building, as every write here: an item
+ * already replaced has a successor that says what happened to it.
+ */
+export async function removeCapitalItem(
+  itemId: unknown,
+): Promise<RemoveCapitalItemResult> {
+  const { db } = await getOrgContext();
+
+  const id = idSchema.safeParse(itemId);
+  if (!id.success) return refused(REMOVE_NOT_FOUND);
+
+  try {
+    return await db.run(async (tx): Promise<RemoveCapitalItemResult> => {
+      const [item] = await tx
+        .select({ id: capitalItems.id })
+        .from(capitalItems)
+        .innerJoin(
+          buildings,
+          and(
+            eq(buildings.orgId, capitalItems.orgId),
+            eq(buildings.id, capitalItems.buildingId),
+          ),
+        )
+        .where(
+          and(
+            eq(capitalItems.orgId, db.orgId),
+            eq(capitalItems.id, id.data),
+            eq(capitalItems.status, "active"),
+            eq(buildings.status, "active"),
+          ),
+        )
+        .for("update", { of: capitalItems });
+
+      if (!item) return refused(REMOVE_NOT_FOUND);
+
+      await tx
+        .update(capitalItems)
+        .set({ status: "removed" })
+        .where(
+          and(eq(capitalItems.orgId, db.orgId), eq(capitalItems.id, item.id)),
+        );
+
+      return { ok: true };
+    });
+  } catch (error) {
+    throw withoutParameters(error, "Removing an item");
   }
 }

@@ -1,9 +1,11 @@
 /**
- * What adding and replacing equipment do inside one org: the catalogue's
- * defaults copied onto each item and never read again, the rows one tick
- * becomes for each scope, a replacement as a row of its own with the old one
- * untouched but for its status, and the building form's refusal to remove a
- * unit that has equipment. The cross-org half is the isolation test's.
+ * What adding, editing and replacing equipment do inside one org: the
+ * catalogue's defaults copied onto each item and never read again, the rows
+ * one tick becomes for each scope, an edit that follows its scope with the
+ * item's allocation, a replacement as a row of its own with the old one
+ * untouched but for its status, a removal that is not a delete, and the
+ * building form's refusal to remove a unit that has equipment. The cross-org
+ * half is the isolation test's.
  *
  * Driven as the modal and the editor will drive them (#110) — a signed
  * session, then the function — as `rent-periods.integration.test.ts` does,
@@ -53,7 +55,9 @@ const {
   addCapitalItems,
   confirmCapitalItem,
   recordReplacement,
+  removeCapitalItem,
   undoAddCapitalItems,
+  updateCapitalItem,
 } = await import("@/server/actions/capital-items");
 const { getOrgContext } = await import("@/server/org-context");
 const { updateBuilding } = await import("@/server/actions/buildings");
@@ -762,5 +766,249 @@ describe("updateBuilding, once a unit has equipment", () => {
     });
 
     expect(result).toEqual({ ok: true, buildingId: building.id });
+  });
+});
+
+describe("updateCapitalItem", () => {
+  /** The editor's form for the factory's furnace, every field changed. */
+  const edited = {
+    label: "Furnace, basement",
+    confidence: "estimated",
+    installYear: "2011",
+    installedOn: "",
+    cost: "3,100",
+    expectedLife: "18",
+    replacementCost: "$5,200",
+    scope: "shared",
+    notes: "Carrier 58STA, serial on the door.",
+  };
+
+  it("writes the editor's fields onto the item", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+
+    expect(await updateCapitalItem(item.id, edited)).toEqual({ ok: true });
+    expect(await itemRow(item.id)).toEqual({
+      ...item,
+      label: "Furnace, basement",
+      installYear: 2011,
+      actualCostCents: 310_000,
+      expectedLifeYears: 18,
+      replacementCostCents: 520_000,
+      notes: "Carrier 58STA, serial on the door.",
+      updatedAt: expect.any(Date),
+    });
+  });
+
+  it("makes an item audited from its date, and estimated again without one", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+
+    expect(
+      await updateCapitalItem(item.id, {
+        ...edited,
+        confidence: "audited",
+        installedOn: "2011-03-09",
+      }),
+    ).toEqual({ ok: true });
+    expect(await itemRow(item.id)).toMatchObject({
+      confidence: "audited",
+      installYear: 2011,
+      installDate: "2011-03-09",
+    });
+
+    // Back to a guess: the date goes, the year it gave stays.
+    expect(
+      await updateCapitalItem(item.id, { ...edited, installYear: "2010" }),
+    ).toEqual({ ok: true });
+    expect(await itemRow(item.id)).toMatchObject({
+      confidence: "estimated",
+      installYear: 2010,
+      installDate: null,
+    });
+  });
+
+  it("moves a shared item onto a unit, and its allocation with it", async () => {
+    const { org, building, a } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+
+    expect(
+      await updateCapitalItem(item.id, { ...edited, scope: a.id }),
+    ).toEqual({ ok: true });
+    expect(await itemRow(item.id)).toMatchObject({
+      unitId: a.id,
+      allocation: "building_only",
+    });
+
+    // And back: shared again, divided by unit count.
+    expect(await updateCapitalItem(item.id, edited)).toEqual({ ok: true });
+    expect(await itemRow(item.id)).toMatchObject({
+      unitId: null,
+      allocation: "by_unit_count",
+    });
+  });
+
+  it("keeps an explicit split as it is, and keeps the item shared", async () => {
+    const { org, building, a, b } = await duplex();
+    const item = await createCapitalItem(org.id, building.id, {
+      typeSlug: "boiler",
+      label: "Boiler",
+    });
+    await splitCapitalItem(org.id, building.id, item.id, [
+      { unitId: a.id, shareBps: 6000 },
+      { unitId: b.id, shareBps: 4000 },
+    ]);
+    const shares = () =>
+      testDb()
+        .select({ unitId: capitalItemAllocations.unitId })
+        .from(capitalItemAllocations)
+        .where(eq(capitalItemAllocations.capitalItemId, item.id));
+
+    // An edit that leaves it shared leaves the split alone.
+    expect(await updateCapitalItem(item.id, edited)).toEqual({ ok: true });
+    expect(await itemRow(item.id)).toMatchObject({ allocation: "explicit" });
+    expect(await shares()).toHaveLength(2);
+
+    // Moving it onto a unit would drop the shares, which nothing deletes on
+    // its own (§7) — so it is refused, and the split stands.
+    expect(
+      await updateCapitalItem(item.id, { ...edited, scope: b.id }),
+    ).toEqual({
+      ok: false,
+      errors: {
+        scope:
+          "This item’s cost is split across units by hand, so it stays shared.",
+      },
+    });
+    expect(await itemRow(item.id)).toMatchObject({
+      unitId: null,
+      allocation: "explicit",
+    });
+    expect(await shares()).toHaveLength(2);
+  });
+
+  it("keeps an item on its retired unit, and puts nothing new there", async () => {
+    const { org, building, c } = await duplex();
+    const kept = await createCapitalItem(org.id, building.id, {
+      unitId: c.id,
+    });
+    const moved = await createCapitalItem(org.id, building.id);
+
+    expect(
+      await updateCapitalItem(kept.id, { ...edited, scope: c.id }),
+    ).toEqual({ ok: true });
+    expect(await itemRow(kept.id)).toMatchObject({ unitId: c.id });
+
+    expect(
+      await updateCapitalItem(moved.id, { ...edited, scope: c.id }),
+    ).toEqual({
+      ok: false,
+      errors: {
+        scope:
+          "That unit is no longer part of this building. Choose another, or Shared.",
+      },
+    });
+    expect(await itemRow(moved.id)).toEqual(moved);
+  });
+
+  it("puts an item on no unit of another building", async () => {
+    const { org, building } = await duplex();
+    const other = await createBuilding(org.id);
+    const elsewhere = await createUnit(org.id, other.id, { label: "1" });
+    const item = await createCapitalItem(org.id, building.id);
+
+    expect(
+      await updateCapitalItem(item.id, { ...edited, scope: elsewhere.id }),
+    ).toMatchObject({ ok: false, errors: { scope: expect.any(String) } });
+    expect(await itemRow(item.id)).toEqual(item);
+  });
+
+  it("says what is wrong with the form, and writes nothing", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+
+    expect(
+      await updateCapitalItem(item.id, {
+        ...edited,
+        installYear: String(thisYear + 1),
+        expectedLife: "0",
+      }),
+    ).toEqual({
+      ok: false,
+      errors: {
+        installYear: "Enter this year or an earlier one.",
+        expectedLife: "Enter a whole number of years, like 15.",
+      },
+    });
+    expect(await itemRow(item.id)).toEqual(item);
+  });
+
+  it("edits an active item only, on an active building only", async () => {
+    const { org, building } = await duplex();
+    const replaced = await createCapitalItem(org.id, building.id);
+    const successor = await createCapitalItem(org.id, building.id);
+    await testDb()
+      .update(capitalItems)
+      .set({ status: "replaced", replacedById: successor.id })
+      .where(eq(capitalItems.id, replaced.id));
+    const gone = await createCapitalItem(org.id, building.id, {
+      status: "removed",
+    });
+
+    expect((await updateCapitalItem(replaced.id, edited)).ok).toBe(false);
+    expect((await updateCapitalItem(gone.id, edited)).ok).toBe(false);
+    expect((await updateCapitalItem(successor.id, edited)).ok).toBe(true);
+
+    await testDb()
+      .update(buildings)
+      .set({ status: "archived" })
+      .where(eq(buildings.id, building.id));
+
+    expect((await updateCapitalItem(successor.id, edited)).ok).toBe(false);
+  });
+});
+
+describe("removeCapitalItem", () => {
+  it("marks the item removed, and keeps everything else about it", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id, {
+      actualCostCents: 310_000,
+      notes:
+        "Cracked heat exchanger; not replaced, unit switched to mini-splits.",
+    });
+
+    expect(await removeCapitalItem(item.id)).toEqual({ ok: true });
+    expect(await itemRow(item.id)).toEqual({
+      ...item,
+      status: "removed",
+      updatedAt: expect.any(Date),
+    });
+  });
+
+  it("removes an item once, and not one already replaced", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+    const replaced = await createCapitalItem(org.id, building.id);
+    await testDb()
+      .update(capitalItems)
+      .set({ status: "replaced", replacedById: item.id })
+      .where(eq(capitalItems.id, replaced.id));
+
+    expect((await removeCapitalItem(item.id)).ok).toBe(true);
+    expect((await removeCapitalItem(item.id)).ok).toBe(false);
+    expect((await removeCapitalItem(replaced.id)).ok).toBe(false);
+    expect(await itemRow(replaced.id)).toMatchObject({ status: "replaced" });
+  });
+
+  it("removes nothing on an archived building", async () => {
+    const { org, building } = await duplex();
+    const item = await createCapitalItem(org.id, building.id);
+    await testDb()
+      .update(buildings)
+      .set({ status: "archived" })
+      .where(eq(buildings.id, building.id));
+
+    expect((await removeCapitalItem(item.id)).ok).toBe(false);
+    expect(await itemRow(item.id)).toEqual(item);
   });
 });

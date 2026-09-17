@@ -31,8 +31,10 @@ page's recurring tasks, where checking one off writes its next occurrence — #1
 read and edited in full in the task modal at `?task=`, with its confirmation, Mark done, Cancel task
 and the contacts tagged with its trade — #114. The portfolio at `/` is finished: the four v0 tiles,
 the building cards' rent, CapEx, tasks, flag and systems life, the replacement runway and what is
-due in the next 30 days — #115. The tax planner and the rest of what the product is *for* are still
-unwritten. Rules below that describe runtime behaviour describe what the code *will*
+due in the next 30 days — #115. An item is edited in full in the item editor, opened from the
+equipment table's Item button, with Record replacement, Remove and Confirm in it, and a building's
+replaced and removed equipment shown on request — #125. The tax planner and the rest of what the
+product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
 

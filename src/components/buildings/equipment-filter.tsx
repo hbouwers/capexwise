@@ -115,3 +115,52 @@ export function EquipmentFilterClear() {
     </Button>
   );
 }
+
+/**
+ * `Show replaced and removed` at the table's foot, and `Hide` once they are
+ * shown (`building-detail.md`, the item editor). In the URL as
+ * `?history=shown`, like the filters, and leaving every other param as it
+ * was: the muted rows are still there after a save refreshes the page.
+ */
+export function EquipmentHistoryToggle({
+  shown,
+  count,
+}: {
+  shown: boolean;
+  count: number;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [, startTransition] = useTransition();
+  const [view, setView] = useOptimistic(shown);
+
+  function toggle() {
+    const params = new URLSearchParams(searchParams);
+    if (view) params.delete("history");
+    else params.set("history", "shown");
+
+    const query = params.toString();
+    startTransition(() => {
+      setView(!view);
+      router.push(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      });
+    });
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="link"
+      size="xs"
+      aria-pressed={view}
+      onClick={toggle}
+      className="px-0 text-accent max-md:h-11 max-md:text-sm"
+    >
+      {view
+        ? "Hide replaced and removed"
+        : `Show replaced and removed (${count})`}
+    </Button>
+  );
+}
