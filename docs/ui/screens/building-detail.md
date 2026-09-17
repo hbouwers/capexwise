@@ -303,6 +303,31 @@ On narrow viewports the row's `Item` button is how `Confirm` is reached — the 
 - **An occurrence the task modal has taken the date off reads `Not scheduled`** in Next due, and
   sorts last.
 
+#125 built the item editor. What it settled:
+
+- **Confidence is a choice in the editor, not only `Confirm`'s flip.** `Install year is` Estimated
+  or Audited; Estimated takes a four-digit year and Audited a whole date, and the year is the
+  date's. `Confirm` in the editor's footer is that switch with the date focused next — the same
+  change as the row's `Confirm` makes, saved with the form. Audited back to Estimated drops the date
+  and keeps the year.
+- **`What it cost` is on the editor**, beside the install: the basis, `actual_cost_cents`, which
+  `Confirm` and `Record replacement` also record. Without it an audited item's cost could be got
+  wrong once and never corrected.
+- **Scope follows the allocation rule.** Moving an item onto a unit makes it `building_only`;
+  moving it back to Shared makes it `by_unit_count`. **An item split by hand stays shared**: nothing
+  deletes a share on its own ([data-model §7](../../data-model.md)), and nothing writes a split yet.
+- **`Record replacement` and `Remove` replace the footer**, as the task modal's `Mark done` and
+  `Cancel task` do, and say so when they would drop what was typed.
+- **`Show replaced and removed` is `?history=shown`**, like the filters, so a save keeps them shown.
+  The rows come back muted inside their scope groups, after the items in service, with `Replaced` or
+  `Removed` where the life status was and nothing in Replace or Est. cost — they are in nobody's
+  forecast, and count toward neither the summary line nor the total. A building whose every item is
+  in the history keeps the table, and reads `No equipment in service`.
+- **The editor's open state is local**, not the URL: nothing links to an item. On an archived or
+  sold building it opens read-only.
+- **Below `md` the row's `Confirm` is gone with the Installed column**, and the editor is how an
+  estimated item is confirmed there.
+
 ---
 
 ## Changes from the prototype
