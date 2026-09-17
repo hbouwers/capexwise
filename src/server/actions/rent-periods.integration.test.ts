@@ -1,9 +1,10 @@
 /**
  * What the rent roll does inside one org: the month a view opens, the rule
  * that a rent change does not reach back into it, the one-click mark and its
- * date, the Other amount form, `Record rent` for a unit with no month, and the
- * building form's refusal to delete a unit that has rent history. The
- * cross-org half is the isolation test's.
+ * date, the Other amount form, `Record rent` for a unit with no month, the
+ * portfolio's rent across buildings, and the building form's refusal to
+ * delete a unit that has rent history. The cross-org half is the isolation
+ * test's.
  *
  * Driven as the page drives them — a signed session, then the function — as
  * `building-facts.integration.test.ts` does, whose session setup this repeats.
@@ -15,7 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildings, rentPeriods, units } from "@/db/schema";
 import { buildingFields } from "@/lib/building-form";
-import { addMonths, firstOfMonth, todayIn } from "@/lib/dates";
+import { addMonths, firstOfMonth, todayIn, yearOf } from "@/lib/dates";
 import { UNREADABLE_FORM } from "@/lib/forms";
 import { monthParam } from "@/lib/rent";
 import {
@@ -50,7 +51,8 @@ const { getAuth } = await import("@/server/auth");
 const { markRentPaid, openRentPeriod, saveRentPeriod, unmarkRentPaid } =
   await import("@/server/actions/rent-periods");
 const { updateBuilding } = await import("@/server/actions/buildings");
-const { getRentRoll } = await import("@/server/queries/rent-periods");
+const { getPortfolioRent, getRentRoll } =
+  await import("@/server/queries/rent-periods");
 const { getBuilding } = await import("@/server/queries/buildings");
 
 const ZONE = "America/Indiana/Indianapolis";
@@ -269,6 +271,79 @@ describe("getRentRoll", () => {
 
     const now = await getRentRoll(building.id, undefined);
     expect(now?.rows.map((row) => row.unit.label)).toEqual(["A"]);
+  });
+});
+
+describe("getPortfolioRent", () => {
+  it("opens the current month on every active building, and nothing on an archived one", async () => {
+    const { org, building, a } = await duplex();
+    const archived = await createBuilding(org.id, {
+      timezone: ZONE,
+      status: "archived",
+    });
+    const let_ = await createUnit(org.id, archived.id, {
+      status: "occupied",
+      rentCents: 150_000,
+    });
+
+    const rent = await getPortfolioRent();
+
+    expect([...rent.keys()]).toEqual([building.id]);
+    expect(rent.get(building.id)).toEqual({
+      month: thisMonth,
+      expectedCents: 230_000,
+      receivedCents: 0,
+      receivedThisYearCents: 0,
+    });
+    expect(await periodsOf(a.id)).toHaveLength(1);
+    expect(await periodsOf(let_.id)).toEqual([]);
+  });
+
+  it("adds up this year's months, and leaves a vacant month out of both halves", async () => {
+    const { org, building, a, b } = await duplex();
+    const january = `${yearOf(thisMonth)}-01-01`;
+    const lastDecember = addMonths(january, -1);
+
+    await createRentPeriod(org.id, building.id, a.id, {
+      periodMonth: thisMonth,
+      amountExpectedCents: 230_000,
+      amountReceivedCents: 230_000,
+      receivedOn: today,
+    });
+    // Last year's rent is not this year's, however recently it arrived.
+    await createRentPeriod(org.id, building.id, b.id, {
+      periodMonth: lastDecember,
+      amountExpectedCents: 195_000,
+      amountReceivedCents: 195_000,
+      receivedOn: lastDecember,
+    });
+    await createRentPeriod(org.id, building.id, b.id, {
+      periodMonth: january,
+      amountExpectedCents: 195_000,
+      amountReceivedCents: 100_000,
+      receivedOn: january,
+    });
+    const c = await createUnit(org.id, building.id, {
+      label: "C",
+      status: "occupied",
+      rentCents: 180_000,
+    });
+    await createRentPeriod(org.id, building.id, c.id, {
+      periodMonth: thisMonth,
+      amountExpectedCents: 180_000,
+      vacant: true,
+    });
+
+    const rent = await getPortfolioRent();
+
+    // In January, B's January is this month as well.
+    const bThisMonth = january === thisMonth;
+    expect(rent.get(building.id)).toEqual({
+      month: thisMonth,
+      expectedCents: 230_000 + (bThisMonth ? 195_000 : 0),
+      receivedCents: 230_000 + (bThisMonth ? 100_000 : 0),
+      receivedThisYearCents: 330_000,
+    });
   });
 });
 

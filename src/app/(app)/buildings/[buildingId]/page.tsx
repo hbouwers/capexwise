@@ -26,7 +26,7 @@ import {
   unitCount,
 } from "@/lib/buildings";
 import { monthOf, todayIn, yearOf } from "@/lib/dates";
-import { lifeStatus, replacementYear } from "@/lib/forecast/life";
+import { capexThroughNextYear } from "@/lib/forecast/building";
 import {
   type ForecastItem,
   levelFundingPerMonthCents,
@@ -116,14 +116,7 @@ export default async function BuildingPage({
     status: "active",
   }));
   const years = outflowByYear(replacements(forecastItems, thisYear), thisYear);
-  // `CapEx through {next year}`: each item's own next replacement, past-due
-  // ones included — not its recurrences, which the ten-year tile counts.
-  const dueSoon = equipment.filter(
-    (item) => replacementYear(item) <= thisYear + 1,
-  );
-  const pastLife = dueSoon.filter(
-    (item) => lifeStatus(item, thisYear) === "past-life",
-  ).length;
+  const capex = capexThroughNextYear(forecastItems, thisYear);
 
   const tracked: Record<string, number> = {};
   for (const item of equipment) {
@@ -203,15 +196,8 @@ export default async function BuildingPage({
               />
               <StatTile
                 label={`CapEx through ${thisYear + 1}`}
-                figure={
-                  <Money
-                    cents={dueSoon.reduce(
-                      (sum, item) => sum + item.replacementCostCents,
-                      0,
-                    )}
-                  />
-                }
-                sub={`${dueSoon.length === 1 ? "1 item" : `${dueSoon.length} items`}, ${pastLife} past life`}
+                figure={<Money cents={capex.cents} />}
+                sub={`${capex.items === 1 ? "1 item" : `${capex.items} items`}, ${capex.pastLife} past life`}
                 href="#equipment"
               />
               <StatTile

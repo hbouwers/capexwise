@@ -6,7 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildingFlag, systemsLifeUsedPercent } from "@/lib/forecast/building";
+import {
+  buildingFlag,
+  capexThroughNextYear,
+  endOfLife,
+  systemsLifeUsedPercent,
+} from "@/lib/forecast/building";
 import { BIG_TICKET_CENTS, type ForecastItem } from "@/lib/forecast/outflow";
 
 const THIS_YEAR = 2026;
@@ -180,5 +185,50 @@ describe("systemsLifeUsedPercent", () => {
     expect(
       systemsLifeUsedPercent([item(10, { status: "replaced" })], THIS_YEAR),
     ).toBeNull();
+  });
+});
+
+describe("capexThroughNextYear", () => {
+  it("sums next year and every year before it, and nothing after", () => {
+    // Due in 2021, 2026, 2027 and 2028 on a 20-year life.
+    const items = [
+      item(25, { replacementCostCents: 100_000 }),
+      item(20, { replacementCostCents: 200_000 }),
+      item(19, { replacementCostCents: 400_000 }),
+      item(18, { replacementCostCents: 800_000 }),
+    ];
+
+    expect(capexThroughNextYear(items, THIS_YEAR)).toEqual({
+      cents: 700_000,
+      items: 3,
+      pastLife: 2,
+    });
+  });
+
+  it("leaves out replaced and removed items", () => {
+    expect(
+      capexThroughNextYear(
+        [item(25, { status: "replaced" }), item(25, { status: "removed" })],
+        THIS_YEAR,
+      ),
+    ).toEqual({ cents: 0, items: 0, pastLife: 0 });
+  });
+});
+
+describe("endOfLife", () => {
+  it("counts active items in their replacement year or past it, by confidence", () => {
+    expect(
+      endOfLife(
+        [
+          item(20, { confidence: "audited" }),
+          item(31, { confidence: "estimated" }),
+          item(22, { confidence: "estimated" }),
+          // One year short of its life: due soon, not end of life.
+          item(19, { confidence: "audited" }),
+          item(40, { confidence: "audited", status: "removed" }),
+        ],
+        THIS_YEAR,
+      ),
+    ).toEqual({ audited: 1, estimated: 2 });
   });
 });

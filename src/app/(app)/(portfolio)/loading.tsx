@@ -2,10 +2,9 @@ import { PageBody } from "@/components/shell/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
- * The portfolio while its buildings load: the header's height, and two cards
- * at the height a card renders at, so nothing jumps when the data lands
- * (`docs/ui/screens/portfolio.md`, states). The tiles and the rail join this
- * when they join the page (#115).
+ * The portfolio while it loads (`docs/ui/screens/portfolio.md`, states): the
+ * header's height, four tiles, two building cards and the rail's two cards,
+ * each at the height it renders at, so nothing jumps when the data lands.
  */
 export default function PortfolioLoading() {
   return (
@@ -17,11 +16,24 @@ export default function PortfolioLoading() {
         </div>
       </div>
       <PageBody>
-        <div className="@container flex flex-col gap-4" aria-busy="true">
-          <Skeleton className="h-4 w-32" />
-          <div className="grid gap-4 @xl:grid-cols-2">
-            <Skeleton className="h-36 rounded-lg" />
-            <Skeleton className="h-36 rounded-lg" />
+        <div className="flex flex-col gap-6" aria-busy="true">
+          <div className="grid gap-3 sm:grid-cols-[repeat(auto-fit,minmax(168px,1fr))] sm:gap-4">
+            {Array.from({ length: 4 }, (_, index) => (
+              <Skeleton key={index} className="h-14 rounded-lg sm:h-28" />
+            ))}
+          </div>
+          <div className="grid-two-column items-start">
+            <div className="@container flex flex-col gap-4">
+              <Skeleton className="h-4 w-32" />
+              <div className="grid gap-4 @xl:grid-cols-2">
+                <Skeleton className="h-56 rounded-lg" />
+                <Skeleton className="h-56 rounded-lg" />
+              </div>
+            </div>
+            <div className="flex flex-col gap-5">
+              <Skeleton className="h-64 rounded-lg" />
+              <Skeleton className="h-48 rounded-lg" />
+            </div>
           </div>
         </div>
       </PageBody>
