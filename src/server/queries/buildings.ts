@@ -31,6 +31,7 @@ export type BuildingSummary = {
   addressLine1: string;
   city: string;
   buildYear: number | null;
+  timezone: string;
   status: (typeof buildings.$inferSelect)["status"];
   /** Units that are not retired. */
   unitCount: number;
@@ -60,6 +61,7 @@ export async function listBuildings(): Promise<BuildingSummary[]> {
         addressLine1: buildings.addressLine1,
         city: buildings.city,
         buildYear: buildings.buildYear,
+        timezone: buildings.timezone,
         status: buildings.status,
         unitCount:
           sql<number>`count(${units.id}) filter (where ${units.status} <> 'retired')`.mapWith(
