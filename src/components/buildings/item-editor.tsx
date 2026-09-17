@@ -157,6 +157,10 @@ function ItemEditorModal({
     installedOn: today,
     cost: "",
   });
+  // The replacement's own errors, apart from the form's: its date and cost
+  // share their keys with the form's audited date and basis, and a wrong
+  // replacement date is not a wrong install date.
+  const [replacementErrors, setReplacementErrors] = useState<FieldErrors>({});
 
   const changed = JSON.stringify(fields) !== JSON.stringify(initial);
   const estimated = fields.confidence === "estimated";
@@ -280,23 +284,23 @@ function ItemEditorModal({
   function replace() {
     const checked = validateReplacement(replacement, today, item);
     if (!checked.ok) {
-      setErrors(checked.errors);
+      setReplacementErrors(checked.errors);
       focusFirstError();
       return;
     }
 
-    setErrors({});
+    setReplacementErrors({});
     startTransition(async () => {
       const result = await recordReplacement(item.id, replacement).catch(
         () => null,
       );
 
       if (result === null || !result.ok) {
-        setErrors(
-          result?.errors ?? {
-            form: "Couldn’t record the replacement. Check your connection and try again.",
-          },
-        );
+        const { form, ...fields } = result?.errors ?? {
+          form: "Couldn’t record the replacement. Check your connection and try again.",
+        };
+        setReplacementErrors(fields);
+        setErrors(form ? { form } : {});
         focusFirstError();
         return;
       }
@@ -384,7 +388,7 @@ function ItemEditorModal({
         <Field
           name={name("replacement-installedOn")}
           label="Installed on"
-          error={errors.installedOn}
+          error={replacementErrors.installedOn}
           className="sm:w-44"
         >
           {(control) => (
@@ -398,7 +402,7 @@ function ItemEditorModal({
                   ...r,
                   installedOn: event.target.value,
                 }));
-                setErrors({});
+                setReplacementErrors({});
               }}
               autoFocus
               className="font-mono tabular-nums"
@@ -409,7 +413,7 @@ function ItemEditorModal({
           name={name("replacement-cost")}
           label="What it cost"
           optional
-          error={errors.cost}
+          error={replacementErrors.cost}
           className="sm:w-36"
         >
           {(control) => (
@@ -418,7 +422,7 @@ function ItemEditorModal({
               value={replacement.cost}
               onChange={(event) => {
                 setReplacement((r) => ({ ...r, cost: event.target.value }));
-                setErrors({});
+                setReplacementErrors({});
               }}
             />
           )}

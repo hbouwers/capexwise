@@ -133,12 +133,10 @@ export function EquipmentCard({
     );
   }
 
-  // The history rows the table shows, if any: `Show replaced and removed`.
-  const shownHistory = view.history ? history : [];
-
-  const withItems = new Set(
-    [...items, ...shownHistory].map((item) => item.unitId),
-  );
+  // A retired unit with equipment on it, in service or in the history, is a
+  // scope whether or not the history is shown — so the toggle changes what
+  // rows there are, never how the table is grouped or filtered.
+  const withItems = new Set([...items, ...history].map((item) => item.unitId));
   const scopedUnits = units.filter(
     (unit) => !unit.retired || withItems.has(unit.id),
   );
@@ -164,6 +162,13 @@ export function EquipmentCard({
 
   const shown = items.filter((item) => inScope(item) && inConfidence(item));
   const audited = items.filter((item) => item.confidence === "audited").length;
+
+  // The history rows under the same filters, and the ones the table shows —
+  // none until `Show replaced and removed` is pressed.
+  const historyInView = history.filter(
+    (item) => inScope(item) && inConfidence(item),
+  );
+  const shownHistory = view.history ? historyInView : [];
 
   const scopes: ScopeChip[] = showScope
     ? [
@@ -203,9 +208,7 @@ export function EquipmentCard({
           label: group.label,
           items: sorted(shown.filter((item) => item.unitId === group.unitId)),
           history: sorted(
-            shownHistory.filter(
-              (item) => item.unitId === group.unitId && inScope(item),
-            ),
+            shownHistory.filter((item) => item.unitId === group.unitId),
           ),
         }))
         .filter((group) => group.items.length + group.history.length > 0)
@@ -361,9 +364,12 @@ export function EquipmentCard({
         </Table>
       )}
 
-      {history.length > 0 ? (
+      {historyInView.length > 0 ? (
         <div className="border-t border-border-divider px-5 py-1.5">
-          <EquipmentHistoryToggle shown={view.history} count={history.length} />
+          <EquipmentHistoryToggle
+            shown={view.history}
+            count={historyInView.length}
+          />
         </div>
       ) : null}
 
