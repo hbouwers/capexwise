@@ -1,11 +1,12 @@
 /**
- * The two summaries a building's card and page carry about its equipment
- * (`docs/ui/screens/portfolio.md`, Your buildings): the flag, and systems life
- * used. Built on the same age and replacement year as the equipment table and
- * the forecast, so the card cannot say `Healthy` over a table with a row past
+ * The summaries a building's card and page carry about its equipment
+ * (`docs/ui/screens/portfolio.md`, Your buildings): the flag, systems life
+ * used, and CapEx through next year — and the portfolio's End of life tile.
+ * Built on the same age and replacement year as the equipment table and the
+ * forecast, so the card cannot say `Healthy` over a table with a row past
  * life.
  */
-import { ageInYears, lifeStatus } from "@/lib/forecast/life";
+import { ageInYears, lifeStatus, replacementYear } from "@/lib/forecast/life";
 import {
   BIG_TICKET_CENTS,
   type ForecastItem,
@@ -106,6 +107,50 @@ export function systemsLifeUsedPercent(
   // round(100 × numerator ÷ (denominator × total)), half up.
   const scale = denominator * total;
   return Number((200n * numerator + scale) / (2n * scale));
+}
+
+/**
+ * **CapEx through {next year}**: the replacement cost of active items whose
+ * own replacement year is next year or earlier — past-due ones included, and
+ * not their recurrences, which the ten-year figures count. A replacement year
+ * is a year, so "the next twelve months" is not a set the data can name; the
+ * label states the boundary this sum uses (`portfolio.md`). The building
+ * page's tile and the portfolio's card are both this.
+ */
+export function capexThroughNextYear(
+  items: readonly ForecastItem[],
+  thisYear: number,
+): { cents: number; items: number; pastLife: number } {
+  const due = items.filter(
+    (item) => item.status === "active" && replacementYear(item) <= thisYear + 1,
+  );
+
+  return {
+    cents: due.reduce((sum, item) => sum + item.replacementCostCents, 0),
+    items: due.length,
+    pastLife: due.filter((item) => lifeStatus(item, thisYear) === "past-life")
+      .length,
+  };
+}
+
+/**
+ * The End of life tile: active items at or past their expected life, split by
+ * whether the install year behind each is audited or estimated — PRD F0's
+ * "flagged as estimates rather than mixed in silently". The same set as the
+ * forecast's bar for this year, which folds every past-due replacement into
+ * it; the tile links there.
+ */
+export function endOfLife(
+  items: readonly ForecastItem[],
+  thisYear: number,
+): { audited: number; estimated: number } {
+  const past = items.filter(
+    (item) =>
+      item.status === "active" && lifeStatus(item, thisYear) === "past-life",
+  );
+  const audited = past.filter((item) => item.confidence === "audited").length;
+
+  return { audited, estimated: past.length - audited };
 }
 
 function compare(a: string, b: string): number {
