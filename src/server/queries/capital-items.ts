@@ -13,7 +13,10 @@ import type { CalendarDate } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
 import { getOrgContext } from "@/server/org-context";
 
-/** One row of the equipment table: an item, and the group of its type. */
+/**
+ * One row of the equipment table: an item, the group of its type, and what the
+ * item editor opens on it.
+ */
 export type EquipmentItem = {
   id: string;
   /** Null for the building's own — `Shared`. */
@@ -29,12 +32,17 @@ export type EquipmentItem = {
   confidence: (typeof capitalItems.$inferSelect)["confidence"];
   expectedLifeYears: number;
   replacementCostCents: Cents;
+  /** What installing it did cost, when known — the basis. */
+  actualCostCents: Cents | null;
+  status: (typeof capitalItems.$inferSelect)["status"];
+  notes: string | null;
 };
 
 /**
- * A building's items in service — `active` ones. Replaced and removed items
- * leave the table and the forecast (`building-detail.md`); the link that
- * brings them back comes with the item editor that makes them (#125).
+ * A building's equipment, every status: the `active` items in service, which
+ * are the table's and the forecast's, and the `replaced` and `removed` ones,
+ * which `Show replaced and removed` brings back muted (`building-detail.md`).
+ * The page splits them; the forecast never sees the history.
  *
  * `buildingId` is one `getBuilding()` has already found in this org, and the
  * org is filtered on again here all the same. In no order: the table sorts
@@ -58,6 +66,9 @@ export async function listEquipment(
         confidence: capitalItems.confidence,
         expectedLifeYears: capitalItems.expectedLifeYears,
         replacementCostCents: capitalItems.replacementCostCents,
+        actualCostCents: capitalItems.actualCostCents,
+        status: capitalItems.status,
+        notes: capitalItems.notes,
       })
       .from(capitalItems)
       .leftJoin(
@@ -68,7 +79,6 @@ export async function listEquipment(
         and(
           eq(capitalItems.orgId, db.orgId),
           eq(capitalItems.buildingId, buildingId),
-          eq(capitalItems.status, "active"),
         ),
       ),
   );

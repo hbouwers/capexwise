@@ -73,7 +73,7 @@ export default async function BuildingPage({
   const { building } = detail;
   const query = await searchParams;
   const editable = building.status === "active";
-  const [facts, contacts, roll, equipment, catalogue, recurring, modal] =
+  const [facts, contacts, roll, allEquipment, catalogue, recurring, modal] =
     await Promise.all([
       getBuildingFacts(building.id),
       listContacts(),
@@ -89,6 +89,8 @@ export default async function BuildingPage({
     ]);
   // Read through `getBuilding`, which has just found the building.
   if (!roll) notFound();
+  // What is in service. Replaced and removed items are never the forecast's.
+  const equipment = allEquipment.filter((item) => item.status === "active");
   // Retired units are history, not part of the building's figures.
   const units = detail.units.filter((unit) => unit.status !== "retired");
   const occupied = units.filter((unit) => unit.status === "occupied");
