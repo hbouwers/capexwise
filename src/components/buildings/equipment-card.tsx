@@ -4,8 +4,10 @@ import { ConfirmItem } from "@/components/buildings/confirm-item";
 import {
   EquipmentFilter,
   EquipmentFilterClear,
+  EquipmentHistoryToggle,
   type ScopeChip,
 } from "@/components/buildings/equipment-filter";
+import { ItemEditor } from "@/components/buildings/item-editor";
 import { ConfidenceBadge } from "@/components/confidence-badge";
 import { DateValue } from "@/components/date-value";
 import { EmptyState } from "@/components/empty-state";
@@ -16,6 +18,7 @@ import {
 } from "@/components/life-bar";
 import { Money } from "@/components/money";
 import { ScopeLabel } from "@/components/scope-label";
+import { StatusBadge } from "@/components/status-badge";
 import {
   Table,
   TableBody,
@@ -43,12 +46,22 @@ export type EquipmentView = {
   /** `shared`, a unit's id, or null for every scope. */
   scope: string | null;
   estimatedOnly: boolean;
+  /** `Show replaced and removed` pressed — `?history=shown`. */
+  history: boolean;
 };
 
 type Unit = { id: string; label: string; retired: boolean };
 
-/** A run of rows under one scope heading — or the only run, unheaded. */
-type Group = { key: string; label: string; items: EquipmentItem[] };
+/**
+ * A run of rows under one scope heading — or the only run, unheaded: the
+ * items in service, then the history rows shown after them.
+ */
+type Group = {
+  key: string;
+  label: string;
+  items: EquipmentItem[];
+  history: EquipmentItem[];
+};
 
 /**
  * Equipment & capital items (`docs/ui/screens/building-detail.md`): every item
@@ -67,11 +80,19 @@ type Group = { key: string; label: string; items: EquipmentItem[] };
  * Every figure comes from `src/lib/forecast/life.ts`, the rules the forecast
  * reads, so this table and the forecast cannot disagree about a year.
  *
- * Renders on the server. `Confirm` and the filter chips are the client parts,
- * and both hand their result back to the server — a write, or a URL.
+ * **Replaced and removed items are out of the table and the forecast**, and
+ * `Show replaced and removed` at the foot brings them back muted, in their
+ * scope groups after the items in service, with what became of each in place
+ * of its life. They count toward nothing — not the summary line, not the
+ * total.
+ *
+ * Renders on the server. The item editor, `Confirm` and the filter chips are
+ * the client parts, and each hands its result back to the server — a write,
+ * or a URL.
  */
 export function EquipmentCard({
   items,
+  history,
   units,
   view,
   thisYear,
@@ -79,7 +100,10 @@ export function EquipmentCard({
   editable,
   addEquipment,
 }: {
+  /** The items in service. */
   items: EquipmentItem[];
+  /** The replaced and removed ones. */
+  history: EquipmentItem[];
   /** Every unit, retired ones included, in label order. */
   units: Unit[];
   view: EquipmentView;
@@ -90,7 +114,10 @@ export function EquipmentCard({
   /** The `Add equipment` control, or null where it is not offered. */
   addEquipment: ReactNode;
 }) {
-  if (items.length === 0) {
+  // With nothing in service and nothing in the history, the empty state. A
+  // building whose every item was replaced or removed keeps the table, so
+  // the history is still reachable.
+  if (items.length === 0 && history.length === 0) {
     return (
       <section id="equipment" className="scroll-mt-6 lg:scroll-mt-20">
         <EmptyState
@@ -106,7 +133,12 @@ export function EquipmentCard({
     );
   }
 
-  const withItems = new Set(items.map((item) => item.unitId));
+  // The history rows the table shows, if any: `Show replaced and removed`.
+  const shownHistory = view.history ? history : [];
+
+  const withItems = new Set(
+    [...items, ...shownHistory].map((item) => item.unitId),
+  );
   const scopedUnits = units.filter(
     (unit) => !unit.retired || withItems.has(unit.id),
   );
@@ -170,9 +202,21 @@ export function EquipmentCard({
           key: group.key,
           label: group.label,
           items: sorted(shown.filter((item) => item.unitId === group.unitId)),
+          history: sorted(
+            shownHistory.filter(
+              (item) => item.unitId === group.unitId && inScope(item),
+            ),
+          ),
         }))
-        .filter((group) => group.items.length > 0)
-    : [{ key: "all", label: "", items: sorted(shown) }];
+        .filter((group) => group.items.length + group.history.length > 0)
+    : [
+        {
+          key: "all",
+          label: "",
+          items: sorted(shown),
+          history: sorted(shownHistory),
+        },
+      ];
 
   const filterName =
     scope === "shared"
@@ -222,12 +266,12 @@ export function EquipmentCard({
         />
       </div>
 
-      {shown.length === 0 ? (
+      {shown.length + groups.reduce((n, g) => n + g.history.length, 0) === 0 ? (
         <div className="flex flex-col items-start gap-3 px-5 py-8 sm:items-center sm:text-center">
           <p className="text-sm font-medium text-text-primary">
-            No {filteredTo} items
+            {filteredTo ? `No ${filteredTo} items` : "No equipment in service"}
           </p>
-          <EquipmentFilterClear />
+          {filteredTo ? <EquipmentFilterClear /> : null}
         </div>
       ) : (
         <Table className="table-fixed">
@@ -282,10 +326,15 @@ export function EquipmentCard({
                 <Row
                   key={item.id}
                   item={item}
+                  units={scopedUnits}
+                  showScope={showScope}
                   thisYear={thisYear}
                   today={today}
                   editable={editable}
                 />
+              ))}
+              {group.history.map((item) => (
+                <HistoryRow key={item.id} item={item} />
               ))}
             </TableBody>
           ))}
@@ -312,6 +361,12 @@ export function EquipmentCard({
         </Table>
       )}
 
+      {history.length > 0 ? (
+        <div className="border-t border-border-divider px-5 py-1.5">
+          <EquipmentHistoryToggle shown={view.history} count={history.length} />
+        </div>
+      ) : null}
+
       <p className="border-t border-border-divider px-5 py-3 text-xs leading-snug text-text-muted">
         Estimated install years assume each item is 60% of the way through its
         typical life, and never older than the building. Confirm an item once
@@ -333,11 +388,15 @@ function sorted(items: EquipmentItem[]): EquipmentItem[] {
 
 function Row({
   item,
+  units,
+  showScope,
   thisYear,
   today,
   editable,
 }: {
   item: EquipmentItem;
+  units: Unit[];
+  showScope: boolean;
   thisYear: number;
   today: CalendarDate;
   editable: boolean;
@@ -369,22 +428,24 @@ function Row({
   return (
     <TableRow className="border-border-divider hover:bg-hover-fill-subtle">
       <TableCell className="pl-5 align-top whitespace-normal">
-        {/* Plain text until the item editor makes it a button (#125). */}
-        <span className="block truncate text-sm font-medium text-text-primary">
-          {item.label}
-        </span>
+        <ItemEditor
+          item={item}
+          units={units}
+          showScope={showScope}
+          today={today}
+          editable={editable}
+        />
         {category ? (
           <span className="block text-2xs leading-snug text-text-muted max-md:hidden">
             {category}
           </span>
         ) : null}
+        {/* The Installed column is folded here, and `Confirm` with it: the
+            editor carries it, and the label opens the editor. */}
         <span className="block text-2xs leading-snug text-text-muted md:hidden">
           {category ? `${category} · ` : null}
           {folded}
         </span>
-        {/* The Installed column is hidden here, and `Confirm` with it. Until
-            the editor carries it (#125), it moves under the item. */}
-        {confirm ? <span className="block md:hidden">{confirm}</span> : null}
       </TableCell>
       <TableCell className="hidden align-top md:table-cell">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -422,6 +483,55 @@ function Row({
       </TableCell>
       <TableCell className="hidden pr-5 align-top md:table-cell">
         <LifeStatusBadge status={status} />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/**
+ * A replaced or removed item, muted: its name and category as plain text,
+ * when it went in, and what became of it where its life status was. No
+ * replacement year, no cost — it is in nobody's forecast.
+ */
+function HistoryRow({ item }: { item: EquipmentItem }) {
+  const estimated = item.confidence === "estimated";
+  const became = item.status === "replaced" ? "Replaced" : "Removed";
+  const category =
+    item.group === null ? null : CAPITAL_ITEM_GROUP_LABELS[item.group];
+
+  return (
+    <TableRow className="border-border-divider text-text-muted hover:bg-hover-fill-subtle">
+      <TableCell className="pl-5 align-top whitespace-normal">
+        <span className="block truncate text-sm font-medium">{item.label}</span>
+        {category ? (
+          <span className="block text-2xs leading-snug max-md:hidden">
+            {category}
+          </span>
+        ) : null}
+        {/* Below `md`, the folded columns as text, as the live rows fold. */}
+        <span className="block text-2xs leading-snug md:hidden">
+          {[
+            category,
+            `${estimated ? "est." : "installed"} ${item.installYear}`,
+            became.toLowerCase(),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </TableCell>
+      <TableCell className="hidden align-top md:table-cell">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <DateValue year={item.installYear} className="text-sm" />
+          <ConfidenceBadge confidence={item.confidence} />
+        </span>
+      </TableCell>
+      <TableCell className="hidden align-top md:table-cell" />
+      <TableCell className="text-right align-top text-sm max-md:pr-5">
+        —
+      </TableCell>
+      <TableCell className="hidden align-top md:table-cell" />
+      <TableCell className="hidden pr-5 align-top md:table-cell">
+        <StatusBadge variant="neutral">{became}</StatusBadge>
       </TableCell>
     </TableRow>
   );

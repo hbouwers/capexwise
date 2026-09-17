@@ -46,9 +46,10 @@ import { getRecurringTasks, getTaskModal } from "@/server/queries/tasks";
  * Summary's `Rent / mo` tile, the rent roll for the month in `?month=`, its
  * facts, its recurring tasks — filtered by `?taskScope=` — beside their
  * seasonal rhythm and the replacement runway, and its equipment, filtered by
- * `?scope=` and `?confidence=`. `?task=` opens the task modal over it. The capital tiles and the runway read `src/lib/forecast/`, the
- * module the forecast page reads, so the two pages cannot disagree about a
- * year.
+ * `?scope=` and `?confidence=`, with its replaced and removed items shown by
+ * `?history=shown`. `?task=` opens the task modal over it. The capital tiles
+ * and the runway read `src/lib/forecast/`, the module the forecast page
+ * reads, so the two pages cannot disagree about a year.
  *
  * `getBuilding()` answers `null` for an id that does not exist, one that is not
  * an id, and one in another org, and all three are the same 404.
@@ -89,8 +90,10 @@ export default async function BuildingPage({
     ]);
   // Read through `getBuilding`, which has just found the building.
   if (!roll) notFound();
-  // What is in service. Replaced and removed items are never the forecast's.
+  // What is in service. Replaced and removed items are the table's to show
+  // on request, and never the forecast's.
   const equipment = allEquipment.filter((item) => item.status === "active");
+  const history = allEquipment.filter((item) => item.status !== "active");
   // Retired units are history, not part of the building's figures.
   const units = detail.units.filter((unit) => unit.status !== "retired");
   const occupied = units.filter((unit) => unit.status === "occupied");
@@ -297,6 +300,7 @@ export default async function BuildingPage({
 
           <EquipmentCard
             items={equipment}
+            history={history}
             units={detail.units.map((unit) => ({
               id: unit.id,
               label: unit.label,
@@ -343,8 +347,9 @@ function runwayItems(labels: readonly string[]): string | null {
 
 /**
  * The equipment table's filters, from the URL: `?scope=shared` or a unit of
- * this building, and `?confidence=estimated`. Anything else — an array, a
- * unit of another building — is no filter, rather than an error.
+ * this building, `?confidence=estimated`, and `?history=shown` for the
+ * replaced and removed items. Anything else — an array, a unit of another
+ * building — is no filter, rather than an error.
  */
 function equipmentView(
   query: Record<string, string | string[] | undefined>,
@@ -358,5 +363,6 @@ function equipmentView(
         ? (scope as string)
         : null,
     estimatedOnly: query.confidence === "estimated",
+    history: query.history === "shown",
   };
 }
