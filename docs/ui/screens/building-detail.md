@@ -234,8 +234,7 @@ items by name (`AC condenser, washer, carpet`), and compact `Money`. A year with
 The prototype skips empty years and shows 2029 then 2031. The same component on the portfolio shows
 five consecutive years, so this one does too — and a year with nothing due is information.
 
-**As built (#112), it stands full width where the recurring tasks' band will be**, until #113 gives
-it a band to sit in. A year's items are named largest first, with a repeated label counted —
+**As built (#112)**, a year's items are named largest first, with a repeated label counted —
 `Dishwasher ×2` — for an item added to each unit.
 
 The prototype's caption, `Set aside $640/mo here … You are banking $400`, needs a per-building
@@ -284,6 +283,25 @@ not edits:
   table's foot brings them back, muted.
 
 On narrow viewports the row's `Item` button is how `Confirm` is reached — the editor has it too.
+
+---
+
+## As built
+
+#113 built the recurring tasks' band. What it settled that the regions above do not say:
+
+- **The scope filter is `?taskScope=`**, not the equipment table's `?scope=`. The two tables filter
+  separately, and one chip moving the other table would be a surprise.
+- **Each recurring task is shown at its open occurrence** — the one not yet done. Checking it writes
+  the next, which takes its place in the row with its new date. `{n} done this year` counts the
+  occurrences completed since January 1.
+- **The seasonal rhythm counts the twelve months starting with this one**, each task stepped from
+  its next due date by its interval (`seasonalCounts` in `src/lib/tasks.ts`). An overdue task counts
+  from the first step not behind them; one every two years counts only if it lands inside them.
+- **The inline add row's frequency starts at `Annually`**, and the title keeps the focus after an
+  add so a list of jobs goes in one after another.
+- **An occurrence the task modal has taken the date off reads `Not scheduled`** in Next due, and
+  sorts last.
 
 ---
 

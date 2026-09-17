@@ -14,6 +14,8 @@ import { RunwayList } from "@/components/runway-list";
 import { PageBody, PageHeader } from "@/components/shell/page-header";
 import { StatTile, StatTiles } from "@/components/stat-tile";
 import { StatusBadge } from "@/components/status-badge";
+import { RecurringTasksCard } from "@/components/tasks/recurring-tasks-card";
+import { SeasonalStrip } from "@/components/tasks/seasonal-strip";
 import { Button } from "@/components/ui/button";
 import {
   buildingName,
@@ -21,7 +23,7 @@ import {
   fullAddress,
   unitCount,
 } from "@/lib/buildings";
-import { todayIn, yearOf } from "@/lib/dates";
+import { monthOf, todayIn, yearOf } from "@/lib/dates";
 import { lifeStatus, replacementYear } from "@/lib/forecast/life";
 import {
   type ForecastItem,
@@ -29,18 +31,20 @@ import {
   outflowByYear,
   replacements,
 } from "@/lib/forecast/outflow";
+import { seasonalCounts } from "@/lib/tasks";
 import { getBuildingFacts } from "@/server/queries/building-facts";
 import { getBuilding } from "@/server/queries/buildings";
 import { getCatalogue, listEquipment } from "@/server/queries/capital-items";
 import { listContacts } from "@/server/queries/contacts";
 import { getRentRoll } from "@/server/queries/rent-periods";
+import { getRecurringTasks } from "@/server/queries/tasks";
 
 /**
  * A building's page (`docs/ui/screens/building-detail.md`): its header, the
  * Summary's `Rent / mo` tile, the rent roll for the month in `?month=`, its
- * facts, its replacement runway, and its equipment, filtered by `?scope=` and
- * `?confidence=`. The recurring tasks come with the issue that stores them
- * (#113). The capital tiles and the runway read `src/lib/forecast/`, the
+ * facts, its recurring tasks — filtered by `?taskScope=` — beside their
+ * seasonal rhythm and the replacement runway, and its equipment, filtered by
+ * `?scope=` and `?confidence=`. The capital tiles and the runway read `src/lib/forecast/`, the
  * module the forecast page reads, so the two pages cannot disagree about a
  * year.
  *
@@ -67,14 +71,16 @@ export default async function BuildingPage({
   const { building } = detail;
   const query = await searchParams;
   const editable = building.status === "active";
-  const [facts, contacts, roll, equipment, catalogue] = await Promise.all([
-    getBuildingFacts(building.id),
-    listContacts(),
-    getRentRoll(building.id, query.month),
-    listEquipment(building.id),
-    // The checklist is only offered on an active building.
-    editable ? getCatalogue() : null,
-  ]);
+  const [facts, contacts, roll, equipment, catalogue, recurring] =
+    await Promise.all([
+      getBuildingFacts(building.id),
+      listContacts(),
+      getRentRoll(building.id, query.month),
+      listEquipment(building.id),
+      // The checklist is only offered on an active building.
+      editable ? getCatalogue() : null,
+      getRecurringTasks(building.id),
+    ]);
   // Read through `getBuilding`, which has just found the building.
   if (!roll) notFound();
   // Retired units are history, not part of the building's figures.
@@ -230,28 +236,65 @@ export default async function BuildingPage({
             }))}
           />
 
-          {/* The spec puts the runway in the recurring tasks' rail. Until those
-              are stored (#113) there is no band to put it beside, so it
-              stands on its own where the band will be. */}
-          <section
-            aria-labelledby="runway-heading"
-            className="overflow-hidden rounded-lg border border-border-card bg-surface-card"
-          >
-            <h2
-              id="runway-heading"
-              className="border-b border-border-divider px-5 py-4 text-md leading-tight font-semibold text-text-primary"
-            >
-              Replacement runway
-            </h2>
-            <RunwayList
-              rows={years.slice(0, 5).map((bar) => ({
-                year: bar.year,
-                items: runwayItems(bar.replacements.map((r) => r.item.label)),
-                cents: bar.totalCents,
-                href: `/forecast?building=${building.id}&year=${bar.year}`,
+          <div className="grid-two-column items-start">
+            <RecurringTasksCard
+              recurring={recurring}
+              units={detail.units.map((unit) => ({
+                id: unit.id,
+                label: unit.label,
+                retired: unit.status === "retired",
               }))}
+              scope={
+                typeof query.taskScope === "string" ? query.taskScope : null
+              }
+              today={today}
+              editable={editable}
+              building={{ id: building.id, name: buildingName(building) }}
             />
-          </section>
+
+            {/* The rail, which follows the recurring tasks below `lg`. */}
+            <div className="flex flex-col gap-5">
+              {recurring.open.length > 0 ? (
+                <section
+                  aria-labelledby="seasonal-heading"
+                  className="flex flex-col gap-4 rounded-lg border border-border-card bg-surface-card px-5 py-4"
+                >
+                  <h2
+                    id="seasonal-heading"
+                    className="text-md leading-tight font-semibold text-text-primary"
+                  >
+                    Seasonal rhythm
+                  </h2>
+                  <SeasonalStrip
+                    counts={seasonalCounts(recurring.open, today)}
+                    currentMonth={monthOf(today)}
+                  />
+                </section>
+              ) : null}
+
+              <section
+                aria-labelledby="runway-heading"
+                className="overflow-hidden rounded-lg border border-border-card bg-surface-card"
+              >
+                <h2
+                  id="runway-heading"
+                  className="border-b border-border-divider px-5 py-4 text-md leading-tight font-semibold text-text-primary"
+                >
+                  Replacement runway
+                </h2>
+                <RunwayList
+                  rows={years.slice(0, 5).map((bar) => ({
+                    year: bar.year,
+                    items: runwayItems(
+                      bar.replacements.map((r) => r.item.label),
+                    ),
+                    cents: bar.totalCents,
+                    href: `/forecast?building=${building.id}&year=${bar.year}`,
+                  }))}
+                />
+              </section>
+            </div>
+          </div>
 
           <EquipmentCard
             items={equipment}

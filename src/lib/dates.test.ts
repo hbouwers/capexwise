@@ -6,7 +6,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addDays,
   addMonths,
+  addMonthsKeepingDay,
+  daysBetween,
   firstOfMonth,
   formatDate,
   isCalendarDate,
@@ -100,6 +103,56 @@ describe("addMonths", () => {
 
   it("refuses a fraction of a month", () => {
     expect(() => addMonths("2026-09-01", 0.5)).toThrow(RangeError);
+  });
+});
+
+describe("addMonthsKeepingDay", () => {
+  it("keeps the day of the month", () => {
+    expect(addMonthsKeepingDay("2026-09-14", 3)).toBe("2026-12-14");
+    expect(addMonthsKeepingDay("2026-09-14", -9)).toBe("2025-12-14");
+  });
+
+  it("falls back to a shorter month's last day", () => {
+    expect(addMonthsKeepingDay("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonthsKeepingDay("2028-01-31", 1)).toBe("2028-02-29");
+    expect(addMonthsKeepingDay("2026-08-31", 1)).toBe("2026-09-30");
+  });
+
+  it("is the 31st again two steps on, counted from the start", () => {
+    expect(addMonthsKeepingDay("2026-01-31", 2)).toBe("2026-03-31");
+  });
+});
+
+describe("addDays and daysBetween", () => {
+  it("cross a month, a year and a leap day", () => {
+    expect(addDays("2026-09-14", 30)).toBe("2026-10-14");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(addDays("2028-02-28", 1)).toBe("2028-02-29");
+    expect(addDays("2100-02-28", 1)).toBe("2100-03-01");
+    expect(addDays("2026-03-01", -1)).toBe("2026-02-28");
+  });
+
+  it("count the days between two dates, negative for an earlier one", () => {
+    expect(daysBetween("2026-08-24", "2026-09-01")).toBe(8);
+    expect(daysBetween("2026-09-01", "2026-08-24")).toBe(-8);
+    expect(daysBetween("2026-09-14", "2026-09-14")).toBe(0);
+    expect(daysBetween("2024-01-01", "2025-01-01")).toBe(366);
+  });
+
+  it("agree with each other across four centuries", () => {
+    // Every day from 1900 to 2300, round-tripped: a slip in the era
+    // arithmetic shows up on a century that is not a leap year.
+    let date = "1900-01-01";
+    for (let step = 0; step < 146_097; step += 37) {
+      const next = addDays(date, 37);
+      expect(daysBetween(date, next)).toBe(37);
+      expect(isCalendarDate(next)).toBe(true);
+      date = next;
+    }
+  });
+
+  it("refuse a fraction of a day", () => {
+    expect(() => addDays("2026-09-01", 0.5)).toThrow(RangeError);
   });
 });
 
