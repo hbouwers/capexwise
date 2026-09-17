@@ -95,6 +95,46 @@ a canceled task keeps its history, and the tasks tables leave it out.
 
 ---
 
+## As built
+
+#114 built this modal. What it settled that the sections above do not say:
+
+- **It opens on `/maintenance` and `/buildings/[buildingId]`.** `/` gets it with the dashboard's due
+  list (#115), which is the first thing there that links to a task.
+- **The confirmation box unticks as the date or the assignee changes**, so what the box shows is
+  what saves: a new booking is confirmed by ticking it again, which records today. Left ticked on the
+  booking it was, it keeps the day it was confirmed, shown under it as `Confirmed Sep 3.` A booking
+  confirmed earlier today, rebooked and confirmed again, writes the value it already had, which
+  `tasks_clear_confirmation` would clear, so the save writes that confirmation again on its own. The
+  label is `Confirmed with {name}` for a contact and `Confirmed` for `Me` or a member.
+- **A done task edits `Completed on` and `What it cost`** in place of the date, the confirmation and
+  Repeats, which its completion has already acted on. Its confirmation is history, and is cleared
+  only if the assignee changes. `More` is not offered: it is done, and a done task is not cancelled.
+- **A cancelled task, and any task on an archived or sold building, opens read-only**, with `Close`
+  only and a line saying why. The id still resolves, so a link to one is not a `wasn't found`.
+- **What the form names is checked when it saves.** An archived contact, or an item replaced or
+  removed, is offered only to the task that already names it, and marked `(archived)` or `no longer
+  in service`. `A member` is offered only on a task already assigned to another member. A trade,
+  contact, item or unit that has gone since the modal opened is refused with `Reload the page`.
+- **The assignee `Select`'s contact groups are `Tagged {trade}` and `Other contacts`**, or one group
+  `Contacts` with no trade set.
+- **The rail is a list, not a four-column table.** At 336px, Company and Phone as columns left a
+  name two characters wide, so both sit under the name and the rate note, and `Assign` is the row's
+  one control — `Assigned` and disabled for the contact already chosen. `Add a contact` opens the
+  contact book's new contact with the trade ticked.
+- **Mark done's cost starts from what is recorded**, the actual cost if there is one and the estimate
+  otherwise, and an emptied cost records none rather than zero. Its toast offers Undo for five
+  seconds, as the checkbox's does. A date after today is refused.
+- **Cancel task asks in the footer**, `Cancel {title}?`, saying the task stays in the history — and,
+  for a recurring task, that it won't come round again.
+- **The body is two columns from 48rem of the modal's own width**, not from a viewport breakpoint, so
+  a 768px window gets the form and then the rail rather than a squeezed pair.
+- **Maintenance's inline add row is gone**: `Add task` opens this modal, on the filtered building. The
+  building page's recurring add row stays, because a list of recurring jobs goes in faster one line
+  at a time.
+
+---
+
 ## Changes from the prototype
 
 - **Editable**, where the prototype shows notes, priority and cost as static text.

@@ -27,8 +27,10 @@ the building flag — #111. The forecast page reads it at `/forecast`, portfolio
 with `What if?` deferral and the reserve entered through `Update reserve`, and the building page's
 capital tiles and replacement runway read the same module — #112. Tasks are stored, with a
 confirmation and a member as assignee (#93, #94), and shown at `/maintenance` and in the building
-page's recurring tasks, where checking one off writes its next occurrence — #113. The task modal,
-the dashboard, the tax planner and the rest of what the product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
+page's recurring tasks, where checking one off writes its next occurrence — #113. A task is added,
+read and edited in full in the task modal at `?task=`, with its confirmation, Mark done, Cancel task
+and the contacts tagged with its trade — #114. The dashboard, the tax planner and the rest of what
+the product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
 

@@ -126,13 +126,13 @@ Tasks with `status = 'done'`, most recently completed first, the last 12 months 
 
 ## As built
 
-#113 built this screen before the task modal (#114). What it settled that the regions above do not
-say:
+#113 built this screen before the task modal, and #114 added the modal. What they settled that the
+regions above do not say:
 
-- **There is no `Add task` button yet, and a title is not yet a link.** Both open the task modal,
-  which is #114. Until then an **inline add row closes the Unscheduled tab** — a title, a building
-  `Select` when there is more than one, and a scope `Select` on a building with more than one unit
-  — and the task it adds waits there for a date. The empty states use that row as their action.
+- **`Add task` and every task's title open the task modal**, over the tab and the building filter
+  they were opened from. The inline add row #113 closed the Unscheduled tab with, until the modal
+  existed, is gone. The two empty states take `Add task` as their action, and the filtered one has
+  `Show all buildings` beside it.
 - **Only active buildings' tasks are shown**, and the building `Select` lists only active
   buildings, as the forecast's does. An archived or sold building is kept for its history and left
   out of the portfolio's figures; its recurring tasks stay readable on its own page.
