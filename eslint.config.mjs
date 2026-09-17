@@ -33,6 +33,10 @@ import prettier from "eslint-config-prettier/flat";
  *                              context and opens its own connection
  *   src/db/backup.mts          the nightly backup (#35), which reads every
  *                              org at once, as a role that can write none
+ *   src/server/demo.ts         the demo org's nightly reset (#34), which
+ *                              deletes and recreates one org — the demo — on
+ *                              the identity path and writes its content as the
+ *                              scoped role (ADR-0011)
  *   src/test/db.ts             the integration harness (#21)
  *   src/server/org-context.integration.test.ts
  *                              the only test that calls `forOrg()` directly,
@@ -71,6 +75,7 @@ const UNSCOPED_DB_ALLOWED = [
   "src/server/auth.ts",
   "src/db/migrate.mts",
   "src/db/backup.mts",
+  "src/server/demo.ts",
   "src/test/db.ts",
 ];
 
@@ -87,7 +92,7 @@ const DRIVER_MESSAGE =
   "'@/server/org-context'. See ADR-0003.";
 
 const FOR_ORG_MESSAGE =
-  "Never import `forOrg` — it scopes to whatever org id you hand it and checks " +
+  "Never import `forOrg` or `enterOrg` — they scope to whatever org id you hand them and check " +
   "none of them, so an id that came from a request reads another tenant's " +
   "rows. Use `const { db } = await getOrgContext()` from " +
   "'@/server/org-context', which resolves the org from the session and joins " +
@@ -112,7 +117,7 @@ const UNSCOPED_DB_IMPORTS = [
     // server component is meant to import — it is the single export inside it
     // that must not travel.
     group: ["@/server/org-context", "**/server/org-context"],
-    importNames: ["forOrg"],
+    importNames: ["forOrg", "enterOrg"],
     message: FOR_ORG_MESSAGE,
   },
 ];
