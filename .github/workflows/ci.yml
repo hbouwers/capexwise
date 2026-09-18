@@ -473,3 +473,19 @@ jobs:
       # readable by anyone who can read the repository, and it is retained.
       - name: Apply migrations
         run: npm run db:migrate
+
+      # The same migrations, applied to `preview-base`, the Neon branch every
+      # preview branch is created from (ADR-0012). It holds the schema and the
+      # rows migrations write and nothing else, so a preview never starts as a
+      # copy of production. Production goes first: the base failing turns the
+      # run red, but it never holds back a release.
+      #
+      # Same environment, because it is the same job, and a second environment
+      # would buy nothing: the base holds no data, and its owner's password is
+      # reset when the branch is made, so this credential opens nothing else
+      # (README, "The preview base"). Direct endpoint, owner role, for the reasons
+      # above.
+      - name: Apply migrations to the preview base
+        env:
+          DATABASE_URL: ${{ secrets.PREVIEW_BASE_DATABASE_URL }}
+        run: npm run db:migrate

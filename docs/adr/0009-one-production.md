@@ -123,7 +123,8 @@ are.
 **What this makes hard.**
 - **Holden's data shares a database with customers' data.** Row-level security protects it the same
   way it protects theirs, which is the intent of the hard rule. But his portfolio is exposed in any
-  incident involving customer data, and in every preview branch until #85 lands.
+  incident involving customer data. Preview branches no longer copy it
+  ([ADR-0012](0012-preview-base-branch.md), #85).
 - **Billing is constrained.** It has to switch off cleanly, which it would not otherwise need to.
 - **The way back takes time.** Its steps involve customers (notice, export, deletion), and it ends
   only when the last backup holding their rows expires.

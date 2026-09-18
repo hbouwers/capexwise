@@ -220,9 +220,11 @@ marketplace integration so that the Vercel project and the database branches are
 (#33). Local development does not use it at all — that is the compose container, and the two never
 talk.
 
-One Neon project, with a branch per environment: `main`, the project's default branch, backs the
-live Vercel deployment, and each preview deployment gets a branch named `preview/<git branch>`,
-created from `main` and so holding a copy of production's rows. "Production" here means the deployment that holds real
+One Neon project, with a branch per environment. `main` backs the live Vercel deployment. Each
+preview deployment gets a branch named `preview/<git branch>`, created from `preview-base`, the
+project's **default branch**. `preview-base` holds the migrated schema and the rows the migrations
+write, and nothing else, so a preview never starts as a copy of production
+([ADR-0012](docs/adr/0012-preview-base-branch.md), "The preview base" below). "Production" here means the deployment that holds real
 data rather than the plan it runs on — through v0 and v0.5 that is the Vercel Hobby instance with
 the real portfolio in it, and at v1 the role moves to Cloud Run with [ADR-0002](docs/adr/0002-hosting.md)'s
 migration. The secret the migrate job reads follows the role, not the vendor, which is why it is
@@ -238,7 +240,7 @@ those bite long before storage does, and neither is about how much data there is
   anything that polls it steadily keeps the compute awake. Exhausting the budget suspends the compute
   **until the next billing period** — so the failure mode is the portfolio demo being dead when
   somebody clicks the link, which is the one thing v0.5 exists to avoid.
-- **The ten-branch cap.** A branch per pull request plus `main` reaches ten quickly, and the
+- **The ten-branch cap.** A branch per pull request plus `main` and `preview-base` reaches ten quickly, and the
   integration does not delete a branch when its pull request closes. It deletes a preview branch
   only when Vercel deletes the last deployment for that git branch, and Vercel keeps preview
   deployments for months and always keeps the project's ten most recent. When the cap is reached,
@@ -270,7 +272,8 @@ and has no setting for the role, so its connection to the Vercel project covers 
 Production is unticked, and so is Development, because local development uses the compose
 database and never needs a Neon connection string on the machine. Production's `DATABASE_URL` is an ordinary project
 variable instead, Production scope only, marked Sensitive, built from the Neon console's Connect
-dialog with the role set to `capexwise_app` and pooling on. **Reconnecting the integration with
+dialog with the branch set to `main`, the role to `capexwise_app`, and pooling on. The dialog opens
+on the default branch, which is `preview-base`, so pick `main` first. **Reconnecting the integration with
 Production ticked undoes this**: at best it clashes with the variable, at worst production is
 quietly back on the owner, and nothing would flag it.
 
@@ -292,10 +295,12 @@ preview is valid in production. Generate one with:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-**Every environment needs its own `ACCESS_CODE_KEYS` too**, for a reason specific to Neon. The
-integration creates every preview branch from `main`, production's own branch, and a Neon branch
-holds its parent's rows. A preview deployment holding production's key would therefore reveal every production access code from a URL that exists for code review. With its own key it
-cannot open them. Version numbers restart in each environment, and preview's
+**Every environment needs its own `ACCESS_CODE_KEYS` too.** Until
+[ADR-0012](docs/adr/0012-preview-base-branch.md) the integration created every preview branch from
+`main`, production's own branch, and a Neon branch holds its parent's rows. A preview deployment
+holding production's key would then have revealed every production access code from a URL that
+exists for code review. Previews now start from an empty base, and separate keys still cost
+nothing, so the rule stays. Version numbers restart in each environment, and preview's
 version 1 is a different key from production's. Generate one with:
 
 ```bash
@@ -540,10 +545,10 @@ Vercel's bot posts on the pull request. A preview has:
 
 - **Vercel Authentication in front of it.** Only members of the Vercel team can open it. Leave
   that setting on: a preview runs unmerged code, Dependabot's included.
-- **Its own Neon branch**, `preview/<git branch>`, created when the preview is and deleted when the
-  pull request closes. "The database" above has the details, and
-  [#85](https://github.com/hbouwers/capexwise/issues/85) is why that branch should stop starting
-  as a copy of production's rows.
+- **Its own Neon branch**, `preview/<git branch>`, created from `preview-base` when the preview
+  is, and deleted when the pull request closes. It starts with the schema, the trade tags and the
+  catalogue, and no other rows: no users, no buildings, and no demo
+  ([ADR-0012](docs/adr/0012-preview-base-branch.md)). "The database" above has the details.
 - **Its own secrets**, the Preview-scoped values in the table above.
 - **No sign-in.** Google matches redirect URIs exactly, and every branch has a new hostname, so a
   preview's callback is never on the list. The sign-in page says so instead of offering a button.
@@ -628,10 +633,66 @@ Nothing checks that the secret is present. A missing `PRODUCTION_DATABASE_URL` f
 runner's environment validation and turns the run red, which is the right outcome for a release that
 would otherwise have quietly migrated nothing.
 
+After production, the same job migrates `preview-base`, from `PREVIEW_BASE_DATABASE_URL` in the
+same environment, so every new preview branch starts at `main`'s latest migration. Production goes
+first. If the base fails, the run is red, but production has already been migrated.
+
 Vercel builds every pull request too, and that check is not this workflow. It is the deploy
 preview, it builds without `output: "standalone"` like every build but the image's
 ([#68](https://github.com/hbouwers/capexwise/issues/68), [#70](https://github.com/hbouwers/capexwise/issues/70)),
 and it goes away with the move to Cloud Run — which is exactly why the container job exists.
+
+### The preview base
+
+`preview-base` is the Neon project's default branch, and so the parent of every preview branch
+([ADR-0012](docs/adr/0012-preview-base-branch.md)). It is a root branch with no parent. It holds
+what the migrations create and write, and nothing else: no users, no orgs, no demo. CI migrates it
+after production ("Applying migrations" above). Nothing else writes to it, and a preview writes
+only to its own branch.
+
+Setting it up, once. The order matters: `main` stays the default until the base is migrated, so no
+preview is ever created from a half-built base.
+
+1. In the Neon console, open **Branches** → **New branch**. Set the parent to `main`, the name to
+   `preview-base`, and choose **Schema only**. Untick **Automatically delete branch after**.
+   Schema-only is only the way to get a root branch without `main`'s rows. Its tables are dropped
+   in step 3.
+2. On `preview-base`, open **Roles** and **reset the owner's password**. The branch copies `main`'s
+   roles, and without a reset the base's connection string would also log in to production.
+3. Open the **SQL editor**, set the branch picker to `preview-base`, and run this as the owner:
+
+   ```sql
+   drop schema if exists drizzle cascade;
+   drop schema public cascade;
+   create schema public authorization pg_database_owner;
+   grant usage on schema public to public;
+   ```
+
+   The last two lines recreate `public` the way Postgres creates it in a new database.
+4. Open **Connect**, and choose branch `preview-base`, the owner role, and pooling **off**. Add the
+   connection string as `PREVIEW_BASE_DATABASE_URL` under the `production` environment's
+   **Environment secrets** in GitHub.
+5. Merge, or push anything to `main`. The migrate job builds the base from `0000`. Check it in the
+   SQL editor, on `preview-base`: `select count(*) from drizzle.__drizzle_migrations` matches the
+   number of files in `drizzle/`, and `select count(*) from users` is `0`.
+6. On **Branches**, open `preview-base` → **Set as default**.
+7. Delete every `preview/*` branch that exists. Each one was created from `main` and holds
+   production's rows. The next deployment of that pull request creates it again, from the base.
+8. On the next pull request, check that its `preview/<git branch>` lists `preview-base` as its
+   parent. If it lists `main`, the integration does not follow the default branch. Set `main`
+   back as the default so previews keep working, and reopen
+   [#85](https://github.com/hbouwers/capexwise/issues/85): the fallback is creating preview branches
+   from CI.
+
+**Every console step on production has to name `main` now.** The Connect dialog, the SQL editor
+and the Tables page open on the default branch, which is the base. That is the safe way round,
+because a query typed without looking lands on an empty database. But a production task that
+never picks `main` quietly runs against the base.
+
+**`main` can be archived now**, because it is no longer the default. Neon archives a branch that is
+older than 14 days and has not been accessed for 24 hours. It unarchives on the next connection,
+which is slower. The nightly backup and the demo reset each connect every day, so in practice this
+does not happen.
 
 ### Deleting preview branches
 

@@ -155,6 +155,10 @@ Use Neon's history. In the Neon console, open the project's **Branches**, then b
 **Restore**, and choose a moment before the mistake. Neon keeps the state it replaced as a backup
 branch, so a restore to the wrong moment can itself be undone.
 
+That backup branch is a root branch, and the Free plan allows three. `main` and `preview-base` use
+two ([ADR-0012](../adr/0012-preview-base-branch.md)), so a second restore fails until the first
+restore's backup branch is deleted. Delete it once you are sure you will not need it.
+
 To look before you leap, create a new branch from `main` at a past moment instead, and query it.
 That changes nothing in production.
 

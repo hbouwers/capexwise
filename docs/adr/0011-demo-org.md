@@ -142,7 +142,8 @@ every request can do.
 has something to show on any night of the year. The reset is one transaction through roles that
 already exist, so there is no new bypass to audit. It moves to Cloud Run as a scheduler entry. A
 preview deployment can show signed-in pages through the demo, because anonymous sign-in needs no
-OAuth redirect, as long as that preview's database holds a demo (#85 decides whether it does).
+OAuth redirect, as long as that preview's database holds a demo. For now it does not:
+[ADR-0012](0012-preview-base-branch.md) starts previews from an empty base and defers seeding one.
 
 **What this makes hard.**
 
@@ -153,8 +154,8 @@ OAuth redirect, as long as that preview's database holds a demo (#85 decides whe
   cache (ADR-0004) still holds the deleted visitor's session, and `getOrgContext()` finds no
   membership for it. Once the cache expires, the next request goes to sign-in. The window is five
   minutes at 3am in Indianapolis, so it is accepted rather than routed around.
-- **`users` gains one row per visit**, removed nightly. That is the rows #85 has to keep out of
-  preview branches from v0.5 on. They identify nobody: no email a person owns, no name, no provider
+- **`users` gains one row per visit**, removed nightly. ADR-0012 keeps these rows out of preview
+  branches. They identify nobody: no email a person owns, no name, no provider
   account.
 - **The demo org's plan is `free`** and holds eight units. No capacity check exists yet. ADR-0009
   leaves how the demo holds more than the free unit to the billing work, and that work has to cover
