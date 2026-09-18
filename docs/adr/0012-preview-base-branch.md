@@ -40,7 +40,14 @@ What Neon and Vercel allow, checked on 2026-09-18 against Neon's documentation:
 - **Schema-only branches** exist (beta). They are root branches with no parent, and they copy the
   structure but no rows. That includes the rows of `drizzle.__drizzle_migrations`, so the migrator
   would treat such a branch as unmigrated. It also includes the rows migrations write themselves:
-  the trade tags (0013) and the capital item catalogue (0020).
+  the trade tags (0013) and the capital item catalogue (0020). **And this project cannot create
+  one.** Neon refuses with `project with a legacy web access role do not support schema-only
+  branches; role:"capexwise_reader"`. The roles the migrations and #81 created with SQL are ones
+  Neon will not recreate on a new root branch, and that is not something to undo.
+- **A branch copies its parent's roles too**, passwords included. A child of `main` can log in as
+  `capexwise_app` and `capexwise_backup` with production's passwords, on its own endpoint.
+- **Restoring a root branch that has children moves the children** onto the backup branch the
+  restore creates, and a branch with children cannot be deleted.
 - **The Free plan allows three root branches**, and Neon counts a restore's backup branch among
   them.
 
@@ -51,15 +58,20 @@ them.
 
 ## Decision
 
-**A root branch named `preview-base` is the Neon project's default branch.** It holds the migrated
+**A branch named `preview-base` is the Neon project's default branch.** It holds the migrated
 schema and the rows the migrations write, and nothing else. Every preview branch is created from
 it.
 
-- **It is made from a schema-only branch of `main`, emptied.** Dropping the `public` and `drizzle`
-  schemas and running every migration from `0000` gives the same database the integration suite
-  builds on every pull request: the journal, the trade tags and the catalogue, and no other rows.
-  A schema-only branch is used only because it is the way to get a root branch that carries none
-  of `main`'s rows or history. Its tables are thrown away straight after.
+- **It is a child of `main`, emptied.** Dropping the `public` and `drizzle` schemas and running
+  every migration from `0000` gives the same database the integration suite builds on every pull
+  request: the journal, the trade tags and the catalogue, and no other rows. A preview branches
+  from the base's current state, so that is all it sees. The rows from before the drop stay in the
+  base's own history until it ages out. Only someone in the Neon console can reach them there, and
+  that person can already read `main`.
+- **Its copies of production's credentials are cut.** The owner's password is reset on the base,
+  and `capexwise_app` and `capexwise_backup` lose their login and their password there. A preview
+  copies the base's roles, so no preview holds a production password either. Until now, every
+  preview did.
 - **CI keeps it migrated.** The migrate job applies migrations to production and then to
   `preview-base`, on every push to `main`, from `PREVIEW_BASE_DATABASE_URL` in the same
   `production` environment. Production goes first. A failure on the base turns the run red, but it
@@ -80,16 +92,21 @@ integration creates the branch. The copy exists before the job runs. The branch'
 holds every row, so a restore to a moment before the scrub brings them back. And a job that
 fails leaves the copy in place, with nothing flagging it. Rejected.
 
-**A schema-only branch as the base, used as it comes.** Neon's feature for exactly this concern.
-But it copies no rows, so the migration journal is empty and the next `npm run db:migrate` fails
-on `0000`'s `CREATE TYPE`. The catalogue and the trade tags would be missing too, and the equipment
-checklist and the contact book both read them. Reset from parent is not supported, so there is no
-way to refresh it except rebuilding it. Kept only as the way to create the root branch.
+**A schema-only branch as the base.** Neon's feature for exactly this concern, and the first
+version of this decision, because a root branch carries none of `main`'s rows or history at all.
+Neon refuses to create one in this project (Context). Used as it came it would not have worked
+either: it copies no rows, so the migration journal is empty and the next `npm run db:migrate`
+fails on `0000`'s `CREATE TYPE`, and the catalogue and trade tags that the equipment checklist and
+the contact book read would be missing. Not possible.
 
-**A child branch of `main`, truncated.** The truncate hides production's rows from queries but not
-from the branch's history, and a preview branched from it at a past moment gets them back. Each
-preview would also be a grandchild of `main`, so `main` could never be archived, which sounds
-helpful but only holds while some preview exists. Rejected.
+**A root branch made some other way.** Neon makes a root branch only as a schema-only branch or as
+a restore's backup, and a backup is a full copy of `main`. A second Neon project would start empty,
+but the Vercel integration connects one project. Not possible.
+
+**A child of `main`, truncated rather than rebuilt.** Truncating every table keeps the journal, but
+it needs a list of tables kept in step with the migrations, and it empties the catalogue and the
+trade tags along with everything else. Dropping the schemas and migrating from `0000` builds the
+database the integration suite already tests. Rejected in favour of the rebuild.
 
 **The Neon-managed integration, or preview branches created from CI.** Neither is needed. The
 Neon-managed integration also branches from the default, so switching to it buys nothing, and the
@@ -105,24 +122,27 @@ previews branch from it.
 
 ## Consequences
 
-**What this makes easy.** A preview holds nobody's data, at v0.5 or at v1, and nothing has to run
-after the branch is created to make that true. Reviewing a migration against a preview still
+**What this makes easy.** A preview holds nobody's data and no production password, at v0.5 or at
+v1, and nothing has to run after the branch is created to make that true. Reviewing a migration against a preview still
 works, because the base is always at `main`'s latest migration. The Neon console now opens on
 `preview-base`. That makes the console's default the safe branch rather than production, and a
 query typed without looking lands on an empty database.
 
 **What this makes hard.**
 
-- **`main` can now be archived.** It is no longer the default. The nightly backup at 08:17 UTC and
-  the demo reset at 08:00 UTC each open a connection every day, so it should never go 24 hours
-  untouched. If both stop, the first request after a quiet day is slower while `main` unarchives.
-  The fix is a paid plan's protected branch, not a change here.
+- **`Reset from parent` on the base copies production into it.** The base's parent is `main`, so
+  that one console button undoes everything above. Never use it on the base. Rebuild it instead,
+  with the drop and the migration, as the README says.
 - **Every console step on production has to name `main`.** The Connect dialog, the SQL editor and
   the Tables page all start on the default branch. The README and the runbook say `main` wherever
   it matters.
-- **Two of the three root branches are used.** A restore of `main` from Neon's history keeps the
-  replaced state as a backup branch, which takes the third. A second restore fails until that one
-  is deleted. The runbook says so.
+- **A restore of `main` moves the base.** Neon moves `main`'s children onto the backup branch the
+  restore creates, so the base, and every preview under it, then hangs off that backup. Previews
+  keep working. But the backup cannot be deleted while the base is under it, and it holds one of
+  the Free plan's three root branches. The runbook says how to rebuild the base on `main` when the
+  backup has to go.
+- **`main` is still never archived.** It is no longer the default, but a branch with an unarchived
+  child is exempt, and the base, being the default, is never archived.
 - **A second database to migrate.** A migration that assumes rows exist, for example one that
   updates rows it expects to find, has to succeed on an empty base as well. The integration suite
   already runs every migration against an empty database, so this failure shows up on the pull
@@ -133,3 +153,6 @@ query typed without looking lands on an empty database.
 **Cost of reversal.** Low. Setting `main` as the default again restores the old behaviour for
 every preview created after that, and it brings the old problem back with it. Deleting
 `preview-base` and the CI step removes the rest.
+
+**Revised before merge.** The first version made the base a schema-only root branch, and Neon
+refused to create one (Context). A child of `main`, emptied the same way, replaced it.

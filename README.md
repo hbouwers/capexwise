@@ -645,8 +645,9 @@ and it goes away with the move to Cloud Run — which is exactly why the contain
 ### The preview base
 
 `preview-base` is the Neon project's default branch, and so the parent of every preview branch
-([ADR-0012](docs/adr/0012-preview-base-branch.md)). It is a root branch with no parent. It holds
-what the migrations create and write, and nothing else: no users, no orgs, no demo. CI migrates it
+([ADR-0012](docs/adr/0012-preview-base-branch.md)). It is a child of `main`, emptied and rebuilt
+by the migrations. It holds what the migrations create and write, and nothing else: no users, no
+orgs, no demo, and no login that shares a password with production. CI migrates it
 after production ("Applying migrations" above). Nothing else writes to it, and a preview writes
 only to its own branch.
 
@@ -654,21 +655,26 @@ Setting it up, once. The order matters: `main` stays the default until the base 
 preview is ever created from a half-built base.
 
 1. In the Neon console, open **Branches** → **New branch**. Set the parent to `main`, the name to
-   `preview-base`, and choose **Schema only**. Untick **Automatically delete branch after**.
-   Schema-only is only the way to get a root branch without `main`'s rows. Its tables are dropped
-   in step 3.
+   `preview-base`, and the data to **Current data**. Untick **Automatically delete branch after**.
+   Not **Schema only**: Neon refuses it for this project, because of the roles the migrations
+   created with SQL. The branch starts as a full copy of production, and step 3 empties it.
 2. On `preview-base`, open **Roles** and **reset the owner's password**. The branch copies `main`'s
    roles, and without a reset the base's connection string would also log in to production.
 3. Open the **SQL editor**, set the branch picker to `preview-base`, and run this as the owner:
 
    ```sql
+   alter role capexwise_app with nologin password null;
+   alter role capexwise_backup with nologin password null;
    drop schema if exists drizzle cascade;
    drop schema public cascade;
    create schema public authorization pg_database_owner;
    grant usage on schema public to public;
    ```
 
-   The last two lines recreate `public` the way Postgres creates it in a new database.
+   The first two lines stop production's other two passwords working on the base, and on every
+   preview copied from it; previews connect as the owner. The drops remove every row, and the last
+   two lines recreate `public` the way Postgres creates it in a new database. Check the branch
+   picker says `preview-base` before running it: on `main` this deletes production.
 4. Open **Connect**, and choose branch `preview-base`, the owner role, and pooling **off**. Add the
    connection string as `PREVIEW_BASE_DATABASE_URL` under the `production` environment's
    **Environment secrets** in GitHub.
@@ -689,10 +695,14 @@ and the Tables page open on the default branch, which is the base. That is the s
 because a query typed without looking lands on an empty database. But a production task that
 never picks `main` quietly runs against the base.
 
-**`main` can be archived now**, because it is no longer the default. Neon archives a branch that is
-older than 14 days and has not been accessed for 24 hours. It unarchives on the next connection,
-which is slower. The nightly backup and the demo reset each connect every day, so in practice this
-does not happen.
+**Never use `Reset from parent` on `preview-base`.** Its parent is `main`, so the reset copies
+production back into it, and every preview after that. To refresh the base, run step 3 again and
+push to `main`, or re-run the migrate job.
+
+**A restore of `main` moves the base.** Neon moves `main`'s children onto the backup branch the
+restore creates, so afterwards `preview-base` hangs off the backup. Previews keep working. To delete
+the backup, first delete `preview-base` and every `preview/*` branch, then repeat steps 1–6
+(the new branch has a new connection string for step 4).
 
 ### Deleting preview branches
 
