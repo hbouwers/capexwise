@@ -19,8 +19,10 @@ logical ones, and disk encryption does nothing for them:
 
 - **A Neon preview branch**, created for every pull request. A Neon branch is a copy-on-write child
   of its parent, rows included, and the Vercel integration creates each one from the project's
-  default branch. Here that is `main`, which is production's own branch, so every preview holds
-  production's rows.
+  default branch. When this was written that was `main`, which is production's own branch, so
+  every preview held production's rows. Since [ADR-0012](0012-preview-base-branch.md) the default
+  is an empty, migrated base. The requirement stands anyway: the next copy is the one nobody
+  planned for.
 - **A dump or a backup restore** (#35).
 - **The Neon console's SQL editor**, open to whoever holds the account.
 - **A log line.** Drizzle 0.45's `DrizzleQueryError` has the message
@@ -69,11 +71,11 @@ secret, all at once.
 | Preview | Vercel, Preview scope, with its own value |
 | Production | Vercel, Production scope, marked Sensitive. **The master copy is in the password manager**, because Vercel will not show a Sensitive value again |
 
-Preview's key being its own is the point, not a formality. Every preview branch holds production's
-rows, so a preview deployment holding production's key could reveal every production code from a URL
-that exists for code review. With its own key, the reveal fails with the error that names this case.
-If previews are ever branched from something else, separate keys still cost nothing, so the rule
-stays.
+Preview's key being its own is the point, not a formality. Every preview branch held production's
+rows, so a preview deployment holding production's key could have revealed every production code from
+a URL that exists for code review. With its own key, the reveal fails with the error that names this
+case. Previews are now branched from an empty base ([ADR-0012](0012-preview-base-branch.md)), and
+separate keys still cost nothing, so the rule stays.
 Version numbers restart in every environment, so preview's version 1 and production's version 1 are
 different keys.
 
