@@ -2,7 +2,8 @@
  * The auth provider, configured once. [ADR-0004](../../docs/adr/0004-auth-provider.md)
  * is the decision this file implements: **Better Auth, with our Postgres
  * authoritative for organizations and memberships**, and Google OAuth as the
- * only way in during v0.
+ * only way in during v0 — apart from a demo visit, which is an anonymous account
+ * that can reach the demo org and nothing else (ADR-0011).
  *
  * Two things about this module are load-bearing rather than incidental.
  *
@@ -23,11 +24,13 @@
 import "server-only";
 
 import { betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { anonymous } from "better-auth/plugins/anonymous";
 import { organization } from "better-auth/plugins/organization";
 import { memberAc, ownerAc } from "better-auth/plugins/organization/access";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
@@ -140,7 +143,10 @@ async function resolveActiveOrganization(user: {
   id: string;
   name?: string | null;
   email: string;
+  isAnonymous: boolean;
 }): Promise<string | null> {
+  if (user.isAnonymous) return await joinDemoOrganization(user.id);
+
   // Existing membership wins, and the oldest one is the tie-break: for anyone
   // with more than one it is their own org rather than whichever they were most
   // recently invited to. The org switcher (#29) is what changes it afterwards.
@@ -170,6 +176,52 @@ async function resolveActiveOrganization(user: {
 
     return org.id;
   });
+}
+
+/**
+ * Where a demo visitor's session opens: the demo org, as a `member`, and
+ * nowhere else (ADR-0011). An anonymous account never gets an org of its own —
+ * that would be a free unit per click — so this is its whole route into the
+ * product, and the demo is the only org it can ever act in.
+ *
+ * `member` rather than `owner`: nothing distinguishes the two yet, and a
+ * visitor is the last account that should be first to hold the role that one
+ * day will. Idempotent like the rest of the hook, on the membership's unique
+ * key.
+ *
+ * `null` where there is no demo to join. The endpoint refuses a visit before
+ * it writes anything in that case (`hooks.before` below), so this is reached
+ * only by a visit that raced a reset — and `getOrgContext()` refusing that
+ * one session is the right answer.
+ */
+async function joinDemoOrganization(userId: string): Promise<string | null> {
+  const demo = await findLiveDemoOrganization();
+
+  if (!demo) return null;
+
+  await db()
+    .insert(memberships)
+    .values({ orgId: demo.id, userId, role: "member" })
+    .onConflictDoNothing();
+
+  return demo.id;
+}
+
+/**
+ * The demo org, unless it is soft-deleted — the same `deleted_at is null` that
+ * `resolveOrgForUser()` applies, so a visitor is never let into an org that
+ * `getOrgContext()` would then refuse to open. `findDemoOrgId()` in
+ * `src/server/demo.ts` asks the same question for the sign-in page; it is
+ * repeated rather than imported because that module imports this one.
+ */
+async function findLiveDemoOrganization(): Promise<{ id: string } | null> {
+  const [demo] = await db()
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(and(eq(organizations.isDemo, true), isNull(organizations.deletedAt)))
+    .limit(1);
+
+  return demo ?? null;
 }
 
 function createAuth() {
@@ -283,7 +335,27 @@ function createAuth() {
         // because a legitimate retry lands here, and because a limit that bites
         // mid-flow strands somebody at the provider with no way back.
         "/callback/:id": { window: 60, max: 20 },
+        // A demo visit writes a user, a session and a membership, so a loop
+        // on it is a loop of inserts. Five a minute is more than one person
+        // clicking "Explore the demo" ever needs (ADR-0011).
+        "/sign-in/anonymous": { window: 60, max: 5 },
       },
+    },
+
+    hooks: {
+      // No demo, no demo visit. Without this the anonymous endpoint would still
+      // write a user and a session wherever nothing has seeded a demo — before
+      // the first reset in production, and in every environment that never runs
+      // one — and nothing would ever delete them. Refused here, before the
+      // plugin writes anything, as a 404: there is nothing at this address to
+      // visit.
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/sign-in/anonymous") return;
+
+        if (!(await findLiveDemoOrganization())) {
+          throw new APIError("NOT_FOUND", { message: "There is no demo." });
+        }
+      }),
     },
 
     databaseHooks: {
@@ -298,6 +370,7 @@ function createAuth() {
                 id: schema.users.id,
                 name: schema.users.name,
                 email: schema.users.email,
+                isAnonymous: schema.users.isAnonymous,
               })
               .from(schema.users)
               .where(eq(schema.users.id, session.userId))
@@ -351,6 +424,14 @@ function createAuth() {
           },
         },
       }),
+
+      // A demo visitor (ADR-0011): an account with no email a person owns,
+      // written to `users` with `is_anonymous` set, and let into the demo org
+      // alone by `joinDemoOrganization` above. The address is the plugin's
+      // placeholder on `.invalid`, which by definition receives nothing. If the
+      // visitor then signs in with Google, the plugin deletes the anonymous
+      // account and the session hook gives the real one its own org.
+      anonymous({ generateName: () => "Demo visitor" }),
 
       // Must stay last. It writes Better Auth's cookies through Next's own cookie
       // API, which is what makes a sign-out from a Server Action take effect

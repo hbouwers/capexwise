@@ -55,3 +55,4 @@ New decisions take the next number and are added here in the same pull request.
 | [0008](0008-access-code-encryption.md) | Access codes — sealed in the application, keyed per environment | [#31](https://github.com/hbouwers/capexwise/issues/31) |
 | [0009](0009-one-production.md) | One production, and the way back to Hobby | [#86](https://github.com/hbouwers/capexwise/issues/86) |
 | [0010](0010-backups.md) | Backups — a nightly dump that is also a restore drill | [#35](https://github.com/hbouwers/capexwise/issues/35) |
+| [0011](0011-demo-org.md) | The demo org — anonymous visitors, and a reset that bypasses nothing | [#34](https://github.com/hbouwers/capexwise/issues/34) |

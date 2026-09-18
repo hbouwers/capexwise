@@ -171,6 +171,9 @@ create table users (                    -- Better Auth `user`
   email_verified boolean not null default false,
   name           text,
   image          text,
+  -- A demo visitor: the anonymous plugin's account, a member of the demo org
+  -- alone and deleted by its nightly reset (ADR-0011).
+  is_anonymous   boolean not null default false,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
@@ -1284,8 +1287,9 @@ what a scoped path hides; and the identity path, on the three tables above. The 
 does not bypass anything. It reads every org's rows because every table has a policy saying it may,
 and it can write none. A *data* migration over
 an org-owned table would be subject to `FORCE` and see no domain rows. The demo reset (#34) is the
-first job that has to write across orgs, and it decides how — with its own role, rather than by
-inheriting a bypass. ADR-0007 has the table.
+first job that has to write across orgs, and [ADR-0011](adr/0011-demo-org.md) decided it needs no
+role of its own: it deletes the demo org on the identity path, which the cascade empties, and
+writes the content back as the scoped role. ADR-0007 has the table.
 
 ### The per-table checklist
 

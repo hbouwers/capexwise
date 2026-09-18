@@ -92,7 +92,8 @@ subject to `FORCE`, so on a login that is neither superuser nor `BYPASSRLS` it w
 identity-path tables and nothing of a domain table — an `UPDATE` that silently matches zero rows.
 There are no data migrations yet. The demo reset (#34) is the first maintenance job that needs to
 write across orgs, and it decides — with its own role and its own ADR, as ADR-0003 asked — rather
-than inheriting a bypass from this one.
+than inheriting a bypass from this one. *Later:* [ADR-0011](0011-demo-org.md) decided it needs no
+role — it deletes the demo org on the identity path and writes its content as the scoped role.
 
 **The integration suite runs the application as a restricted login.** `capexwise_test_app` is not
 the owner, has no `BYPASSRLS`, and holds exactly the two memberships above. Every Better Auth

@@ -26,6 +26,7 @@
     "db:backup": "node src/db/backup.mts",
     "db:studio": "drizzle-kit studio",
     "db:drift": "node scripts/check-migration-drift.mjs",
+    "demo:reset": "node scripts/reset-demo.mjs",
     "docker:build": "docker build -t capexwise-app .",
     "docker:up": "docker compose --profile app up -d --build --wait",
     "docker:down": "docker compose --profile app down",

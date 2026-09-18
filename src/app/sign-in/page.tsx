@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 
+import { DemoSignIn } from "@/components/demo-sign-in";
 import { Button } from "@/components/ui/button";
 import { GoogleMark } from "@/components/google-mark";
+import { withoutParameters } from "@/lib/query-errors";
 import { signInWithGoogle } from "@/server/actions/auth";
+import { findDemoOrgId } from "@/server/demo";
 import { env } from "@/server/env";
 import { AFTER_SIGN_IN_PATH, getSession } from "@/server/session";
 import { redirect } from "next/navigation";
@@ -18,7 +21,9 @@ import { redirect } from "next/navigation";
  * changes the layout and not the palette.
  *
  * One sign-in method, because ADR-0004 chose one: Google OAuth, no passwords, no
- * email provider, no domain. There is nothing to lay out but a button.
+ * email provider, no domain. The second button is not a second method but a way
+ * to look without one: `Explore the demo` (ADR-0011), offered wherever a demo
+ * org has been seeded.
  */
 export const metadata: Metadata = {
   title: "Sign in — CapExWise",
@@ -45,6 +50,25 @@ export default async function SignInPage({
   // The button would lead to Google's `redirect_uri_mismatch` page, so it is
   // replaced by a line saying where signed-in pages can be seen instead.
   const preview = env().VERCEL_ENV === "preview";
+
+  // Needs no OAuth round trip, so unlike Google it works on a preview too —
+  // wherever that preview's database holds a demo.
+  //
+  // **This page renders without a database, and has to keep doing so.** It is
+  // what the Dockerfile's HEALTHCHECK and CI's container job fetch, because it
+  // was the one route that reached neither the database nor Google, and both
+  // run with no database behind them. So a demo check that cannot reach it
+  // hides the button rather than taking the page down — with nothing to sign
+  // in to, there is no demo to offer either.
+  const demo = await findDemoOrgId().then(
+    (id) => id !== null,
+    (error: unknown) => {
+      console.error(
+        withoutParameters(error, "Looking for the demo org").message,
+      );
+      return false;
+    },
+  );
 
   return (
     <main className="flex flex-1 items-center justify-center bg-surface-page p-8">
@@ -91,6 +115,16 @@ export default async function SignInPage({
               </p>
             </>
           )}
+
+          {demo ? (
+            <div className="mt-6 border-t border-border-card pt-6">
+              <DemoSignIn destination={AFTER_SIGN_IN_PATH} />
+              <p className="mt-4 text-xs leading-normal text-text-muted">
+                A sample portfolio in Indianapolis, with no account. Anyone
+                exploring it can change it, and it resets every night.
+              </p>
+            </div>
+          ) : null}
         </div>
       </div>
     </main>

@@ -210,6 +210,7 @@ to start the server if a server variable carries the prefix. There are no public
 | `APP_URL` | `http://localhost:3000` | **Leave it unset.** A preview's hostname is generated per branch, so the server derives it from Vercel's `VERCEL_BRANCH_URL`, on a preview only ([#32](https://github.com/hbouwers/capexwise/issues/32)) | `https://capexwise.com` |
 | `BETTER_AUTH_SECRET` | Generated once, per machine — never copied from anywhere | Vercel project environment, Preview scope; its own value | Vercel project environment, Production scope; its own value |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | A Google OAuth client of your own, in Testing mode | The same client as production, or its own | The production OAuth client |
+| `CRON_SECRET` | Optional. Set it to run `npm run demo:reset` against the dev server | Unset — the reset route answers 404 | Vercel project environment, Production scope, **Sensitive**. Vercel Cron sends it to the demo reset by itself ([ADR-0011](docs/adr/0011-demo-org.md)) |
 | `ACCESS_CODE_KEYS` | Generated once, per machine | Vercel project environment, Preview scope; its own value, never production's | Vercel project environment, Production scope, **Sensitive**, with a copy kept outside Vercel ([ADR-0008](docs/adr/0008-access-code-encryption.md)) |
 
 #### The database
@@ -407,9 +408,12 @@ migration that drops anything.
 | `npm run db:drift` | Fail if the schema is ahead of the committed migrations |
 | `npm run db:backup` | Dump a database, restore it into a scratch one, and compare. Takes `-- <file>`. What the nightly backup runs |
 | `npm run db:studio` | Drizzle Studio, a browser UI over the data |
+| `npm run demo:reset` | Write the demo org again, by calling the route the nightly schedule calls. Needs a running server and `CRON_SECRET`; takes `-- <origin>` for a deployment |
 
-The demo seed is [#34](https://github.com/hbouwers/capexwise/issues/34), so `db:migrate` leaves a
-schema with no rows in it.
+`db:migrate` leaves a schema with reference data and no org in it. The demo org is content, not
+schema: `npm run demo:reset` writes it — five Indianapolis buildings and eight doors, dated from
+today — and `Explore the demo` on the sign-in page appears once it exists
+([ADR-0011](docs/adr/0011-demo-org.md)).
 
 ### The container
 

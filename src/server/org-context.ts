@@ -76,9 +76,10 @@
  *
  * - **Migrations** (`src/db/migrate.mts`) open their own connection and run
  *   before any org exists. They are named in `eslint.config.mjs`.
- * - **The demo org's nightly reset** (#34) is SQL through the seed path, for the
- *   reason ADR-0003 gives: the demo org is a row, so resetting it is a statement
- *   rather than orchestration.
+ * - **The demo org's nightly reset** (#34) turned out not to need one
+ *   (ADR-0011). It deletes and recreates the demo org on the identity path,
+ *   whose grants already cover an org row, and writes the content through
+ *   `enterOrg()` below as the scoped role, one org wide like everything else.
  * - **The integration harness** (`src/test/db.ts`) holds an unscoped connection
  *   because #27 has to tell a row that was correctly hidden from one that was
  *   never written. That is an assertion, not a bypass.
@@ -328,7 +329,8 @@ export async function listOrgsForUser(userId: string): Promise<OrgOption[]> {
  * It is exported for two callers and no others: `getOrgContext()`, and the
  * integration test that has to build a handle without a session to build one
  * from. If a third appears, the question to ask is what `getOrgContext()` is
- * missing.
+ * missing. The demo reset is not a third: it needs the scope inside a
+ * transaction it already holds, which is `enterOrg()` below.
  */
 export function forOrg(orgId: string): OrgScopedDb {
   return {
@@ -336,52 +338,67 @@ export function forOrg(orgId: string): OrgScopedDb {
 
     async run<T>(work: (tx: OrgScopedTx) => Promise<T>): Promise<T> {
       return await unscopedDb().transaction(async (tx) => {
-        // `set_config(name, value, true)` is `SET LOCAL` in a form that takes
-        // the value as a parameter — `SET LOCAL` itself does not, and building
-        // the statement by interpolation would put an id into SQL text on every
-        // request. `role` is a setting like any other as far as `set_config` is
-        // concerned, and switching it is `SET LOCAL ROLE` with the same
-        // permission check. One statement for both, so the switch costs no
-        // round trip of its own.
-        //
-        // The `true` is the entire safety property of this line, twice over:
-        // pass `false` and the role and the org both become session-level,
-        // survive the commit and are inherited by the next request handed this
-        // pooled connection. `org-context.integration.test.ts` is what holds
-        // those arguments in place, because nothing else would notice them
-        // change.
-        const applied = await tx.execute<{
-          role: string | null;
-          org_id: string | null;
-        }>(
-          sql`select set_config('role', ${SCOPED_ROLE}, true) as role,
-                     set_config(${ORG_ID_SETTING}, ${orgId}, true) as org_id`,
-        );
-
-        // ADR-0003 asks this helper to assert the context took, and
-        // `docs/data-model.md` §9 gives the reason: a policy comparing against
-        // an unset setting filters everything out rather than raising, so the
-        // symptom of a context that never applied is a page rendering zero
-        // buildings. That is a terrible way to learn about it. `set_config`
-        // returns what it set, so the check costs the comparison and nothing
-        // else. A login role that may not become the scoped one never gets
-        // this far — the switch raises `permission denied to set role`.
-        const [row] = applied.rows;
-
-        if (row?.role !== SCOPED_ROLE || row.org_id !== orgId) {
-          throw new Error(
-            `Failed to apply ${SCOPED_ROLE} and ${ORG_ID_SETTING} for the ` +
-              `transaction. Every row-level security policy is written for that ` +
-              `role and compares against that setting, and a context that did ` +
-              `not apply filters silently rather than raising — so this stops ` +
-              `here instead of returning an empty result that looks like data.`,
-          );
-        }
+        await enterOrg(tx, orgId);
 
         return await work(tx);
       });
     },
   };
+}
+
+/**
+ * Makes the rest of an open transaction `capexwise_scoped`, in `orgId` — the
+ * statement `forOrg().run()` opens every transaction with.
+ *
+ * **One caller besides `forOrg()`, and it is named:** the demo reset in
+ * `src/server/demo.ts`, which deletes and recreates the demo org on the
+ * identity path and then has to write its content as the scoped role *in the
+ * same transaction*, so that a failed seed leaves last night's demo rather
+ * than an empty one. ADR-0011 is the decision. The warning on `forOrg()`
+ * applies here twice over: the id is trusted, and nothing checks it.
+ */
+export async function enterOrg(tx: OrgScopedTx, orgId: string): Promise<void> {
+  // `set_config(name, value, true)` is `SET LOCAL` in a form that takes
+  // the value as a parameter — `SET LOCAL` itself does not, and building
+  // the statement by interpolation would put an id into SQL text on every
+  // request. `role` is a setting like any other as far as `set_config` is
+  // concerned, and switching it is `SET LOCAL ROLE` with the same
+  // permission check. One statement for both, so the switch costs no
+  // round trip of its own.
+  //
+  // The `true` is the entire safety property of this line, twice over:
+  // pass `false` and the role and the org both become session-level,
+  // survive the commit and are inherited by the next request handed this
+  // pooled connection. `org-context.integration.test.ts` is what holds
+  // those arguments in place, because nothing else would notice them
+  // change.
+  const applied = await tx.execute<{
+    role: string | null;
+    org_id: string | null;
+  }>(
+    sql`select set_config('role', ${SCOPED_ROLE}, true) as role,
+                     set_config(${ORG_ID_SETTING}, ${orgId}, true) as org_id`,
+  );
+
+  // ADR-0003 asks this helper to assert the context took, and
+  // `docs/data-model.md` §9 gives the reason: a policy comparing against
+  // an unset setting filters everything out rather than raising, so the
+  // symptom of a context that never applied is a page rendering zero
+  // buildings. That is a terrible way to learn about it. `set_config`
+  // returns what it set, so the check costs the comparison and nothing
+  // else. A login role that may not become the scoped one never gets
+  // this far — the switch raises `permission denied to set role`.
+  const [row] = applied.rows;
+
+  if (row?.role !== SCOPED_ROLE || row.org_id !== orgId) {
+    throw new Error(
+      `Failed to apply ${SCOPED_ROLE} and ${ORG_ID_SETTING} for the ` +
+        `transaction. Every row-level security policy is written for that ` +
+        `role and compares against that setting, and a context that did ` +
+        `not apply filters silently rather than raising — so this stops ` +
+        `here instead of returning an empty result that looks like data.`,
+    );
+  }
 }
 
 /**

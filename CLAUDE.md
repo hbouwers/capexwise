@@ -33,7 +33,9 @@ and the contacts tagged with its trade — #114. The portfolio at `/` is finishe
 the building cards' rent, CapEx, tasks, flag and systems life, the replacement runway and what is
 due in the next 30 days — #115. An item is edited in full in the item editor, opened from the
 equipment table's Item button, with Record replacement, Remove and Confirm in it, and a building's
-replaced and removed equipment shown on request — #125. The tax planner and the rest of what the
+replaced and removed equipment shown on request — #125. The demo org is written by a nightly reset
+at `/api/cron/demo-reset` — five Indianapolis buildings and eight doors, dated from today — and
+`Explore the demo` signs a visitor in anonymously, into the demo alone — #34. The tax planner and the rest of what the
 product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
@@ -235,6 +237,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Backups | **Nightly `pg_dump` as `capexwise_reader`, restored and compared on the runner before it is kept, `age`-encrypted, in an S3-compatible bucket outside Neon and GitHub, kept 90 days** ([ADR-0010](docs/adr/0010-backups.md)). Neon's 6-hour history covers the hours since. The reader reads through a read policy on every table rather than bypassing row-level security, so every new table needs its `select` grant and, if it has row-level security, the policy — docs/data-model.md §9. Rejected: Neon's backups alone (6 hours, and not independent), dumping as the owner (every domain table comes out empty), GitHub artifacts |
 | Portfolio forecasting | **In v1** (PRD §12, question 6). The dashboard rollup (F0) was already settled and in v1; the 10-year forecast and reserve projection get the same portfolio view in v1 rather than staying per-building until v1.1 |
 | Reserve timing | **A replacement is paid in January of its year, and contributions since the reserve's as-of date are not counted** (#111, 2026-09-16). Replacements are known by the year and the reserve by the month, so the forecast has to pick a month. Both rules pick the reading that never overstates what the reserve covers: a failure does not wait for December, and CapExWise cannot see the account to know a deposit was made. Rejected: mid-year or year-end payment, and rolling the balance forward by the stated contribution. [capex-forecast.md](docs/ui/screens/capex-forecast.md#ten-year-capital-plan) states them |
+| Demo org | **Anonymous visitors, full writes, a nightly reset that bypasses nothing** ([ADR-0011](docs/adr/0011-demo-org.md), #34). Better Auth's `anonymous` plugin makes one account per visit, a member of the `is_demo` org and nothing else. The reset deletes that org on the identity path — the cascade empties it — and writes the content back as `capexwise_scoped`, in one transaction, from a route Vercel Cron and Cloud Scheduler can both call. Rejected: a shared demo user, a read-only demo, a `BYPASSRLS` maintenance role, and a GitHub Actions job holding a copy of production's keyring |
 | Forecast recurrence | **An item is due again a life after the year it lands, inside the ten years** (#111). Five catalogue types live eight years or less, so counting each item once understates every later year and the reserve need. A recurrence of an estimated item stays estimated, and costs are today's, not inflated. Rejected: one replacement per item. [capex-forecast.md](docs/ui/screens/capex-forecast.md#ten-year-capital-plan) states it |
 
 All six PRD open questions (#13) are now settled — see PRD §12.
