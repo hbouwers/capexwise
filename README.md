@@ -202,7 +202,19 @@ with an empty environment for exactly this reason.
 build. A `NEXT_PUBLIC_` variable is the opposite of that: the compiler inlines its value into the
 client bundle as a literal, so it is published to every browser and stays published in every cached
 build — a secret that acquires the prefix cannot be un-published by removing it. The schema refuses
-to start the server if a server variable carries the prefix. There are no public variables yet.
+to start the server if a server variable carries the prefix. The public half is `publicEnvSchema`,
+parsed by `src/lib/env-public.ts`, and the test for admission is not "is this low-risk" but "would
+publishing it to every browser, permanently, be correct". One variable meets it today:
+`NEXT_PUBLIC_SENTRY_DSN`, a write-only ingest endpoint whose whole purpose is to be published.
+
+**Observability is off unless configured, and that is the state everywhere but production.** Sentry,
+the funnel and the structured logs are [ADR-0013](docs/adr/0013-observability.md);
+[`docs/runbooks/observability.md`](docs/runbooks/observability.md) is the setup. `SENTRY_DSN` and
+`POSTHOG_KEY` are set in Vercel's Production scope alone — a preview reporting into the same Sentry
+project makes the production feed useless within a week, and a preview branch's clicks are not a
+funnel. The three `SENTRY_*` build variables are read by `next.config.ts` and never by the running
+server, which is why they are absent from the schema; without them the build still succeeds and
+errors still arrive, only the source maps are missing.
 
 | Variable | Local | Preview | Production |
 | --- | --- | --- | --- |

@@ -35,7 +35,10 @@ due in the next 30 days — #115. An item is edited in full in the item editor, 
 equipment table's Item button, with Record replacement, Remove and Confirm in it, and a building's
 replaced and removed equipment shown on request — #125. The demo org is written by a nightly reset
 at `/api/cron/demo-reset` — five Indianapolis buildings and eight doors, dated from today — and
-`Explore the demo` signs a visitor in anonymously, into the demo alone — #34. The tax planner and the rest of what the
+`Explore the demo` signs a visitor in anonymously, into the demo alone — #34. The application now
+reports on itself: errors to Sentry with the request stripped off them, one JSON line per event
+carrying the org, `/api/health` for an uptime check, and the four onboarding funnel events measured
+on the server — #36, [ADR-0013](docs/adr/0013-observability.md). The tax planner and the rest of what the
 product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
@@ -60,7 +63,7 @@ eventually be world-readable.
 | `docs/ui/components.md` | Component inventory — names, layers, shadcn mapping. The contract the screen specs reference |
 | `docs/ui/screens/` | One markdown spec per screen and modal, and a README of the rules they all share — widths, tables below `md`, building-or-unit scope, states. The contract a screen is built against |
 | `docs/ui/reference/rental-manager.html` | The design prototype. Visual source of truth |
-| `docs/runbooks/` | Operational procedures: the steps, where the ADR is the reasons. `backup-and-restore.md` is the first |
+| `docs/runbooks/` | Operational procedures: the steps, where the ADR is the reasons. `backup-and-restore.md` and `observability.md` |
 | `CONTRIBUTING.md` | Branch, commit and PR conventions, and the protection to enable at v0.5 |
 
 ### Source layout
@@ -86,6 +89,10 @@ eventually be world-readable.
 | `src/db/migrate.mts` | The migration runner. Forward-only, and it opens its own connection — [ADR-0006](docs/adr/0006-migrations.md) |
 | `src/db/backup.mts` | The nightly backup: dump, restore into a scratch database, compare — [ADR-0010](docs/adr/0010-backups.md). Opens its own connections, like the runner |
 | `src/lib/env-schema.mts` | The environment contract — the schema, and the parser that formats a failure without printing a value. `.mts` because the migration runner imports it and runs under plain Node |
+| `src/lib/env-public.ts` | The `NEXT_PUBLIC_` half, parsed. Importable from a Client Component, which is the whole point of its being a separate module from `@/server/env`. Every variable is spelled literally there, because that is what the compiler inlines |
+| `src/lib/log.ts` | One JSON line per event ([ADR-0013](docs/adr/0013-observability.md)). `orgId` is a required argument and values are scrubbed on the way out — this is where "logs never carry PII" stops being a comment |
+| `src/server/sentry.ts`, `src/instrumentation-client.ts` | Error tracking, server and browser. Off wherever the DSN is unset, which is every laptop and every preview |
+| `src/server/analytics.ts` | The four onboarding funnel events, emitted server-side. No browser script, no autocapture, no replay; the demo org is excluded by a required field rather than by remembering |
 | `src/lib/access-code-cipher.mts` | Seals and opens access codes, and parses `ACCESS_CODE_KEYS` ([ADR-0008](docs/adr/0008-access-code-encryption.md)). Takes the keyring as an argument and reads no environment. `.mts` because `env-schema.mts` imports it |
 | `src/lib/` | Framework-free helpers — money, dates, formatting. No React, no database, no request context. This is what the unit tests cover |
 | `drizzle/` | Generated migrations, committed. Read the SQL before committing it; there is no `down` |
@@ -239,6 +246,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Reserve timing | **A replacement is paid in January of its year, and contributions since the reserve's as-of date are not counted** (#111, 2026-09-16). Replacements are known by the year and the reserve by the month, so the forecast has to pick a month. Both rules pick the reading that never overstates what the reserve covers: a failure does not wait for December, and CapExWise cannot see the account to know a deposit was made. Rejected: mid-year or year-end payment, and rolling the balance forward by the stated contribution. [capex-forecast.md](docs/ui/screens/capex-forecast.md#ten-year-capital-plan) states them |
 | Demo org | **Anonymous visitors, full writes, a nightly reset that bypasses nothing** ([ADR-0011](docs/adr/0011-demo-org.md), #34). Better Auth's `anonymous` plugin makes one account per visit, a member of the `is_demo` org and nothing else. The reset deletes that org on the identity path — the cascade empties it — and writes the content back as `capexwise_scoped`, in one transaction, from a route Vercel Cron and Cloud Scheduler can both call. Rejected: a shared demo user, a read-only demo, a `BYPASSRLS` maintenance role, and a GitHub Actions job holding a copy of production's keyring |
 | Preview databases | **Every preview branch is created from `preview-base`, the Neon project's default branch: the migrated schema and the rows migrations write, nothing else** ([ADR-0012](docs/adr/0012-preview-base-branch.md), #85). Neither Neon integration lets a preview choose its parent, so the default branch is the lever. CI migrates the base after production. `main` is still production's branch, and every console step on it has to pick it by name. No demo in previews yet. The base is a child of `main` with its schemas dropped and rebuilt and production's passwords cut, and `Reset from parent` on it would copy production back in. Rejected: branching from `main` and scrubbing, a schema-only base (Neon refuses one in this project, and it would have no migration journal or catalogue) |
+| Observability | **Sentry for errors, JSON lines for logs, `/api/health` for uptime, PostHog for the funnel — and nothing of it in the browser except Sentry** ([ADR-0013](docs/adr/0013-observability.md), #36). Analytics is emitted server-side only: no `posthog-js`, no autocapture, no session replay, no cookie and so no consent banner, because autocapture on this product records tenant names and street addresses and cannot be configured safe. The four funnel events are `signed_up`, `building_created`, `capital_item_added`, `forecast_viewed`, and the demo org emits none of them — `track()` takes a required `isDemo` rather than a flag somebody remembers. Every vendor is off where its variable is unset, which is every laptop and every preview. Rejected: GlitchTip (a server to run), Plausible (thin funnels, and the privacy gap that would justify paying it does not survive keeping the browser clean), Vercel Analytics (lock-in aimed at ADR-0002's escape hatch), a health route that queries Postgres (it would need a ninth entry on the raw-client allowlist to buy a signal Sentry already gives) |
 | Forecast recurrence | **An item is due again a life after the year it lands, inside the ten years** (#111). Five catalogue types live eight years or less, so counting each item once understates every later year and the reserve need. A recurrence of an estimated item stays estimated, and costs are today's, not inflated. Rejected: one replacement per item. [capex-forecast.md](docs/ui/screens/capex-forecast.md#ten-year-capital-plan) states it |
 
 All six PRD open questions (#13) are now settled — see PRD §12.
