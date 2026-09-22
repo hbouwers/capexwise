@@ -33,6 +33,7 @@ import { rowsForScope, type ScopeChoice } from "@/lib/capital-items";
 import { todayIn, yearOf } from "@/lib/dates";
 import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
 import { withoutParameters } from "@/lib/query-errors";
+import { track } from "@/server/analytics";
 import { getOrgContext } from "@/server/org-context";
 
 export type AddCapitalItemsResult =
@@ -124,7 +125,7 @@ export async function addCapitalItems(
   buildingId: unknown,
   input: unknown,
 ): Promise<AddCapitalItemsResult> {
-  const { db } = await getOrgContext();
+  const { db, org, user } = await getOrgContext();
 
   const id = idSchema.safeParse(buildingId);
   if (!id.success) return refused(BUILDING_NOT_FOUND);
@@ -134,7 +135,7 @@ export async function addCapitalItems(
 
   const requested = parsed.data.items;
 
-  return await db.run(async (tx): Promise<AddCapitalItemsResult> => {
+  const result = await db.run(async (tx): Promise<AddCapitalItemsResult> => {
     // `for share`: the building form's save takes this row `for update`
     // before it retires or removes a unit, so it waits for this add to
     // finish, and this add cannot put equipment on a unit it is retiring.
@@ -206,6 +207,20 @@ export async function addCapitalItems(
 
     return { ok: true, itemIds: added.map((row) => row.id) };
   });
+
+  // Step three of the onboarding funnel (ADR-0013): the differentiator has been
+  // reached. After the commit, and only on the path that wrote something — a
+  // refusal is a step somebody did not complete, which is the thing being
+  // measured.
+  if (result.ok) {
+    track(
+      "capital_item_added",
+      { userId: user.id, orgId: org.id, isDemo: org.isDemo },
+      { items: result.itemIds.length },
+    );
+  }
+
+  return result;
 }
 
 /**

@@ -34,6 +34,7 @@ import { type UnitValues, validateBuilding } from "@/lib/building-form";
 import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
 import { sqlState } from "@/lib/query-errors";
 import { recordAccessCodeEvent } from "@/server/access-codes";
+import { track } from "@/server/analytics";
 import {
   getOrgContext,
   type OrgScopedDb,
@@ -85,7 +86,7 @@ function unitColumns(unit: UnitValues) {
 export async function createBuilding(
   input: unknown,
 ): Promise<SaveBuildingResult> {
-  const { db } = await getOrgContext();
+  const { db, org, user } = await getOrgContext();
 
   const validated = validateBuilding(input);
   if (!validated.ok) return validated;
@@ -117,6 +118,14 @@ export async function createBuilding(
 
     return row.id;
   });
+
+  // Step two of the onboarding funnel (ADR-0013), after the commit rather than
+  // inside it: a rolled-back save is not something that happened.
+  track(
+    "building_created",
+    { userId: user.id, orgId: org.id, isDemo: org.isDemo },
+    { units: submitted.length },
+  );
 
   return { ok: true, buildingId };
 }
