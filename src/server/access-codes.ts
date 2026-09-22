@@ -7,6 +7,7 @@
 import "server-only";
 
 import { type Keyring, parseKeyring } from "@/lib/access-code-cipher.mts";
+import { logEvent } from "@/lib/log";
 import { env } from "@/server/env";
 
 let parsed: Keyring | undefined;
@@ -36,6 +37,11 @@ export type AccessCodeEvent =
  * so that a reveal that cannot be recorded does not happen. Until then the
  * line is written before a revealed code is returned, and after a save has
  * committed, so the log describes what happened and not what was attempted.
+ *
+ * The line goes through `logEvent()` (ADR-0013), which is where the envelope
+ * and the scrubbing now live. This function was the first instance of that
+ * pattern and is why the envelope has the shape it does; what it still owns is
+ * the list of fields — ids and an enum, no value and no label.
  */
 export function recordAccessCodeEvent(entry: {
   event: AccessCodeEvent;
@@ -44,15 +50,14 @@ export function recordAccessCodeEvent(entry: {
   accessCodeId: string;
   buildingId: string;
 }): void {
-  console.info(
-    JSON.stringify({
-      log: "access_code",
+  logEvent({
+    log: "access_code",
+    orgId: entry.orgId,
+    fields: {
       event: entry.event,
-      org_id: entry.orgId,
       user_id: entry.userId,
       access_code_id: entry.accessCodeId,
       building_id: entry.buildingId,
-      at: new Date().toISOString(),
-    }),
-  );
+    },
+  });
 }
