@@ -19,11 +19,36 @@
  *
  * There is no Edge code in the application today. The guard is here so that
  * adding middleware later does not turn this file into a failure nobody expects.
+ *
+ * `@sentry/nextjs` is imported at the top of this file rather than behind the
+ * guard, and that is safe where `server-only` is not: the SDK ships an Edge
+ * build and `onRequestError` has to be a static export for Next.js to find it.
+ * The *initialisation* still happens only under Node, below.
  */
+import * as Sentry from "@sentry/nextjs";
+
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   const { verifyEnvironment } = await import("@/server/boot");
 
   await verifyEnvironment();
+
+  // After the environment check, never before it — `src/server/sentry.ts` says
+  // why, and the reason is that `env()` parses on first use and the first parse
+  // has to happen inside `verifyEnvironment()`'s `try`.
+  const { initSentry } = await import("@/server/sentry");
+
+  initSentry();
 }
+
+/**
+ * Next.js calls this for every error thrown out of a Server Component, a route
+ * handler or a server action. It is the hook that makes error tracking cover
+ * the server at all: without it Sentry sees only what it can instrument
+ * directly, and a React Server Component's render error is not that.
+ *
+ * Exported unconditionally. Where no DSN was configured, `Sentry.init()` never
+ * ran and this does nothing.
+ */
+export const onRequestError = Sentry.captureRequestError;

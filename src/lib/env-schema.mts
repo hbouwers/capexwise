@@ -154,7 +154,80 @@ export const serverEnvSchema = z.object({
    * preview branch has a new hostname to match.
    */
   VERCEL_ENV: z.enum(["production", "preview", "development"]).optional(),
+
+  /**
+   * The commit this deployment was built from. Vercel sets it; nothing else
+   * does, which is why it is optional.
+   *
+   * Two readers, and they want the same thing for the same reason (ADR-0013):
+   * Sentry tags every error with it, so a regression names the deploy that
+   * introduced it, and `/api/health` reports it, so the uptime check doubles as
+   * a way to see what is actually running. Absent, both say so rather than
+   * inventing a value — "unknown" is a true answer and a made-up sha is not.
+   *
+   * The Cloud Run escape hatch (ADR-0002) will need its own source for this,
+   * since nothing outside Vercel sets it. That is a build argument in the
+   * Dockerfile on the day it matters, not a variable to invent now.
+   */
+  VERCEL_GIT_COMMIT_SHA: z.string().optional(),
+
+  /**
+   * Where server-side errors go (ADR-0013). Optional, and absent means error
+   * tracking is off — which is the right default on a laptop and on a preview.
+   *
+   * A preview reporting into the same Sentry project as production makes the
+   * production feed useless inside a week: every half-finished branch arrives
+   * in the same stream as the errors real people hit. So this is set in
+   * Vercel's Production scope and nowhere else, rather than being set once for
+   * the project.
+   *
+   * Not a secret in the way `BETTER_AUTH_SECRET` is — a DSN only permits
+   * writing events — but it is kept off the client half of this file anyway.
+   * The browser gets its own, `NEXT_PUBLIC_SENTRY_DSN`, so that turning
+   * reporting on in one place and not the other is a thing somebody can
+   * actually do.
+   */
+  SENTRY_DSN: z.string().url().optional(),
+
+  /**
+   * The PostHog project key, and the host its instance answers on (ADR-0013).
+   * Optional, and absent means no analytics — the same default as Sentry, for
+   * the same reason: a preview branch's clicks are not a funnel.
+   *
+   * There is no `NEXT_PUBLIC_` twin, and that absence is the decision rather
+   * than an omission. ADR-0013 keeps analytics server-side entirely: no browser
+   * script, no autocapture, no session replay, no cookie. Adding a public key
+   * here is what would make the browser half possible, so it is not here.
+   *
+   * The host is optional with a fallback rather than a `.default()`, which is
+   * the rule this schema states for itself at the top: a default would make it
+   * a key present in every parsed environment, including the ones that have
+   * never heard of PostHog. The fallback is PostHog's US cloud and lives in
+   * `src/server/analytics.ts`, next to the client it configures.
+   *
+   * It is worth setting deliberately. An EU project answers on
+   * `eu.i.posthog.com`, and a key sent to the wrong one of the two simply
+   * fails — at the vendor, silently, which is the failure mode analytics is
+   * worst at revealing.
+   */
+  POSTHOG_KEY: z.string().min(1).optional(),
+  POSTHOG_HOST: z.string().url().optional(),
 });
+
+/**
+ * The public schema is **not** here, and its absence is the decision.
+ *
+ * It lives in `src/lib/env-public.ts`, together with the module that parses it,
+ * because that module is importable from a Client Component and this one is not
+ * safe to be: validating `ACCESS_CODE_KEYS` above means importing
+ * `access-code-cipher.mts`, so a browser that reached this file would receive
+ * the keyring parser and the name of every server variable in its bundle.
+ *
+ * So the two halves are separated by what may import them rather than by a
+ * comment asking nicely. The rule for what may go in the public one is stated
+ * there, and the assertion at the foot of this file is what keeps this one from
+ * drifting into it.
+ */
 
 /**
  * Fills in `APP_URL` on a Vercel preview deployment, and nowhere else.
@@ -233,11 +306,10 @@ export const backupEnvSchema = z.object({
 });
 
 /**
- * There are no public variables today, and this is the note that says so rather
- * than an empty schema pretending to be one. When the first `NEXT_PUBLIC_`
- * variable arrives it gets a `publicEnvSchema` here and a `src/lib/env-public.ts`
- * that parses it — a separate module, importable from a Client Component, which
- * is the whole point of the split.
+ * The server schema may not carry the prefix that publishes a value.
+ * `publicEnvSchema`, in `src/lib/env-public.ts`, is where a variable goes when
+ * it should be published — a separate module, importable from a Client
+ * Component, which is the whole point of the split.
  *
  * The split is enforced from this side too. `NEXT_PUBLIC_` is not a naming
  * convention: the compiler inlines any variable carrying that prefix into the
@@ -262,97 +334,15 @@ for (const key of Object.keys(serverEnvSchema.shape)) {
 }
 
 /**
- * Thrown by `parseEnv`. A distinct class so a caller can tell a configuration
- * problem — which the operator fixes — from a bug, which the developer fixes.
- */
-export class EnvironmentError extends Error {
-  override readonly name = "EnvironmentError";
-}
-
-/**
- * The closing line of every failure. Deliberately not "copy `.env.example` to
- * `.env.local`" alone: the same message is printed by a container on Cloud Run,
- * where there is no `.env.local` to copy anything into and that advice sends the
- * reader looking for a file that should not exist. It names both homes and lets
- * the reader pick the one they are in.
- */
-const DEFAULT_HINT =
-  "Set it in the environment the process runs in — locally by copying " +
-  "`.env.example` to `.env.local`, on a deploy through the platform's own " +
-  "environment configuration. `.env.example` lists every variable, and the " +
-  "README says where each value comes from in each environment.";
-
-/**
- * An unset variable and one set to the empty string are the same thing, and the
- * distinction is not one anybody configures on purpose: GitHub Actions
- * substitutes an empty string for a secret that does not exist, and several
- * hosting dashboards will happily save a blank value. Without this, the empty
- * string reaches the schema as a present-but-invalid value and the error talks
- * about the format of something the operator never set.
+ * The parser and its error class now live in `src/lib/env-parse.mts`, and are
+ * re-exported here so that every existing caller still imports them from the
+ * environment contract.
  *
- * Whitespace is trimmed for the same reason — a trailing newline pasted into a
- * secrets UI is invisible in it.
+ * They moved when the first `NEXT_PUBLIC_` variable arrived. `src/lib/env-public.ts`
+ * is importable from a Client Component by design, and it needs `parseEnv` — so
+ * while the parser lived in this file, importing it also imported this file's
+ * `access-code-cipher.mts` dependency, and the bundler put the keyring parser
+ * and every server variable's name into the client bundle. That file says the
+ * rest.
  */
-function normalise(
-  source: Record<string, string | undefined>,
-): Record<string, string | undefined> {
-  const normalised: Record<string, string | undefined> = {};
-
-  for (const [key, value] of Object.entries(source)) {
-    const trimmed = value?.trim();
-    normalised[key] = trimmed === "" ? undefined : trimmed;
-  }
-
-  return normalised;
-}
-
-/**
- * Formats the failure. **This never prints a value**, only variable names and
- * what is wrong with them, and that is a hard requirement rather than tidiness:
- * `DATABASE_URL` carries a password, this message is written to a deploy log,
- * and deploy logs are retained and widely readable. It is the same rule as the
- * migration runner's, which logs the host and database of the connection string
- * and never the string.
- */
-function formatIssues(
-  error: z.ZodError,
-  source: Record<string, string | undefined>,
-): string {
-  const lines = error.issues.map((issue) => {
-    const name = issue.path.join(".");
-    const problem =
-      source[name] === undefined
-        ? "is not set"
-        : `is invalid — it ${issue.message}`;
-
-    return `  ${name} ${problem}`;
-  });
-
-  return lines.join("\n");
-}
-
-/**
- * Validates `source` against `schema`, returning the parsed values or throwing
- * an `EnvironmentError` that names every variable at fault at once. Reporting
- * them all together matters: fixing configuration one restart at a time is the
- * experience this is meant to replace.
- *
- * `hint` replaces the default closing line for callers whose fix is more
- * specific than "fill in `.env.local`".
- */
-export function parseEnv<Schema extends z.ZodType>(
-  schema: Schema,
-  source: Record<string, string | undefined>,
-  hint: string = DEFAULT_HINT,
-): z.infer<Schema> {
-  const normalised = normalise(source);
-  const result = schema.safeParse(normalised);
-
-  if (!result.success) {
-    throw new EnvironmentError(
-      `Invalid environment configuration:\n\n${formatIssues(result.error, normalised)}\n\n${hint}`,
-    );
-  }
-
-  return result.data;
-}
+export { EnvironmentError, parseEnv } from "./env-parse.mts";
