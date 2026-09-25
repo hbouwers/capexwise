@@ -1,3 +1,6 @@
+// `@sentry/nextjs/config`, not `@sentry/nextjs`: the root export of the build
+// plugin is deprecated and stops working in the SDK's v11.
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 
 /**
@@ -43,4 +46,44 @@ const nextConfig: NextConfig = {
   output: isStandaloneBuild ? "standalone" : undefined,
 };
 
-export default nextConfig;
+/**
+ * Sentry's build plugin (ADR-0013). It does three things to the build: injects
+ * the commit as the release so the browser knows it without a second published
+ * variable, wraps the server entry points so `onRequestError` is reachable, and
+ * uploads source maps — so that a minified stack trace is readable.
+ *
+ * **`process.env` here is correct, and is the same exception `drizzle.config.ts`
+ * takes.** CLAUDE.md's rule is that configuration comes from `@/server/env`, and
+ * that module is `server-only` and parses the *server's* environment at boot.
+ * This file is a build-time config read by the Next.js CLI before any of that
+ * exists, and none of these three values is read by the running application.
+ * They are credentials for a build step, which is why they are also absent from
+ * `serverEnvSchema` — the same reasoning that keeps `BACKUP_SOURCE_URL` out of
+ * it.
+ *
+ * **Inert without credentials, which is the state everywhere but production.**
+ * No `SENTRY_AUTH_TOKEN` means no upload and a build that still succeeds. That
+ * is not a convenience: the Dockerfile builds with a genuinely empty
+ * environment on purpose (ADR-0006), and CI builds the image on every pull
+ * request, so a plugin that needed credentials to finish would have broken both.
+ */
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Quiet unless something is wrong, except in CI where the log is the only
+  // way to see what the plugin did.
+  silent: !process.env.CI,
+
+  // Source maps are uploaded to Sentry and then deleted from the output, so a
+  // readable stack trace does not also mean publishing the application's source
+  // to every browser that asks for it. The repository goes public at v0.5, so
+  // the source is not a secret — but the two should be separate decisions, and
+  // shipping maps by accident is not a decision.
+  sourcemaps: { deleteSourcemapsAfterUpload: true },
+
+  // The plugin phones home about build timings by default. Off, in a codebase
+  // whose whole observability decision is about what leaves the process.
+  telemetry: false,
+});

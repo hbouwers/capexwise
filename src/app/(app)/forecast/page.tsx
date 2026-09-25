@@ -22,6 +22,8 @@ import {
   parseForecastYear,
 } from "@/lib/forecast/params";
 import { forecast } from "@/lib/forecast/plan";
+import { track } from "@/server/analytics";
+import { getOrgContext } from "@/server/org-context";
 import { getForecastInputs } from "@/server/queries/forecast";
 
 /**
@@ -118,6 +120,23 @@ export default async function ForecastPage({
       }),
     );
   }
+
+  // The last step of the onboarding funnel (ADR-0013): the thing that justifies
+  // paying has been seen.
+  //
+  // Here rather than at the top of the function, and the position is the
+  // definition. Above this line are two renders that are not a forecast — the
+  // empty state, which means equipment was never added, and the redirect that
+  // tidies a no-op deferral out of the URL. Counting either would report the
+  // final step as reached by people who did not reach it, which is the one
+  // wrong answer this measurement must not give.
+  const { org, user } = await getOrgContext();
+
+  track(
+    "forecast_viewed",
+    { userId: user.id, orgId: org.id, isDemo: org.isDemo },
+    { scope: building ? "building" : "portfolio" },
+  );
 
   const buildingsById = new Map(
     inputs.buildings.map((candidate) => [candidate.id, candidate]),

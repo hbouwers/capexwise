@@ -35,6 +35,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { memberships, organizations } from "@/db/schema";
+import { track } from "@/server/analytics";
 import { env } from "@/server/env";
 
 /**
@@ -161,7 +162,7 @@ async function resolveActiveOrganization(user: {
 
   const name = firstOrganizationName(user);
 
-  return await db().transaction(async (tx) => {
+  const orgId = await db().transaction(async (tx) => {
     const [org] = await tx
       .insert(organizations)
       .values({ name, slug: slugify(name) })
@@ -176,6 +177,18 @@ async function resolveActiveOrganization(user: {
 
     return org.id;
   });
+
+  // The first step of the onboarding funnel (ADR-0013), and this is the only
+  // place in the codebase that can emit it: an account exists exactly when its
+  // org is created, and this branch is reached once per account.
+  //
+  // `isDemo: false` is a fact rather than an assumption. An anonymous visitor
+  // returned at the top of this function, into `joinDemoOrganization()`, so
+  // nothing that reaches here is a demo session — and an org created here is
+  // new, which the demo's never is.
+  track("signed_up", { userId: user.id, orgId, isDemo: false });
+
+  return orgId;
 }
 
 /**

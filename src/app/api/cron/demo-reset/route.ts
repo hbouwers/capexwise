@@ -9,6 +9,9 @@
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 
+import * as Sentry from "@sentry/nextjs";
+
+import { logEvent } from "@/lib/log";
 import { withoutParameters } from "@/lib/query-errors";
 import { resetDemoOrg } from "@/server/demo";
 import { env } from "@/server/env";
@@ -44,17 +47,45 @@ export async function GET(request: Request): Promise<Response> {
 
     // Counts and the org id. No visitor ids: they identify nobody, but a log
     // line is not the place to start deciding which ids are safe to print.
-    console.info(
-      `Demo reset: org ${summary.orgId}, ${summary.buildings} buildings, ` +
-        `${summary.visitorsRemoved} visitors removed.`,
-    );
+    logEvent({
+      log: "demo_reset",
+      orgId: summary.orgId,
+      fields: {
+        buildings: summary.buildings,
+        visitors_removed: summary.visitorsRemoved,
+      },
+    });
 
     return Response.json(summary);
   } catch (error) {
     // Without the parameters: a failed insert's message carries every bound
     // value, and the access codes are among them — sealed, but still not the
     // log's to keep (CLAUDE.md).
-    console.error(withoutParameters(error, "The demo reset").message);
+    const safe = withoutParameters(error, "The demo reset");
+
+    // `null` rather than the demo's id: the reset can fail before it has
+    // resolved one, and ADR-0013 is explicit that "no org" and "somebody
+    // forgot" have to be different lines.
+    logEvent({
+      log: "demo_reset_failed",
+      orgId: null,
+      level: "error",
+      fields: { reason: safe.message },
+    });
+
+    // Reported explicitly, because this one is caught. `onRequestError` covers
+    // what escapes a route handler, and nothing escapes here — a cron that
+    // fails silently every night is exactly the failure ADR-0013 exists to
+    // stop. The sanitised error, never the original: the original is where the
+    // bound parameters are.
+    Sentry.captureException(safe);
+
+    // Awaited, unlike anywhere else. A serverless function is frozen the moment
+    // it responds, and this route runs once a night with nobody watching — so
+    // an event still in the buffer is an event that never arrives, and the
+    // failure it described stays invisible until somebody notices the demo is
+    // stale. Two seconds is affordable here and nowhere on a user's path.
+    await Sentry.flush(2000);
 
     return new Response("The demo reset failed.", { status: 500 });
   }

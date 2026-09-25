@@ -57,3 +57,4 @@ New decisions take the next number and are added here in the same pull request.
 | [0010](0010-backups.md) | Backups — a nightly dump that is also a restore drill | [#35](https://github.com/hbouwers/capexwise/issues/35) |
 | [0011](0011-demo-org.md) | The demo org — anonymous visitors, and a reset that bypasses nothing | [#34](https://github.com/hbouwers/capexwise/issues/34) |
 | [0012](0012-preview-base-branch.md) | Preview branches start from an empty, migrated base | [#85](https://github.com/hbouwers/capexwise/issues/85) |
+| [0013](0013-observability.md) | Observability — errors to Sentry, logs as JSON, a funnel measured on the server | [#36](https://github.com/hbouwers/capexwise/issues/36) |
