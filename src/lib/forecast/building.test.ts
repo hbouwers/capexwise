@@ -32,6 +32,7 @@ function item(
     replacementCostCents: 100_000,
     confidence: "estimated",
     status: "active",
+    plannedYear: null,
     ...overrides,
   };
 }
@@ -61,6 +62,32 @@ describe("buildingFlag", () => {
       kind: "big-ticket",
       item: roof,
       year: 2029,
+    });
+  });
+
+  // #96. A plan says when the money goes out, not how old the thing is.
+  it("still counts an item past life when it is planned for later", () => {
+    expect(buildingFlag([item(25, { plannedYear: 2030 })], THIS_YEAR)).toEqual({
+      kind: "past-life",
+      count: 1,
+    });
+  });
+
+  it("names a big-ticket replacement in its planned year", () => {
+    const roof = item(7, {
+      label: "Roof",
+      expectedLifeYears: 10,
+      replacementCostCents: 1_050_000,
+      plannedYear: 2028,
+    }); // projected 2029
+
+    expect(buildingFlag([roof], THIS_YEAR)).toMatchObject({
+      kind: "big-ticket",
+      year: 2028,
+    });
+    // Planned out past the three years, it is no longer the flag's.
+    expect(buildingFlag([{ ...roof, plannedYear: 2031 }], THIS_YEAR)).toEqual({
+      kind: "healthy",
     });
   });
 
@@ -202,6 +229,21 @@ describe("capexThroughNextYear", () => {
       cents: 700_000,
       items: 3,
       pastLife: 2,
+    });
+  });
+
+  it("takes a plan's year over the projection's (#96)", () => {
+    const items = [
+      // Past life, and planned three years out: not through next year.
+      item(25, { replacementCostCents: 100_000, plannedYear: 2029 }),
+      // Healthy, and planned for next year: through next year.
+      item(5, { replacementCostCents: 200_000, plannedYear: 2027 }),
+    ];
+
+    expect(capexThroughNextYear(items, THIS_YEAR)).toEqual({
+      cents: 200_000,
+      items: 1,
+      pastLife: 0,
     });
   });
 

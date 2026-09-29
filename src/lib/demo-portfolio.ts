@@ -78,6 +78,11 @@ export type DemoItem = {
   unit?: string;
   /** The item this one replaced, kept as history. */
   replaced?: { installYear: number; actualCostCents: Cents | null };
+  /**
+   * Years after this one its next replacement is planned for (#96), so the
+   * forecast has a plan to show beside a projection.
+   */
+  plannedIn?: number;
 };
 
 export type DemoTask = {
@@ -606,11 +611,14 @@ export function demoPortfolio(today: CalendarDate): DemoPortfolio {
             replacementCostCents: 130_000,
             replaced: { installYear: year - 19, actualCostCents: null },
           }),
+          // Two years past its life, and booked for next summer rather than
+          // this winter: the forecast shows the plan beside the projection.
           audited(year, 22, {
             typeSlug: "roof-asphalt",
             label: "Roof, asphalt shingle",
             expectedLifeYears: 20,
             replacementCostCents: 1_050_000,
+            plannedIn: 1,
           }),
           estimated(year, 34, {
             typeSlug: "windows",

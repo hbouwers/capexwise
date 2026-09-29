@@ -14,7 +14,7 @@ import { Money } from "@/components/money";
 import { PageBody, PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { todayIn } from "@/lib/dates";
-import { replacementYear } from "@/lib/forecast/life";
+import { scheduledYear } from "@/lib/forecast/outflow";
 import {
   forecastHref,
   forecastToday,
@@ -34,7 +34,7 @@ import { getForecastInputs } from "@/server/queries/forecast";
  * **Every figure is `forecast()` from `src/lib/forecast/`**, called once, so
  * the chart, the three figures, the year's table and the reserve cannot
  * disagree. A `What if?` deferral in `?defer=` is the same call with the item
- * moved; nothing is saved.
+ * moved, and is saved only as a plan, from the menu (#96).
  */
 export const metadata: Metadata = { title: "CapEx forecast — CapExWise" };
 
@@ -196,11 +196,12 @@ export default async function ForecastPage({
   ];
 
   // `Roof, Sumner St → 2030`: where the deferral put its next replacement,
-  // which may be past the ten years the chart draws.
+  // which may be past the ten years the chart draws. From the planned year
+  // when there is one (#96).
   const itemsById = new Map(items.map((item) => [item.id, item]));
   const deferred = [...deferrals].map(([id, years]) => {
     const item = itemsById.get(id)!;
-    const moved = Math.max(result.thisYear, replacementYear(item)) + years;
+    const moved = Math.max(result.thisYear, scheduledYear(item)) + years;
     return `${names.get(id)} → ${moved}`;
   });
 

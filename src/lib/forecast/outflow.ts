@@ -32,6 +32,12 @@ export type ForecastItem = {
   replacementCostCents: Cents;
   confidence: "estimated" | "audited";
   status: "active" | "replaced" | "removed";
+  /**
+   * The year somebody has chosen for its next replacement (#96), or null to
+   * follow the projection. A plan is a decision, where the projection is
+   * arithmetic, so it wins.
+   */
+  plannedYear: number | null;
 };
 
 /**
@@ -56,17 +62,24 @@ export type Replacement = {
   /**
    * The year its arithmetic gives, before folding and deferral — install year
    * plus life for the first replacement, the previous one's year plus life
-   * after. `year` differs from it for a past-due or a deferred replacement.
+   * after. `year` differs from it for a past-due, a planned or a deferred
+   * replacement.
    */
   naturalYear: number;
+  /**
+   * The year a plan chose for it (#96), on the item's next replacement only.
+   * Null when it follows the projection, and on every recurrence.
+   */
+  plannedYear: number | null;
   /** `0` for the item's next replacement, `1` for the one after, and so on. */
   occurrence: number;
   /** Years it was moved by a deferral; `0` when it was not. */
   deferredBy: number;
   /**
    * The wider window an estimated install year puts it in, as PRD F2 asks —
-   * `estimated · 2027–2030`. `null` for an audited item, and for an estimated
-   * one whose whole window is already past. The bar stays at `year`.
+   * `estimated · 2027–2030`. `null` for an audited item, for an estimated
+   * one whose whole window is already past, and for a planned replacement,
+   * whose year is a decision rather than a guess. The bar stays at `year`.
    */
   range: { from: number; to: number } | null;
   tag: ReplacementTag;
@@ -96,18 +109,33 @@ export function estimateSpreadYears(expectedLifeYears: number): number {
 }
 
 /**
+ * The year an item's next replacement is meant for: **the plan's when there
+ * is one, the projection's when not** (#96). Unfolded, so a year already gone
+ * stays the year it was, for the same reason `replacementYear` keeps it.
+ */
+export function scheduledYear(item: ForecastItem): number {
+  return item.plannedYear ?? replacementYear(item);
+}
+
+/**
  * Every replacement of every active item that lands in the ten years from
  * `thisYear`, in no particular order.
  *
  * - **A replacement already past due lands this year.** Money not yet spent
  *   can only be spent from now on, and folding it here is what makes this
- *   year's replacements the dashboard's End of life tile.
+ *   year's replacements the dashboard's End of life tile, as long as no plan
+ *   has moved one.
  * - **An item recurs.** Once replaced it is new again and is due a life later,
  *   so a five-year smoke detector due this year is due again in five. Counting
  *   it once would understate every year after, and the reserve with them.
  *   Each recurrence is timed from the year the one before it lands, and keeps
  *   the item's confidence, since its year rests on the same install year.
- * - **A deferral moves the next replacement**, and everything after it follows.
+ * - **A plan replaces the projection** for the next replacement (#96), and
+ *   everything after it counts on from the planned year. A plan for a year
+ *   already gone was not carried out, so it folds into this year like any
+ *   other replacement past due.
+ * - **A deferral moves the next replacement**, from the planned year when
+ *   there is one, and everything after it follows.
  *
  * Replaced and removed items are not forecast: their successor is, or nothing
  * is.
@@ -140,22 +168,30 @@ export function replacements(
 
     const deferredBy = deferrals.get(item.id) ?? 0;
     let naturalYear = replacementYear(item);
-    let year = Math.max(thisYear, naturalYear) + deferredBy;
+    let year = Math.max(thisYear, item.plannedYear ?? naturalYear) + deferredBy;
 
     for (let occurrence = 0; year <= lastYear; occurrence++) {
+      const planned = occurrence === 0 ? item.plannedYear : null;
+
       found.push({
         item,
         year,
         naturalYear,
+        plannedYear: planned,
         occurrence,
         deferredBy: occurrence === 0 ? deferredBy : 0,
-        range: estimateRange(
-          item,
-          naturalYear,
-          occurrence === 0 ? deferredBy : 0,
-          thisYear,
-        ),
-        tag: tagFor(item, year, naturalYear, thisYear),
+        range:
+          planned === null
+            ? estimateRange(
+                item,
+                naturalYear,
+                occurrence === 0 ? deferredBy : 0,
+                thisYear,
+              )
+            : null,
+        // Overdue is measured from the year it was meant for: the plan's,
+        // when there is one.
+        tag: tagFor(item, year, planned ?? naturalYear, thisYear),
       });
 
       naturalYear = year + life;
@@ -190,10 +226,10 @@ function estimateRange(
 function tagFor(
   item: ForecastItem,
   year: number,
-  naturalYear: number,
+  meantFor: number,
   thisYear: number,
 ): ReplacementTag {
-  if (year === thisYear) return naturalYear < thisYear ? "overdue" : "due";
+  if (year === thisYear) return meantFor < thisYear ? "overdue" : "due";
   if (item.replacementCostCents >= BIG_TICKET_CENTS) return "big-ticket";
   return "planned";
 }

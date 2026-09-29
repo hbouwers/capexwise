@@ -12,7 +12,8 @@ security has covered it since #28. **So is section 3**: `buildings` and `units` 
 `trade_tags`, `contacts` and `contact_tags`** from section 6, with #106, **and section 4's
 `rent_periods`**, with #108, **and section 5** — the catalogue, capital items and their
 allocations — with #109 — **and section 6's `tasks`**, with #113, **and `transactions` and
-`schedule_e_categories`**, with #142. Everything else from section 6 on is still prose.
+`schedule_e_categories`**, with #142, **and section 5's `planned_work`**, with #96. Everything else
+from section 6 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -825,6 +826,86 @@ traceability rule; "split evenly across 2 units" is the whole disclosure.
 Basis points rather than a decimal share: integers sum exactly, and 10000 gives a hundredth of a
 percent, which is finer than any split a landlord will defend to a CPA.
 
+### Planned work (#96)
+
+`install_year + expected_life_years` is a projection. Nothing stored a year somebody had **chosen**
+for work, or how they meant to classify it, and `transactions.classification` is for money already
+spent. PRD F4's repair-or-improvement decisions and timing levers need both, and so does saving a
+forecast's `What if?`.
+
+```sql
+create type planned_work_status as enum ('planned', 'done', 'dropped');
+
+create table planned_work (
+  id               uuid primary key default uuidv7(),
+  org_id           uuid not null references organizations (id) on delete cascade,
+  building_id      uuid not null,
+  unit_id          uuid,                         -- a project's; an item's plan has none
+  capital_item_id  uuid,                         -- null = a discretionary project
+  title            text,                         -- a project's name
+  est_cost_cents   bigint,                       -- a project's cost
+  planned_year     integer not null,
+  classification   transaction_classification not null default 'unclassified',
+  status           planned_work_status not null default 'planned',
+  transaction_id   uuid,                         -- the expense that carried it out
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+
+  constraint planned_work_building foreign key (org_id, building_id)
+    references buildings (org_id, id) on delete restrict,
+  constraint planned_work_unit foreign key (org_id, building_id, unit_id)
+    references units (org_id, building_id, id) on delete restrict,
+  constraint planned_work_capital_item foreign key (org_id, building_id, capital_item_id)
+    references capital_items (org_id, building_id, id) on delete cascade,
+  constraint planned_work_transaction foreign key (org_id, transaction_id)
+    references transactions (org_id, id) on delete set null (transaction_id),
+
+  constraint planned_work_year_plausible check (planned_year between 2000 and 2200),
+  constraint planned_work_item_or_project check (
+    (capital_item_id is not null and title is null and est_cost_cents is null and unit_id is null)
+    or (capital_item_id is null and title is not null and est_cost_cents is not null)),
+  constraint planned_work_cost_not_negative check (est_cost_cents >= 0),
+  constraint planned_work_transaction_when_done
+    check (status = 'done' or transaction_id is null)
+);
+
+create unique index planned_work_one_live_plan on planned_work (org_id, capital_item_id)
+  where status = 'planned' and capital_item_id is not null;
+```
+
+**A row of its own, not columns on the item**, which was this section's lean until #96 settled it:
+
+- **A discretionary project needs a row.** A bathroom remodel replaces no tracked item, and it is
+  exactly what F4's timing levers move between years.
+- **History comes free.** A plan that is carried out is `done` and one given up on is `dropped`,
+  and both keep their row, so "we planned the roof for 2026 and did it in 2027" stays answerable.
+  Columns would overwrite it. The scoped role has no `delete` on the table.
+- **One live plan per item** is `planned_work_one_live_plan`, which keeps the columns' one
+  advantage.
+
+An item's plan takes its name, cost and scope from the item, so they cannot drift apart from it;
+`planned_work_item_or_project` holds a row to one shape or the other. The classification is
+`transactions`' enum, so it copies onto the expense unchanged.
+
+**In the forecast, a live plan's year replaces the projection for the item's next replacement**,
+and the replacements after it count on from the planned year (`src/lib/forecast/outflow.ts`). A
+plan for a year already gone folds into this year as Overdue, as a past-due projection does. The
+CapEx-through-next-year figure takes the planned year too. The past-life and due-soon flags do not:
+they read the item's age, and a furnace planned for 2029 is past life today.
+
+**What closes a plan.** Recording a replacement marks the old item's plan `done`, and removing an
+item marks it `dropped`. The add-equipment Undo takes a plan with the item (`cascade`), since an
+item added seconds ago has no plan worth keeping. **The classification copies onto an expense when
+the tax planner (#144) records the work**: the expense's classification defaults from the plan, and
+the plan becomes `done` and points at the transaction. After that the ledger row is the record, the
+snapshot rule rent periods follow (§4), and a later change to the plan never rewrites classified
+spend. Nothing writes `transaction_id` until #144; the reference is in place so it does not need a
+migration then.
+
+`transaction_id` names the org and not the building, because an expense can be moved to another
+building after the fact. A deleted expense leaves its plan `done` with nothing pointing at the
+money: the work still happened. `transactions_org_and_id` is the unique key the reference needs.
+
 ---
 
 ## 6. Tasks, contacts, documents, and the rest
@@ -1145,12 +1226,13 @@ references that are informational.** A `set null` that would lose a fact is a `r
 | **Organization** | Two-phase. `deleted_at` is set and access stops immediately; a purge job hard-deletes after **30 days**, cascading through every domain table. ADR-0003 notes that restoring one org is a selective export rather than a database restore, which is exactly why the window exists. Export (#45) should be offered at the point of deletion. The purged rows stay in the nightly backups until those expire, 90 days later ([ADR-0010](adr/0010-backups.md)), so an org is gone from every copy 120 days after it is deleted |
 | **User** | The `users` row survives as long as anything references it — `invitations.inviter_id` is `restrict`, and #42's audit log will be too. Account deletion revokes memberships and clears sessions; it does not erase authorship |
 | **Membership (revoked)** | Hard delete of the row. Nothing is orphaned: a task assigned to the member goes back to unassigned (`set null` of `tasks.assignee_user_id`, #94) and keeps its history. Blocked if it would leave the org with no owner |
-| **Building** | `restrict` from units, capital items, tasks, rent periods, transactions. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
-| **Unit** | `restrict` from rent periods, capital items and their explicit shares, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
-| **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete, and the row that replaced it is held by `restrict` while the old one points at it. The one delete is the add-equipment modal's Undo (#110): the scoped role's `delete` on `capital_items` comes with a restrictive policy, `capital_items_delete_as_added`, that admits only a row still as the checklist left it — `estimated`, `active`, no actual cost. Undo also leaves an item that spend has been recorded against (#142), which the `restrict` above would refuse anyway, so it counts as kept rather than failing. Nothing deletes a share on its own, so there is no grant on `capital_item_allocations`; an item's shares go with it (`cascade`) |
+| **Building** | `restrict` from units, capital items, tasks, rent periods, transactions, planned work. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
+| **Unit** | `restrict` from rent periods, capital items and their explicit shares, tasks, transactions, and planned work. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
+| **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link; `cascade` to its plans (§5), since the only delete is an Undo seconds after the add. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete, and the row that replaced it is held by `restrict` while the old one points at it. The one delete is the add-equipment modal's Undo (#110): the scoped role's `delete` on `capital_items` comes with a restrictive policy, `capital_items_delete_as_added`, that admits only a row still as the checklist left it — `estimated`, `active`, no actual cost. Undo also leaves an item that spend has been recorded against (#142), which the `restrict` above would refuse anyway, so it counts as kept rather than failing. Nothing deletes a share on its own, so there is no grant on `capital_item_allocations`; an item's shares go with it (`cascade`) |
 | **Task** | `status = 'canceled'`, not a delete: a task that will not happen keeps its history, and the task tables leave it out. The one delete is Undo on a completion (#113), which removes the next occurrence the completion wrote — the scoped role's `delete` on `tasks` comes with a restrictive policy, `tasks_delete_as_materialised`, that admits only a row with a `recurrence_parent_id` nobody has touched since it was written. A deleted parent leaves its occurrences in place and unlinked (`set null` of `recurrence_parent_id`) |
 | **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it — `building_utilities_contact` is `restrict`, which enforces that (§3) — and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
 | **Transaction** | Hard delete, from the expense modal: a row entered twice or against the wrong building is a typo, not history. Nothing yet freezes a year; #44's filed years will, with a restrictive policy of their own. `set null` of `task_id` when its task goes (Undo on a completion) and of `contact_id` when its contact does, so an expense is never lost with either; `restrict` from its building, unit and capital item |
+| **Planned work** | Not deleted. A plan given up on is `dropped` and one carried out is `done`, and both keep their row, so the scoped role holds no `delete` on `planned_work`. The one delete is the `cascade` from an item the add-equipment Undo takes back. `set null` of `transaction_id` when its expense goes; `restrict` from its building and unit |
 | **Rent period** | Not deleted. A month opened for a unit that stood empty is marked `vacant` (§4), which records it, where a deleted row would be reopened by the next view — so the scoped role holds no `delete` on `rent_periods` until something needs one. Once money is recorded it is edited, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
 | **Reference data** (`capital_item_types`, `trade_tags`, `schedule_e_categories`) | Not deleted. `restrict` from every referencing row, so an entry in use cannot be removed. Retiring one means keeping the row and hiding it from new choices, which needs a column neither table has; it is added with the first entry that has to go |
@@ -1227,6 +1309,13 @@ create index transactions_org_building_date on transactions (org_id, building_id
 create index transactions_org_date_category on transactions (org_id, occurred_on, schedule_e_category);
 -- The expense `Mark done` wrote for a task, and what the task's delete has to null.
 create index transactions_org_task on transactions (org_id, task_id) where task_id is not null;
+
+-- Planned work (#96). An item's one live plan is §5's `planned_work_one_live_plan`.
+create index planned_work_org_building_year on planned_work (org_id, building_id, planned_year)
+  where status = 'planned';
+-- The plan an expense carried out, which the expense's delete has to null.
+create index planned_work_org_transaction on planned_work (org_id, transaction_id)
+  where transaction_id is not null;
 ```
 
 ### On `(org_id, building_id, unit_id)` versus a partial index

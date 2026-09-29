@@ -147,6 +147,8 @@ export function YearTable({
                         itemId={replacement.item.id}
                         name={`${replacement.item.label}, ${place.buildingName}`}
                         deferrals={deferrals}
+                        year={replacement.year}
+                        plannedYear={replacement.item.plannedYear}
                       />
                     ) : null}
                   </TableCell>
@@ -164,19 +166,36 @@ export function YearTable({
  * `15 yr life · installed 2011 · estimated · 2025–2031`: the item's life and
  * the year it counts from, then what moved it — an estimate's window, a
  * replacement already overdue, a deferral.
+ *
+ * **A plan leads** (#96): `planned for 2029 · projected 2026 · …`, so the
+ * chart shows both the decision and the arithmetic it overrode. The
+ * projection stands in for `due {year}` there, and a planned year has no
+ * estimate window to give.
  */
 export function whyThisYear(replacement: Replacement): string {
-  const { item, occurrence, naturalYear, deferredBy, range, year } =
-    replacement;
+  const {
+    item,
+    occurrence,
+    naturalYear,
+    plannedYear,
+    deferredBy,
+    range,
+    year,
+  } = replacement;
 
   return [
+    plannedYear !== null
+      ? `planned for ${plannedYear} · projected ${naturalYear}`
+      : null,
     `${item.expectedLifeYears} yr life`,
     occurrence === 0
       ? `installed ${item.installYear}`
       : `again after ${naturalYear - item.expectedLifeYears}`,
     item.confidence === "estimated" ? "estimated" : null,
     range ? `${range.from}–${range.to}` : null,
-    naturalYear < year - deferredBy ? `due ${naturalYear}` : null,
+    plannedYear === null && naturalYear < year - deferredBy
+      ? `due ${naturalYear}`
+      : null,
     deferredBy > 0
       ? `deferred ${deferredBy === 1 ? "1 year" : `${deferredBy} years`}`
       : null,
