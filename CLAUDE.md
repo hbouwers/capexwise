@@ -55,8 +55,7 @@ The git repository is the checkout folder; its parent working directory is delib
 **outside git** — scratch files, helper scripts, secrets, and anything not meant to be published.
 On this machine those are still `propex/` inside `propex-working-directory/`, from before the
 rename. Renaming them locally is cosmetic and changes nothing about the remote.
-The repository is private today and flips public at v0.5, so assume anything committed will
-eventually be world-readable.
+The repository is public, since v0.5 (#138) — assume anything committed is world-readable.
 
 | Path | What it holds |
 | --- | --- |
@@ -144,9 +143,9 @@ These are the ones that are expensive or impossible to fix later. Everything els
 - **Branch per issue**, named `type/short-description` — `feat/`, `fix/`, `docs/`, `chore/`,
   `refactor/`. One open PR at a time where practical.
 - **Never push to `main`.** The one exception was the bootstrap commit, which had no base branch
-  to target. Nothing enforces this: GitHub offers no branch protection or rulesets on a private
-  repository outside a paid plan, so it is convention until the repo goes public at v0.5
-  ([CONTRIBUTING.md](CONTRIBUTING.md) lists the ruleset to turn on then).
+  to target. Enforced by the `main` ruleset since v0.5 (#138) — a PR, the four merge-gate checks,
+  up to date, linear history, no force pushes or deletions
+  ([CONTRIBUTING.md](CONTRIBUTING.md) lists what it turns on).
 - **Squash merge only.** Merge commits and rebase merges are disabled at the repository level,
   branches delete on merge, and history stays linear by construction.
 - **Small commits inside one PR**, each standing alone: green build, green tests, and a message
@@ -238,6 +237,7 @@ before each test. It refuses to run against a database whose name does not end i
 | Auth | Better Auth + its `organization` plugin, orgs and memberships in our own Postgres ([ADR-0004](docs/adr/0004-auth-provider.md)). Google OAuth only in v0 — no passwords, no email provider, no domain. Rejected: Auth.js (v5 still beta, no org primitive) and Clerk (would own the tenancy boundary). **Pinned to an exact version, no caret** — the ADR's own mitigation for the youngest dependency in the stack, and the mapping in `src/server/auth.ts` is written against the schema that version reports. **No middleware auth check**: middleware sees a cookie, not a validated session |
 | Name | **CapExWise**, `capexwise.com` registered 2026-09-08 (#3). Repository, board and Vercel project take the same name |
 | Trademark | **Do not register yet** (#3). Rights come from use in commerce, and an Intent-to-Use filing keeps priority available later, so registration waits for the first paying customer, public launch, or real branding spend. "CapExWise" is suggestive-to-descriptive in a category already full of CapEx-named tools, so it is a weak mark and early registration buys little. **Clearance came back clear on 2026-09-08** and no longer blocks #32 or v0.5 — USPTO turned up nothing on the exact string or on confusingly similar marks, and the sweep for unregistered common-law users found none. Use ™ freely; **® is unlawful before registration**. Not legal advice; an attorney gives the real opinion before any money is spent on branding |
+| Repo visibility | **Public now, reconsider at real paid traction.** The repo went public at v0.5 (#138) for the portfolio goal (PRD Goal 2) while the product is pre-revenue, which is low-risk: "All rights reserved" ([Licence](#decided-and-not-up-for-re-litigation) above) makes cloning-and-relaunching infringement, and a solo product's real moat is execution, not read access to a snapshot. But GitHub forks made while a repo is public persist even if the original later goes private, so this is closer to a one-way door than the licence note ("reversible toward permissive") suggests. **Revisit at [Goal 3](docs/PRD.md#9-success-criteria)** — three paying orgs, not personal referrals — the same trigger the trademark decision watches for commercial reality. Options then: take the repo private (existing forks stand), or keep a public copy frozen at an older commit while development continues in a private fork. Not legal advice; get a lawyer's read on the licence and DMCA posture if it gets there |
 | Pricing | **$5 per unit per month, first unit free permanently, no trial and no card to start** (PRD §12, questions 2–3). The free tier *is* the trial: a clock short enough to convert expires long before a tax-year or ten-year instrument pays off, and it would run during manual entry. Gating is by capacity, never by feature — hiding the forecast hides the thing that justifies paying. The free unit is per **account**, not per org. Conversion event is the second rental, not a timer. Left to the billing work: a taper above ~10 units, and an annual plan |
 | Dark mode | **Out of scope through v1** ([tokens](docs/ui/tokens.md) §12). The palette is warm paper: four surfaces within 5% luminance of each other, hierarchy carried by 1px borders rather than shadow, status as dark-on-pale-tint. An inversion is a second design needing its own accessibility pass, not a token swap. Reversal stays cheap because every value is a semantic custom property and no component references a primitive |
 | Typeface | **IBM Plex Sans + IBM Plex Mono**, self-hosted via `next/font`, weights 400/500/600 ([components](docs/ui/components.md) §12). Every number that is a *value* renders in the mono; everything else in the sans. Rejected: the prototype's system stack — Arial and Segoe UI have no Medium, so 45 deliberate 500/600 weights collapse to two on Windows, and their digits are unrelated to the mono's |

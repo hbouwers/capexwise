@@ -1,6 +1,6 @@
 # Contributing
 
-CapExWise is a solo project. This file exists because the repository goes public at v0.5, and
+CapExWise is a solo project. This file exists because the repository went public at v0.5, and
 because a convention that lives only in one person's head is not a convention — it is a habit
 that drifts. `CLAUDE.md` holds the working rules for the code; this holds the rules for the
 history and the pull request.
@@ -68,17 +68,18 @@ delete on merge, and history stays linear by construction.
 
 ## Branch protection
 
-`main` has no enforced protection rule today, and this is a plan limit rather than a decision:
-GitHub does not offer branch protection or rulesets on a **private** repository outside a paid
-plan, and the API returns `403 Upgrade to GitHub Pro or make this repository public` for both.
+`main` is protected by a ruleset (`main`, active) since v0.5 (#138). Before that it had no
+enforced protection rule, and that was a plan limit rather than a decision: GitHub does not offer
+branch protection or rulesets on a **private** repository outside a paid plan, and the API
+returned `403 Upgrade to GitHub Pro or make this repository public` for both.
 
-The decision is to **wait for v0.5 rather than pay for Pro**. The convention has held across
-seventy-odd pull requests without a rule behind it, the repository goes public on a date that is
-already on the release plan, and that same date is what makes CodeQL, secret scanning and push
-protection free too — so paying now buys a few months of enforcement on a single-contributor
-repository and nothing else.
+The decision was to **wait for v0.5 rather than pay for Pro**. The convention held across
+seventy-odd pull requests without a rule behind it, the repository went public on a date that was
+already on the release plan, and that same date made CodeQL, secret scanning and push protection
+free too — so paying earlier would have bought a few months of enforcement on a
+single-contributor repository and nothing else.
 
-At v0.5, then, create one ruleset on `main`:
+The ruleset on `main`:
 
 - Require a pull request before merging
 - Require status checks to pass: **Types, lint and schema**, **Production build**,
@@ -93,11 +94,12 @@ At v0.5, then, create one ruleset on `main`:
 - Require linear history
 - Block force pushes and deletions
 
-Going public also makes free the three things that need GitHub Advanced Security while the
-repository is private. CodeQL code scanning needs nothing done: the workflow is already committed
-and [guards itself on visibility](.github/workflows/codeql.yml). Secret scanning and push
-protection are settings rather than files, and GitHub turns both on by default for public
-repositories — so confirm they are on rather than assuming either way.
+Going public also made free the three things that needed GitHub Advanced Security while the
+repository was private. CodeQL code scanning needed nothing done: the workflow was already
+committed and [guards itself on visibility](.github/workflows/codeql.yml) — it starts reporting to
+the Security tab on the first push to `main` after the flip. Secret scanning and push protection
+are settings rather than files; GitHub turns both on by default for public repositories, and both
+are confirmed on.
 
 ## Dependencies
 
