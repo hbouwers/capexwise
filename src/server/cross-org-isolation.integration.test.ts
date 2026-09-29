@@ -1964,17 +1964,18 @@ describe("the capital item paths", () => {
     });
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
 
-    // The control: A's own items, as the checklist left them, do go — the
-    // shared one's share with it.
+    // The control: A's own items, as the checklist left them, do go — apart
+    // from the shared furnace, which the plumber's bill is recorded against:
+    // spend on an item is a fact about it, as a confirmation is, and stays.
     expect(
       await undoAddCapitalItems(a.building.id, [
         a.sharedItem.id,
         a.unitItem.id,
       ]),
-    ).toEqual({ ok: true, removed: 2 });
+    ).toEqual({ ok: true, removed: 1 });
     const owned = await rowsOwnedBy(a.org.id);
-    expect(owned.capital_items ?? []).toHaveLength(0);
-    expect(owned.capital_item_allocations ?? []).toHaveLength(0);
+    expect(owned.capital_items ?? []).toHaveLength(1);
+    expect(owned.capital_item_allocations ?? []).toHaveLength(1);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });
