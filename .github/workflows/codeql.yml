@@ -1,10 +1,10 @@
-# CodeQL, staged now and switched on by going public.
+# CodeQL, staged before v0.5 and switched on by going public.
 #
 # Code scanning on a private repository needs GitHub Advanced Security, which
-# this account does not have; on a public one it is free. The repository flips
-# public at v0.5, so rather than leave #23's last box unticked until then, the
-# workflow lands now behind a visibility check and starts running by itself on
-# the commit that makes the repository public. Nothing to remember later.
+# this account does not have; on a public one it is free. Rather than leave
+# #23's last box unticked until the repository flipped at v0.5, the workflow
+# landed early behind a visibility check, and started running by itself on the
+# first push to main after the flip (#138).
 #
 # Separate from ci.yml on purpose. That file is the gate — four jobs that all
 # have to be green before a branch merges, and a job that is skipped on every
@@ -53,6 +53,14 @@ jobs:
           languages: javascript-typescript
           # No compilation step to observe — CodeQL reads the source directly.
           build-mode: none
+          # The design prototype is a Claude Design bundle: a picture of the
+          # design, never served, and its bundler runtime is not code anyone
+          # here wrote or runs. Its five findings on the first run after the
+          # flip were all in that runtime. Excluded rather than dismissed, so
+          # they do not come back every time the bundle is re-exported.
+          config: |
+            paths-ignore:
+              - docs/ui/reference
 
       - name: Analyse
         uses: github/codeql-action/analyze@v4
