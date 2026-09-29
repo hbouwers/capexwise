@@ -68,9 +68,33 @@ A `Card` headed `{year} rental income statement`, with `Schedule E · {building}
 | **Operating expenses** | Recorded expenses by Schedule E category ([expenses.md](expenses.md)), excluding the two lines below |
 | **Mortgage interest** | Recorded expenses in that category |
 | **Depreciation, existing basis** | Each building's basis over its recovery period, from its in-service date |
-| **Repairs deducted this year** | This year's planned items classified as repairs, below |
-| **Depreciation on improvements** | This year's share of planned items classified as improvements |
+| **Repairs deducted this year** | This year's planned items classified as repairs, below, and any improvement at or under the de minimis threshold that goes into service this year |
+| **Depreciation on improvements** | This year's share of every capitalized improvement: this year's plans, the ledger's improvements from any year, and equipment whose install cost is known but never reached the ledger |
 | **Taxable rental income** | The sum, under a rule |
+
+The arithmetic is `src/lib/tax/` (#144), and these are its rules:
+
+- **Two recovery periods.** A building and its structural improvements recover over 27.5 years
+  with the mid-month convention. Appliances and carpet recover over 5 years, straight line, with
+  the half-year convention. Each item type carries its period. The module does not model the
+  mid-quarter convention, MACRS's 200% declining balance default for five-year property (straight
+  line is the elected alternative), bonus depreciation or cost segregation.
+- **Improvements from earlier years come from the record.** They are the ledger's expenses classified
+  as improvements, and items with an install cost installed after the building went into service.
+  An item installed before then is part of the building's basis. So is one installed in the same year
+  when there is no install date to tell them apart. Neither is counted twice. Spend recorded in an
+  item's install year, against it or against the item it replaced, is taken to be the install,
+  whatever it was classified as, so the item is not also depreciated. When that spend is less than
+  the item's cost, the item is named beneath the statement rather than counted. A building with no
+  in-service date names its improvements the same way.
+- **Work known only by its year goes into service in July**, and its line says so. A plan's month
+  is optional, and a timing lever sets it.
+- **What is not decided is named, not counted.** Spend recorded as `Unclassified`, and plans for the
+  year with no call made, are left out of every line and listed beneath the statement. They are not
+  taken as repairs or as improvements. The statement shows what has been decided, and says what has
+  not.
+- **The de minimis threshold is per tax year**, $2,500 until it is changed, and can be turned off
+  for a year. It is judged on each item's cost.
 
 **Every line is a disclosure.** Each is a `<button aria-expanded>` that opens the inputs beneath it,
 and this is how PRD F4's traceability is met on the page rather than in a promise:
@@ -126,7 +150,13 @@ The rail's first card. A `FieldLabel` `Estimated {year} liability`, the figure i
 the one use of that step — and beneath it the arithmetic in words:
 `Taxable rental income × 29% blended rate`. The rate is a field on this card, saved per tax year
 ([#44](https://github.com/hbouwers/capexwise/issues/44)), because a figure multiplied by a rate
-nobody can see is not traceable.
+nobody can see is not traceable. **It has no default.** Until it is entered, the card asks for it
+in place of the figure.
+
+**A loss is a liability of zero, not a saving.** Whether a rental loss comes off other income
+depends on the passive activity rules, which PRD F4 defers to v1.1, and on income the product never
+sees. The card says the year is a loss, and `Against doing nothing` counts only the saving down to
+zero.
 
 Then, under a rule:
 
@@ -142,6 +172,10 @@ A `TimingLeverList`: each planned item that could move between tax years, with t
 its effect — `Move the Sumner roof into Dec 2026` / `$18,500 capitalized · depreciation starts a
 year earlier` / `−$195 in 2026`. Each opens its arithmetic like a statement line. It needs the same
 planned-year record as the decisions card.
+
+The moves are across the turn of the year: this year's classified plans into January next year,
+and next year's into December this year. The effect is on this year's liability, biggest saving
+first. An undecided plan has no lever, since it counts for nothing either way.
 
 ### Advisor
 
