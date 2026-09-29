@@ -96,6 +96,27 @@ describe("capital_item_types", () => {
     );
   });
 
+  it("recovers appliances and carpet over five years, and the rest with the building", async () => {
+    // #144, decision 1. A type on the wrong schedule is a wrong deduction
+    // every year of its life, so the list is spelled out rather than counted.
+    const types = await testDb()
+      .select({ slug: capitalItemTypes.slug })
+      .from(capitalItemTypes)
+      .where(eq(capitalItemTypes.recoveryClass, "five_year"))
+      .orderBy(asc(capitalItemTypes.sortOrder));
+
+    expect(types.map((type) => type.slug)).toEqual([
+      "refrigerator",
+      "range",
+      "dishwasher",
+      "microwave-hood",
+      "garbage-disposal",
+      "washer",
+      "dryer",
+      "carpet",
+    ]);
+  });
+
   it("keeps a type anybody has added", async () => {
     // §7: reference data in use is not deleted. Refused, so the catalogue the
     // rest of the suite reads is not touched.

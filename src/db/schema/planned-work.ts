@@ -71,6 +71,10 @@ export const plannedWork = pgTable(
     estCostCents: bigint("est_cost_cents", { mode: "number" }),
 
     plannedYear: integer("planned_year").notNull(),
+    // The month inside the year, when somebody has said (#144). Null is a
+    // plan known only by its year, which the tax planner puts into service in
+    // July and says so. The forecast reads years and ignores it.
+    plannedMonth: integer("planned_month"),
     // `transactions`' enum, so the call copies onto the expense unchanged.
     classification: transactionClassification("classification")
       .notNull()
@@ -142,6 +146,10 @@ export const plannedWork = pgTable(
         OR (${table.capitalItemId} IS NULL
           AND ${table.title} IS NOT NULL
           AND ${table.estCostCents} IS NOT NULL)`,
+    ),
+    check(
+      "planned_work_month_valid",
+      sql`${table.plannedMonth} BETWEEN 1 AND 12`,
     ),
     check("planned_work_cost_not_negative", sql`${table.estCostCents} >= 0`),
     // Only a plan that was carried out points at the expense that did it.

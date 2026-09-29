@@ -14,3 +14,4 @@ export * from "./capital-items";
 export * from "./tasks";
 export * from "./transactions";
 export * from "./planned-work";
+export * from "./tax-years";
