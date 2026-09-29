@@ -25,6 +25,7 @@ import {
   contacts,
   memberships,
   organizations,
+  plannedWork,
   rentPeriods,
   tasks,
   transactions,
@@ -63,7 +64,8 @@ async function rowsIn(
     | typeof capitalItems
     | typeof tasks
     | typeof rentPeriods
-    | typeof transactions,
+    | typeof transactions
+    | typeof plannedWork,
   orgId: string,
 ): Promise<number> {
   const [row] = await testDb()
@@ -83,6 +85,7 @@ async function snapshot(orgId: string) {
     tasks: await rowsIn(tasks, orgId),
     rentPeriods: await rowsIn(rentPeriods, orgId),
     transactions: await rowsIn(transactions, orgId),
+    plannedWork: await rowsIn(plannedWork, orgId),
   };
 }
 
@@ -116,6 +119,7 @@ describe("resetDemoOrg", () => {
       buildings: 5,
       units: 8,
       contacts: 14,
+      plannedWork: 1,
     });
 
     const [org] = await testDb()

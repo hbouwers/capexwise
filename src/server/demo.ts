@@ -31,6 +31,7 @@ import {
   buildings,
   buildingUtilities,
   capitalItems,
+  plannedWork,
   contacts,
   contactTags,
   organizations,
@@ -41,7 +42,7 @@ import {
   users,
 } from "@/db/schema";
 import { sealAccessCode } from "@/lib/access-code-cipher.mts";
-import { type CalendarDate, todayIn } from "@/lib/dates";
+import { type CalendarDate, todayIn, yearOf } from "@/lib/dates";
 import {
   DEMO_TIME_ZONE,
   type DemoBuilding,
@@ -268,7 +269,7 @@ async function writeBuilding(
     })),
   );
 
-  for (const { unit: unitKey, replaced, ...item } of demo.items) {
+  for (const { unit: unitKey, replaced, plannedIn, ...item } of demo.items) {
     const unitId = unit(unitKey);
     const scope = unitId
       ? { unitId, allocation: "building_only" as const }
@@ -298,6 +299,15 @@ async function writeBuilding(
         actualCostCents: replaced.actualCostCents,
         status: "replaced",
         replacedById: current.id,
+      });
+    }
+
+    if (plannedIn !== undefined && current) {
+      await tx.insert(plannedWork).values({
+        orgId,
+        buildingId,
+        capitalItemId: current.id,
+        plannedYear: yearOf(today) + plannedIn,
       });
     }
   }
