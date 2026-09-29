@@ -36,14 +36,16 @@ import {
   organizations,
   rentPeriods,
   tasks,
+  transactions,
   units,
   users,
 } from "@/db/schema";
 import { sealAccessCode } from "@/lib/access-code-cipher.mts";
-import { todayIn } from "@/lib/dates";
+import { type CalendarDate, todayIn } from "@/lib/dates";
 import {
   DEMO_TIME_ZONE,
   type DemoBuilding,
+  demoExpenses,
   demoPortfolio,
 } from "@/lib/demo-portfolio";
 import { keyring } from "@/server/access-codes";
@@ -129,8 +131,11 @@ export async function resetDemoOrg(
 
     const contactIds = await writeContacts(tx, org.id, portfolio.contacts);
 
-    for (const building of portfolio.buildings) {
-      await writeBuilding(tx, org.id, building, contactIds);
+    for (const [index, building] of portfolio.buildings.entries()) {
+      await writeBuilding(tx, org.id, building, contactIds, {
+        today,
+        first: index === 0,
+      });
     }
 
     return {
@@ -189,6 +194,7 @@ async function writeBuilding(
   orgId: string,
   demo: DemoBuilding,
   contactIds: Map<string, string>,
+  { today, first }: { today: CalendarDate; first: boolean },
 ): Promise<void> {
   const [building] = await tx
     .insert(buildings)
@@ -296,15 +302,36 @@ async function writeBuilding(
     }
   }
 
-  await tx.insert(tasks).values(
-    demo.tasks.map(({ unit: unitKey, contact: contactKey, ...task }) => ({
-      orgId,
-      buildingId,
-      ...task,
-      unitId: unit(unitKey),
-      assigneeContactId: contact(contactKey),
-    })),
-  );
+  const taskRows = await tx
+    .insert(tasks)
+    .values(
+      demo.tasks.map(({ unit: unitKey, contact: contactKey, ...task }) => ({
+        orgId,
+        buildingId,
+        ...task,
+        unitId: unit(unitKey),
+        assigneeContactId: contact(contactKey),
+      })),
+    )
+    .returning({ id: tasks.id });
+
+  const expenses = demoExpenses(today, demo, first);
+  if (expenses.length > 0) {
+    await tx.insert(transactions).values(
+      expenses.map((expense) => ({
+        orgId,
+        buildingId,
+        unitId: unit(expense.unit),
+        contactId: contact(expense.contact),
+        taskId: expense.task === undefined ? null : taskRows[expense.task]!.id,
+        occurredOn: expense.occurredOn,
+        amountCents: expense.amountCents,
+        description: expense.description,
+        scheduleECategory: expense.category,
+        classification: expense.classification,
+      })),
+    );
+  }
 
   await tx.insert(rentPeriods).values(
     demo.rent.map(({ unit: unitKey, ...period }) => ({

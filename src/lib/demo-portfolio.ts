@@ -31,8 +31,10 @@ import {
   addMonths,
   type CalendarDate,
   firstOfMonth,
+  formatDate,
   yearOf,
 } from "@/lib/dates";
+import { categoryForTrade, REPAIRS } from "@/lib/expenses";
 import type { Cents } from "@/lib/money";
 
 /** Every demo building's zone — the demo city is Indianapolis (CLAUDE.md). */
@@ -1140,4 +1142,106 @@ export function demoPortfolio(today: CalendarDate): DemoPortfolio {
       },
     ],
   };
+}
+
+/**
+ * One expense, as the demo writes it: signed, like the column (§6), and
+ * pointing at its building's task by index and at its unit and contact by
+ * key.
+ */
+export type DemoExpense = {
+  occurredOn: CalendarDate;
+  amountCents: Cents;
+  description: string;
+  category: string;
+  classification: "unclassified" | null;
+  unit?: string;
+  contact?: string;
+  /** The index into the building's `tasks` of the job it paid for. */
+  task?: number;
+};
+
+/** The day of the month the demo's utility bills are paid on. */
+const BILL_DAY = 15;
+
+/**
+ * A building's expenses (#142), **derived from what the content already
+ * says** rather than written out beside it, so the ledger cannot disagree
+ * with the tasks and the utilities it would otherwise repeat:
+ *
+ * - **Every finished job is its bill**, on the day it was done, filed by its
+ *   trade (`categoryForTrade`) and linked to the task, its unit and its
+ *   contact — which is what `Mark done` writes for a real one.
+ * - **Every owner-paid utility with an average is a bill a month**, on the
+ *   15th of each of the rent roll's months that has reached it, so the
+ *   Cash flow tile and the expenses page cover the same months as the rent.
+ * - **The first building's first finished job had a part returned**, three
+ *   days later: one refund, so the ledger shows the sign going both ways.
+ */
+export function demoExpenses(
+  today: CalendarDate,
+  building: DemoBuilding,
+  first: boolean,
+): DemoExpense[] {
+  const expenses: DemoExpense[] = [];
+
+  building.tasks.forEach((task, index) => {
+    if (task.status !== "done" || !task.completedOn || !task.actualCostCents) {
+      return;
+    }
+
+    const category = categoryForTrade(task.tradeTag);
+    expenses.push({
+      occurredOn: task.completedOn,
+      amountCents: -task.actualCostCents,
+      description: task.title,
+      category,
+      classification: category === REPAIRS ? "unclassified" : null,
+      unit: task.unit,
+      contact: task.contact,
+      task: index,
+    });
+  });
+
+  if (first && expenses[0]) {
+    const job = expenses[0];
+    const returnedOn = addDays(job.occurredOn, 3);
+
+    if (returnedOn <= today) {
+      expenses.push({
+        occurredOn: returnedOn,
+        amountCents: Math.round(-job.amountCents / 10),
+        description: "Returned an unused part",
+        category: "supplies",
+        classification: null,
+        unit: job.unit,
+      });
+    }
+  }
+
+  const current = firstOfMonth(today);
+  for (const utility of building.utilities) {
+    if (utility.paidBy !== "owner" || utility.avgMonthlyCents === null) {
+      continue;
+    }
+
+    for (let back = DEMO_RENT_MONTHS - 1; back >= 0; back--) {
+      const occurredOn = addDays(addMonths(current, -back), BILL_DAY - 1);
+      if (occurredOn > today) continue;
+
+      expenses.push({
+        occurredOn,
+        amountCents: -utility.avgMonthlyCents,
+        description: `${utility.providerName}, ${formatDate(occurredOn, "month")}`,
+        category:
+          utility.kind === "lawn" || utility.kind === "snow"
+            ? "cleaning"
+            : "utilities",
+        classification: null,
+        contact: utility.contact,
+      });
+    }
+  }
+
+  return expenses;
 }
