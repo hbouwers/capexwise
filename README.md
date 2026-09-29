@@ -2,10 +2,29 @@
 
 Capital planning for small residential landlords.
 
-> **Status: early scaffold.** The product requirements, the design reference and the work
-> breakdown exist, and the application builds — but it does nothing yet: no database, no auth,
-> no features. See [the project board](https://github.com/users/hbouwers/projects/3) for what is
-> in flight.
+**[Try the demo at capexwise.com](https://capexwise.com)** — `Explore the demo` on the sign-in
+page. No account and no Google sign-in: you land in a seeded Indianapolis portfolio of five
+buildings and eight doors, and you can change anything in it. It is reset every night.
+
+> **Status: v0 is built; v1 is not.** Buildings and units, the rent roll, the capital item
+> inventory, the ten-year CapEx forecast and reserve projection, maintenance tasks, the contact
+> book, building facts with sealed access codes, and the portfolio dashboard all work, in
+> production, under Google sign-in and multi-org tenancy. The tax planner, billing and the
+> onboarding flow are v1 and are not written yet; the Tax page is a placeholder. See
+> [the project board](https://github.com/users/hbouwers/projects/3) for what is in flight.
+
+### If you have ninety seconds
+
+1. **The demo.** Open **Forecast**, pick a year, and use `What if?` on one of its replacements to
+   defer it: the chart, the figures and the reserve projection all move with it.
+2. **[`src/server/org-context.ts`](src/server/org-context.ts)** — the one door to the database.
+   Every read and write goes through a handle scoped to the session's org, and
+   [`eslint.config.mjs`](eslint.config.mjs) makes importing anything else an error.
+3. **[`src/server/cross-org-isolation.integration.test.ts`](src/server/cross-org-isolation.integration.test.ts)**
+   — two orgs, every table, and a test that fails until a new table is named in it.
+4. **[`src/lib/forecast/`](src/lib/forecast/)** — the forecast as pure functions over integer
+   cents, with the tests beside them.
+5. **[`docs/adr/`](docs/adr/)** — thirteen decisions, each with what was rejected and why.
 
 ---
 
@@ -103,11 +122,51 @@ a cookie, not a validated session, so a redirect there is tidiness rather than a
 
 **Money is stored as integer cents.** Dates, identifiers and the estimated-versus-audited
 confidence model follow the conventions in
-[ADR-0005](https://github.com/hbouwers/capexwise/issues/8).
+[ADR-0005](docs/adr/0005-identifiers-money-dates.md). One `Money` type, one formatter.
 
-**The tax surface is the highest-risk code in the product.** Wrong numbers on a tax page are
-worse than no tax page, so every figure has to be traceable to its inputs, and the disclaimer —
-a planning aid, not tax advice — is a requirement rather than a nicety.
+**The forecast is pure functions, and its rules are written down.** `src/lib/forecast/` takes a
+building's capital items and returns ten years of replacements, the reserve projection and the
+monthly contribution that keeps it from running short. No database and no React, and today's date
+is a parameter, so a test can pin it; that is what lets it carry the real unit tests. The rules
+that are judgement calls rather than arithmetic are stated with their reasons in
+[`capex-forecast.md`](docs/ui/screens/capex-forecast.md#ten-year-capital-plan). A replacement is
+paid in January of its year and a deposit CapExWise cannot see is not counted, so the reserve is
+never overstated. An item comes due again a life after it lands, so a short-lived one is not
+counted once and forgotten. And an item whose install year is a guess keeps an `ESTIMATED` badge
+and a range until someone audits it.
+
+**The demo org is a row, and its reset bypasses nothing**
+([ADR-0011](docs/adr/0011-demo-org.md)). `Explore the demo` makes an anonymous account per visit,
+a member of the demo org and of nothing else, so the visitor writes through the same scoped path
+and the same row-level security as a customer. The nightly reset at `/api/cron/demo-reset` deletes
+the org on the identity path, lets the cascade empty it, and writes the content back as the scoped
+role in one transaction. There is no maintenance role that skips the policies.
+
+**Access codes are sealed in the application** with AES-256-GCM, bound to the org they belong to
+([ADR-0008](docs/adr/0008-access-code-encryption.md)). Not `pgcrypto`: that would make the code a
+bound parameter, and a failed query's error prints its parameters. They are masked by default and
+revealed one at a time, and the log records that a reveal happened, never the value.
+
+**Migrations are forward-only and run in CI, never in the build**
+([ADR-0006](docs/adr/0006-migrations.md)). Every migration is compatible with the release already
+running — expand, migrate, contract, across pull requests — so the overlap between the migrate job
+and Vercel's deploy does not matter, and an instant rollback stays safe. Backups are a nightly
+dump that is restored and compared before it is kept ([ADR-0010](docs/adr/0010-backups.md)), and
+every preview gets its own database branch with none of production's rows in it
+([ADR-0012](docs/adr/0012-preview-base-branch.md)).
+
+**The application reports on itself without watching its users**
+([ADR-0013](docs/adr/0013-observability.md)). Errors go to Sentry with the request stripped off
+them; logs are one JSON line per event, and the logger takes the org as a required argument and
+scrubs values on the way out; `/api/health` answers the uptime check. The onboarding funnel is
+four events emitted from the server. There is no analytics script in the browser, so no cookie and
+no consent banner — autocapture on this product would record tenant names and street addresses.
+
+**The tax surface is the highest-risk code in the product, and it is not written yet.** Wrong
+numbers on a tax page are worse than no tax page, so every figure has to be traceable to its
+inputs, and the disclaimer — a planning aid, not tax advice — is a requirement rather than a
+nicety. The groundwork is already in the schema: land and building basis are split on
+`buildings`, because depreciation applies to the building portion only.
 
 ## Documentation
 
@@ -129,8 +188,8 @@ The repository is the source of truth.
 
 | | Contents | Done when |
 | --- | --- | --- |
-| **v0** | Portfolio dashboard, buildings and units, capital items, CapEx forecast, maintenance, contacts, auth and orgs | Two real duplexes and four units are fully entered, rent is tracked monthly, and the forecast is trusted enough to act on |
-| **v0.5** | Seeded demo org, public URL, public repository | A visitor can understand the product in ninety seconds |
+| **v0** — built | Portfolio dashboard, buildings and units, capital items, CapEx forecast, maintenance, contacts, auth and orgs | Two real duplexes and four units are fully entered, rent is tracked monthly, and the forecast is trusted enough to act on |
+| **v0.5** — in progress | Seeded demo org, public URL, public repository, this README | A visitor can understand the product in ninety seconds |
 | **v1** | Tax planner, Stripe billing, onboarding | The first outside org completes setup unassisted |
 | **v2** | Quote requests, AI advisor | — |
 
