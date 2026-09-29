@@ -12,7 +12,7 @@ import { makeSignature } from "better-auth/crypto";
 import { asc, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
-import { buildings, tasks } from "@/db/schema";
+import { buildings, tasks, transactions } from "@/db/schema";
 import { addMonthsKeepingDay, todayIn } from "@/lib/dates";
 import { emptyTaskFields, ME, MEMBER, type TaskFields } from "@/lib/task-form";
 import { nextOccurrence } from "@/lib/tasks";
@@ -191,6 +191,7 @@ describe("completeTask", () => {
       ok: true,
       previousActualCostCents: null,
       next: null,
+      expense: null,
     });
     expect(await tasksOf(building.id)).toMatchObject([
       { status: "done", completedOn: today, actualCostCents: 42_500 },
@@ -742,6 +743,98 @@ describe("completeTask, from Mark done", () => {
       errors: { completedOn: "Enter today’s date or an earlier one." },
     });
     expect(await tasksOf(building.id)).toMatchObject([{ status: "scheduled" }]);
+  });
+});
+
+describe("completeTask, recording an expense", () => {
+  async function expensesOf(taskId: string) {
+    return await testDb()
+      .select()
+      .from(transactions)
+      .where(eq(transactions.taskId, taskId));
+  }
+
+  it("writes the job's bill, linked, filed by its trade, when asked", async () => {
+    const { org, building, a, plumber } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      unitId: a.id,
+      tradeTag: "plumber",
+      assigneeContactId: plumber.id,
+      recurrenceMonths: null,
+    });
+
+    const result = await completeTask(task.id, {
+      completedOn: "2026-06-20",
+      cost: "182.50",
+      recordExpense: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      expense: { amountCents: -18_250 },
+    });
+    expect(await expensesOf(task.id)).toMatchObject([
+      {
+        orgId: org.id,
+        buildingId: building.id,
+        unitId: a.id,
+        contactId: plumber.id,
+        occurredOn: "2026-06-20",
+        amountCents: -18_250,
+        description: "Clean the gutters",
+        scheduleECategory: "repairs",
+        classification: "unclassified",
+      },
+    ]);
+  });
+
+  it("writes none unticked, for no cost, or from the one-click checkbox", async () => {
+    const { org, building } = await duplex();
+    const unticked = await createTask(org.id, building.id);
+    const free = await createTask(org.id, building.id);
+    const oneClick = await createTask(org.id, building.id);
+
+    await completeTask(unticked.id, { completedOn: "2026-06-20", cost: "180" });
+    await completeTask(free.id, {
+      completedOn: "2026-06-20",
+      cost: "",
+      recordExpense: true,
+    });
+    await completeTask(oneClick.id);
+
+    expect(await testDb().select().from(transactions)).toEqual([]);
+  });
+
+  it("takes the expense back on Undo, and refuses the Undo once it was edited", async () => {
+    const { org, building } = await duplex();
+    const task = await createTask(org.id, building.id, {
+      recurrenceMonths: null,
+    });
+    const completion = {
+      completedOn: "2026-06-20",
+      cost: "180",
+      recordExpense: true,
+    };
+
+    const first = await completeTask(task.id, completion);
+    if (!first.ok || !first.expense) throw new Error("No expense written.");
+    expect(await undoCompleteTask(task.id, null, first.expense.id)).toEqual({
+      ok: true,
+    });
+    expect(await expensesOf(task.id)).toEqual([]);
+
+    const second = await completeTask(task.id, completion);
+    if (!second.ok || !second.expense) throw new Error("No expense written.");
+    await testDb()
+      .update(transactions)
+      .set({ description: "Gutters, and a downspout" })
+      .where(eq(transactions.id, second.expense.id));
+
+    expect(await undoCompleteTask(task.id, null, second.expense.id)).toEqual({
+      ok: false,
+    });
+    expect(await tasksOf(building.id)).toMatchObject([{ status: "done" }]);
+    expect(await expensesOf(task.id)).toHaveLength(1);
   });
 });
 

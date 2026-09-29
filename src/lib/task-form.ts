@@ -497,25 +497,40 @@ export function emptyTaskFields(buildingId: string | null): TaskFields {
   };
 }
 
-/** `Mark done`'s short form, as typed. */
-export type CompletionFields = { completedOn: string; cost: string };
+/**
+ * `Mark done`'s short form, as typed. `recordExpense` is its `Record as an
+ * expense` box (#142); absent is unticked.
+ */
+export type CompletionFields = {
+  completedOn: string;
+  cost: string;
+  recordExpense?: boolean;
+};
 
 export type ValidatedCompletion =
   | {
       ok: true;
-      values: { completedOn: CalendarDate; actualCostCents: Cents | null };
+      values: {
+        completedOn: CalendarDate;
+        actualCostCents: Cents | null;
+        /** Ticked, and a cost above zero to record. */
+        recordExpense: boolean;
+      };
     }
   | { ok: false; errors: FieldErrors };
 
 const completionShape = z.object({
   completedOn: z.string().max(100),
   cost: z.string().max(500),
+  recordExpense: z.boolean().optional(),
 });
 
 /**
  * `Mark done` (`modal-task-detail.md`, footer): the day it was done — today by
  * default, and no later — and what it cost, the estimate by default. An empty
- * cost records none, rather than zero.
+ * cost records none, rather than zero. **An expense is recorded only for a
+ * cost above zero**, whatever the box says: no cost, or a free job, is no
+ * money out.
  */
 export function validateCompletion(
   input: unknown,
@@ -542,6 +557,10 @@ export function validateCompletion(
     values: {
       completedOn: done.date,
       actualCostCents: cost.state === "ok" ? cost.cents : null,
+      recordExpense:
+        parsed.data.recordExpense === true &&
+        cost.state === "ok" &&
+        cost.cents > 0,
     },
   };
 }

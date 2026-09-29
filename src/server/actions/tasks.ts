@@ -26,9 +26,11 @@ import {
   contacts,
   tasks,
   tradeTags,
+  transactions,
   units,
 } from "@/db/schema";
 import { type CalendarDate, isCalendarDate, todayIn } from "@/lib/dates";
+import { asksClassification, categoryForTrade } from "@/lib/expenses";
 import { type FieldErrors } from "@/lib/forms";
 import type { Cents } from "@/lib/money";
 import {
@@ -56,6 +58,8 @@ export type CompleteTaskResult =
       ok: true;
       previousActualCostCents: Cents | null;
       next: { id: string; dueDate: CalendarDate } | null;
+      /** The expense `Record as an expense` wrote, which Undo takes back. */
+      expense: { id: string; amountCents: Cents } | null;
     }
   | { ok: false; errors?: FieldErrors };
 
@@ -201,6 +205,13 @@ async function lockTask(tx: OrgScopedTx, orgId: string, taskId: string) {
  * where empty records none — and a form it cannot accept answers with the
  * message per field. The next occurrence is counted from that day.
  *
+ * **With `Record as an expense` ticked, it writes the job's expense** (#142,
+ * `expenses.md`), in the same transaction: money out on the day it was done,
+ * for what it cost, on the task's building and scope, linked to the task, its
+ * equipment and its vendor, and filed by its trade (`categoryForTrade`). The
+ * one-click checkbox never does — a cost it takes from the estimate is not a
+ * receipt anybody has looked at.
+ *
  * Only an open task. A second click, or one on a task somebody finished
  * meanwhile, is refused rather than repeated, so its Undo cannot reopen
  * somebody else's completion.
@@ -224,10 +235,11 @@ export async function completeTask(
 
       let completedOn = today;
       let actualCostCents = task.actualCostCents ?? task.estCostCents;
+      let recordExpense = false;
       if (completion !== undefined) {
         const checked = validateCompletion(completion, today);
         if (!checked.ok) return { ok: false, errors: checked.errors };
-        ({ completedOn, actualCostCents } = checked.values);
+        ({ completedOn, actualCostCents, recordExpense } = checked.values);
       }
 
       await tx
@@ -235,11 +247,39 @@ export async function completeTask(
         .set({ status: "done", completedOn, actualCostCents })
         .where(and(eq(tasks.orgId, db.orgId), eq(tasks.id, task.id)));
 
+      let expense: { id: string; amountCents: Cents } | null = null;
+      if (recordExpense && actualCostCents !== null && actualCostCents > 0) {
+        const category = categoryForTrade(task.tradeTag);
+        const amountCents = -actualCostCents;
+        const [row] = await tx
+          .insert(transactions)
+          .values({
+            orgId: db.orgId,
+            buildingId: task.buildingId,
+            unitId: task.unitId,
+            capitalItemId: task.capitalItemId,
+            taskId: task.id,
+            contactId: task.assigneeContactId,
+            occurredOn: completedOn,
+            amountCents,
+            description: task.title,
+            scheduleECategory: category,
+            classification: asksClassification(category, task.capitalItemId)
+              ? "unclassified"
+              : null,
+          })
+          .returning({ id: transactions.id });
+
+        if (!row) throw new Error("Inserting an expense returned no row.");
+        expense = { id: row.id, amountCents };
+      }
+
       if (task.recurrenceMonths === null) {
         return {
           ok: true,
           previousActualCostCents: task.actualCostCents,
           next: null,
+          expense,
         };
       }
 
@@ -276,6 +316,7 @@ export async function completeTask(
         ok: true,
         previousActualCostCents: task.actualCostCents,
         next: { id: next.id, dueDate },
+        expense,
       };
     });
   } catch (error) {
@@ -303,16 +344,25 @@ const previousCostSchema = z
  *
  * `previousActualCostCents` is what `completeTask` answered: the cost field as
  * it was, which the completion may have filled from the estimate.
+ *
+ * `expenseId` is the expense it wrote, if it wrote one, and **Undo takes that
+ * back too, on the same terms**: untouched since, or the Undo is refused
+ * whole. An expense somebody has since edited is a record in its own right.
+ * One already deleted from the expenses page is simply gone.
  */
 export async function undoCompleteTask(
   taskId: unknown,
   previousActualCostCents: unknown,
+  expenseId: unknown = null,
 ): Promise<TaskWriteResult> {
   const { db } = await getOrgContext();
 
   const id = idSchema.safeParse(taskId);
   const previous = previousCostSchema.safeParse(previousActualCostCents);
-  if (!id.success || !previous.success) return { ok: false };
+  const expense = idSchema.nullable().safeParse(expenseId);
+  if (!id.success || !previous.success || !expense.success) {
+    return { ok: false };
+  }
 
   try {
     return await db.run(async (tx): Promise<TaskWriteResult> => {
@@ -341,6 +391,44 @@ export async function undoCompleteTask(
         )
       ) {
         return { ok: false };
+      }
+
+      const written =
+        expense.data === null
+          ? []
+          : await tx
+              .select({
+                id: transactions.id,
+                createdAt: transactions.createdAt,
+                updatedAt: transactions.updatedAt,
+              })
+              .from(transactions)
+              .where(
+                and(
+                  eq(transactions.orgId, db.orgId),
+                  eq(transactions.id, expense.data),
+                  eq(transactions.taskId, task.id),
+                ),
+              )
+              .for("update");
+
+      if (
+        written.some(
+          (row) => row.updatedAt.getTime() !== row.createdAt.getTime(),
+        )
+      ) {
+        return { ok: false };
+      }
+
+      if (written[0]) {
+        await tx
+          .delete(transactions)
+          .where(
+            and(
+              eq(transactions.orgId, db.orgId),
+              eq(transactions.id, written[0].id),
+            ),
+          );
       }
 
       if (children.length > 0) {
