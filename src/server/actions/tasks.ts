@@ -399,6 +399,7 @@ export async function undoCompleteTask(
           : await tx
               .select({
                 id: transactions.id,
+                taskId: transactions.taskId,
                 createdAt: transactions.createdAt,
                 updatedAt: transactions.updatedAt,
               })
@@ -407,14 +408,17 @@ export async function undoCompleteTask(
                 and(
                   eq(transactions.orgId, db.orgId),
                   eq(transactions.id, expense.data),
-                  eq(transactions.taskId, task.id),
                 ),
               )
               .for("update");
 
+      // Found by its id rather than by its task, so one moved to another
+      // building since — which unlinks it — is found, and refused as edited.
       if (
         written.some(
-          (row) => row.updatedAt.getTime() !== row.createdAt.getTime(),
+          (row) =>
+            row.taskId !== task.id ||
+            row.updatedAt.getTime() !== row.createdAt.getTime(),
         )
       ) {
         return { ok: false };

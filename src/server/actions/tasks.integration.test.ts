@@ -835,6 +835,18 @@ describe("completeTask, recording an expense", () => {
     });
     expect(await tasksOf(building.id)).toMatchObject([{ status: "done" }]);
     expect(await expensesOf(task.id)).toHaveLength(1);
+
+    // Moved to another building, which unlinks it from the task, is edited
+    // too — and found by its id, so the Undo is still refused.
+    const other = await createBuilding(org.id);
+    await testDb()
+      .update(transactions)
+      .set({ buildingId: other.id, taskId: null })
+      .where(eq(transactions.id, second.expense.id));
+    expect(await undoCompleteTask(task.id, null, second.expense.id)).toEqual({
+      ok: false,
+    });
+    expect(await tasksOf(building.id)).toMatchObject([{ status: "done" }]);
   });
 });
 

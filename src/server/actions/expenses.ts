@@ -277,12 +277,14 @@ export async function updateExpense(
             : null,
       };
 
-      const refuse = await refusal(
-        tx,
-        db.orgId,
-        values,
-        values.buildingId === existing.buildingId ? existing : NOTHING_KEPT,
-      );
+      // A unit and an item are the building's, and are kept only on it; a
+      // contact is the org's, and is kept wherever the expense goes.
+      const sameBuilding = values.buildingId === existing.buildingId;
+      const refuse = await refusal(tx, db.orgId, values, {
+        unitId: sameBuilding ? existing.unitId : null,
+        capitalItemId: sameBuilding ? existing.capitalItemId : null,
+        contactId: existing.contactId,
+      });
       if (refuse) return refuse;
 
       await tx

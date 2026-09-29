@@ -60,7 +60,8 @@ process.env.ACCESS_CODE_KEYS = "1:aW50ZWdyYXRpb24tc3VpdGUtbm90LWEtcmVhbC1rZXk";
 const { getAuth } = await import("@/server/auth");
 const { createExpense, deleteExpense, updateExpense } =
   await import("@/server/actions/expenses");
-const { getExpensesPage } = await import("@/server/queries/expenses");
+const { getExpensesPage, getPortfolioSpend } =
+  await import("@/server/queries/expenses");
 
 const ZONE = "America/Indiana/Indianapolis";
 
@@ -245,6 +246,26 @@ describe("updateExpense", () => {
     });
   });
 
+  it("keeps an archived contact when it moves to another building", async () => {
+    const { org, building } = await signedInOrg();
+    const other = await createBuilding(org.id);
+    const contact = await createContact(org.id, { archivedAt: new Date() });
+    const expense = await createTransaction(org.id, building.id, {
+      contactId: contact.id,
+    });
+
+    expect(
+      await updateExpense(
+        expense.id,
+        receipt(other.id, { contact: contact.id }),
+      ),
+    ).toMatchObject({ ok: true });
+    expect(await stored(expense.id)).toMatchObject({
+      buildingId: other.id,
+      contactId: contact.id,
+    });
+  });
+
   it("refuses an expense on a building archived since", async () => {
     const { org } = await signedInOrg();
     const archived = await createBuilding(org.id, { status: "archived" });
@@ -301,6 +322,33 @@ describe("the table", () => {
     await expect(
       testDb().delete(capitalItems).where(eq(capitalItems.id, item.id)),
     ).rejects.toSatisfy(rejectsWith(RESTRICT_VIOLATION));
+  });
+});
+
+describe("getPortfolioSpend", () => {
+  it("nets this month's and this year's spend per building, and nothing earlier", async () => {
+    const { org, building } = await signedInOrg();
+    const month = firstOfMonth(todayIn(ZONE));
+    const january = `${month.slice(0, 4)}-01-01`;
+
+    await createTransaction(org.id, building.id, { occurredOn: month });
+    await createTransaction(org.id, building.id, {
+      occurredOn: month,
+      amountCents: 4_000,
+    });
+    if (january !== month) {
+      await createTransaction(org.id, building.id, { occurredOn: january });
+    }
+    await createTransaction(org.id, building.id, {
+      occurredOn: addDays(january, -1),
+    });
+
+    const spend = await getPortfolioSpend();
+
+    expect(spend.get(building.id)).toEqual({
+      monthCents: 14_000,
+      yearCents: january === month ? 14_000 : 32_000,
+    });
   });
 });
 
