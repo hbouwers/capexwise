@@ -82,9 +82,11 @@ The arithmetic is `src/lib/tax/` (#144), and these are its rules:
 - **Improvements from earlier years come from the record.** They are the ledger's expenses classified
   as improvements, and items with an install cost installed after the building went into service.
   An item installed before then is part of the building's basis. So is one installed in the same year
-  when there is no install date to tell them apart. Neither is counted twice. Spend recorded against
-  an item in its install year is taken to be the install, whatever it was classified as, so the item
-  is not also depreciated.
+  when there is no install date to tell them apart. Neither is counted twice. Spend recorded in an
+  item's install year, against it or against the item it replaced, is taken to be the install,
+  whatever it was classified as, so the item is not also depreciated. When that spend is less than
+  the item's cost, the item is named beneath the statement rather than counted. A building with no
+  in-service date names its improvements the same way.
 - **Work known only by its year goes into service in July**, and its line says so. A plan's month
   is optional, and a timing lever sets it.
 - **What is not decided is named, not counted.** Spend recorded as `Unclassified`, and plans for the

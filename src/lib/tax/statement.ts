@@ -83,6 +83,12 @@ export type TaxItem = {
   /** Only when audited. */
   installDate: CalendarDate | null;
   actualCostCents: Cents | null;
+  /**
+   * The item this one replaced (its `replaced_by_id` points here). A
+   * replacement's bill is often recorded against the old item before the
+   * replacement is, and is still the install of this one.
+   */
+  replacesId: string | null;
   recovery: RecoveryClass;
 };
 
@@ -206,10 +212,17 @@ export type Statement = {
     /** Recorded this year as `unclassified`. */
     unclassifiedExpenses: TaxExpense[];
     /**
-     * Installed with a known cost on a building with no in-service date, so
-     * whether it is part of the building's basis cannot be told.
+     * Improvements on a building with no in-service date, so whether each is
+     * part of the building's basis, or when it started, cannot be told.
      */
     undatedItems: TaxItem[];
+    undatedExpenses: TaxExpense[];
+    /**
+     * Installed with a known cost, with less than that recorded against it
+     * in its install year. Some of the install is on the ledger and some may
+     * not be, and which is not something the statement can guess.
+     */
+    partlyRecordedItems: TaxItem[];
   };
 };
 
@@ -266,6 +279,8 @@ export function statement(input: StatementInput): Statement {
       unclassifiedPlans: [],
       unclassifiedExpenses: [],
       undatedItems: [],
+      undatedExpenses: [],
+      partlyRecordedItems: [],
     },
   };
 
@@ -355,8 +370,10 @@ export function statement(input: StatementInput): Statement {
   // The ledger. An improvement recovers in every year after it, so every
   // year's is read; everything else counts only in the year it was spent.
   const categories = new Map<string, CategoryTotal>();
-  /** Item id → the years spend was recorded against it. */
-  const spentOn = new Map<string, Set<number>>();
+  /** Item id → year → money out recorded against it, net of refunds. */
+  const spentOn = new Map<string, Map<number, Cents>>();
+  const spentOnIn = (itemId: string | null, inYear: number) =>
+    itemId === null ? undefined : spentOn.get(itemId)?.get(inYear);
 
   for (const expense of input.expenses) {
     const building = buildingOf(expense);
@@ -364,17 +381,20 @@ export function statement(input: StatementInput): Statement {
 
     const spentIn = yearOf(expense.occurredOn);
     if (expense.capitalItemId !== null) {
-      const years = spentOn.get(expense.capitalItemId) ?? new Set();
-      years.add(spentIn);
+      const years = spentOn.get(expense.capitalItemId) ?? new Map();
+      years.set(spentIn, (years.get(spentIn) ?? 0) - expense.amountCents);
       spentOn.set(expense.capitalItemId, years);
     }
     if (spentIn > year) continue;
 
     if (expense.classification === "improvement") {
+      if (building.inServiceOn === null) {
+        result.notCounted.undatedExpenses.push(expense);
+        continue;
+      }
       // Work done before the building was placed in service goes into
       // service with it.
       const from =
-        building.inServiceOn !== null &&
         building.inServiceOn > expense.occurredOn
           ? building.inServiceOn
           : expense.occurredOn;
@@ -427,10 +447,20 @@ export function statement(input: StatementInput): Statement {
     assertCents(item.actualCostCents, item.id);
     if (item.installYear > year) continue;
 
-    // Spend recorded against it in the year it went in is taken to be the
-    // install, whatever it was classified as: counting both would deduct the
-    // one cost twice. Spend in a later year is a later job.
-    if (spentOn.get(item.id)?.has(item.installYear)) continue;
+    // Spend recorded in the year it went in, against it or against the item
+    // it replaced, is taken to be the install, whatever it was classified as:
+    // counting both would deduct the one cost twice. At least the install's
+    // cost is the whole of it. Less is part of it, and the rest cannot be
+    // told from a service call, so the item is named rather than counted.
+    // Spend in a later year is a later job.
+    const own = spentOnIn(item.id, item.installYear);
+    const predecessor = spentOnIn(item.replacesId, item.installYear);
+    if (own !== undefined || predecessor !== undefined) {
+      if ((own ?? 0) + (predecessor ?? 0) < item.actualCostCents) {
+        result.notCounted.partlyRecordedItems.push(item);
+      }
+      continue;
+    }
 
     const inService = building.inServiceOn;
     if (inService === null) {

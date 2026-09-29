@@ -60,6 +60,7 @@ function item(overrides: Partial<TaxItem> = {}): TaxItem {
     installYear: 2023,
     installDate: null,
     actualCostCents: 660_000,
+    replacesId: null,
     recovery: "residential",
     ...overrides,
   };
@@ -479,6 +480,47 @@ describe("improvements from the record", () => {
     ]);
   });
 
+  it("takes a bill recorded against the item it replaced as its install", () => {
+    const furnace = item({ installYear: YEAR, replacesId: "old-furnace" });
+    const s = run({
+      items: [furnace],
+      expenses: [
+        expense({
+          capitalItemId: "old-furnace",
+          category: "repairs",
+          classification: "improvement",
+          occurredOn: `${YEAR}-03-02`,
+          amountCents: -660_000,
+        }),
+      ],
+    });
+
+    expect(s.improvementDepreciation.rows).toEqual([
+      expect.objectContaining({ source: "ledger", basisCents: 660_000 }),
+    ]);
+    expect(s.notCounted.partlyRecordedItems).toEqual([]);
+  });
+
+  it("names an item with less than its cost recorded in its install year", () => {
+    // A service call in the year it went in is not its install, and nothing
+    // says whether the install is on the ledger elsewhere.
+    const furnace = item({ installYear: YEAR });
+    const s = run({
+      items: [furnace],
+      expenses: [
+        expense({
+          capitalItemId: furnace.id,
+          category: "repairs",
+          classification: "repair",
+          amountCents: -15_000,
+        }),
+      ],
+    });
+
+    expect(s.improvementDepreciation.rows).toEqual([]);
+    expect(s.notCounted.partlyRecordedItems).toEqual([furnace]);
+  });
+
   it("skips an item with no known cost, and one not yet installed", () => {
     const s = run({
       items: [
@@ -500,6 +542,21 @@ describe("improvements from the record", () => {
 
     expect(s.improvementDepreciation.rows).toEqual([]);
     expect(s.notCounted.undatedItems).toEqual([furnace]);
+  });
+
+  it("lists a ledger improvement on a building with no in-service date", () => {
+    const roof = expense({
+      classification: "improvement",
+      occurredOn: "2024-05-01",
+      amountCents: -1_850_000,
+    });
+    const s = run({
+      buildings: [building({ inServiceOn: null })],
+      expenses: [roof],
+    });
+
+    expect(s.improvementDepreciation.rows).toEqual([]);
+    expect(s.notCounted.undatedExpenses).toEqual([roof]);
   });
 
   it("drops an improvement that is fully recovered", () => {
