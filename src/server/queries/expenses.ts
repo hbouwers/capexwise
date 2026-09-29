@@ -113,6 +113,8 @@ export type ExpensesPage = {
   expenses: ExpenseRecord[];
   /** Their rent periods over the same months. */
   rent: ExpenseRent[];
+  /** Whether anything has ever been recorded on them, in any period. */
+  anyRecorded: boolean;
 };
 
 /** Active buildings and their units that are not retired, by name. */
@@ -206,7 +208,15 @@ export async function getExpensesPage(
     const period = choosePeriod(requestedMonth, range);
 
     if (ids.length === 0) {
-      return { today, range, period, buildings: [], expenses: [], rent: [] };
+      return {
+        today,
+        range,
+        period,
+        buildings: [],
+        expenses: [],
+        rent: [],
+        anyRecorded: false,
+      };
     }
 
     const current =
@@ -307,7 +317,15 @@ export async function getExpensesPage(
         ),
       );
 
-    return { today, range, period, buildings: active, expenses: rows, rent };
+    return {
+      today,
+      range,
+      period,
+      buildings: active,
+      expenses: rows,
+      rent,
+      anyRecorded: (earliest?.on ?? null) !== null,
+    };
   });
 }
 

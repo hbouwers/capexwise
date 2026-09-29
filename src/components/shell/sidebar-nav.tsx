@@ -28,6 +28,8 @@ const NAV = [
     items: [
       { href: "/", label: "Portfolio" },
       { href: "/maintenance", label: "Maintenance" },
+      // The one destination the prototype never drew (`expenses.md`).
+      { href: "/expenses", label: "Expenses" },
       { href: "/contacts", label: "Contact book" },
     ],
   },
