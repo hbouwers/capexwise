@@ -117,3 +117,39 @@ linked, and that is the path most maintenance spend takes.
 | **A period with nothing** | `Nothing recorded in {month}.` and the switcher to move on |
 | **Filtered to nothing** | `No {category} expenses in {month}` and `Clear filters` |
 | **Loading** | The tiles and eight row skeletons |
+
+---
+
+## As built
+
+#142 built this screen. What it settled that the sections above do not say:
+
+- **The tiles follow the period and the building, not the category.** They are the period's cash,
+  and filtered to one category, Rent received and Cash flow would stop meaning anything. The
+  category filters the ledger, whose foot row totals what it shows.
+- **The ledger is exact.** Every amount renders to the cent and signed, `−$182.47` and `+$40.00`,
+  where every other table rounds to the dollar. A CPA adds this list up by hand, and a rounded
+  column would not add up to its own foot row.
+- **Only active buildings are on the page**, as on Maintenance and the forecast. An archived or sold
+  building keeps its expenses, because the tax planner needs a sold building's last year, and one
+  opened by its id is read-only.
+- **The switcher reaches back two years, or to the oldest expense recorded**, whichever is further,
+  and stops at the current month, because nothing is recorded after today where its building is.
+  Its day is the latest of the buildings', the forecast's rule. In the year view the arrows step
+  from the current month.
+- **Viewing the current month opens it on the rent roll**, for every active building, as the
+  dashboard does, so Rent received is not a zero standing in for a month nobody opened. A past
+  month opens nothing.
+- **Cash flow's sub-line names the months**: `September · Jan–Sep +$12,400`, rather than
+  `2026 to date`. For a month in the past, the year to date stops at that month.
+- **The categories are Schedule E lines 5 to 19, less line 18**, since depreciation is computed and
+  never paid. There is no capital-improvement category. The spend is filed where it went, and the
+  repair-or-improvement question says it is capital.
+- **Classification is asked for repairs and for spend on a capital item**, and stored nowhere else.
+  An answer left empty is `Unclassified`. Changing a repair to another category drops the
+  question with it.
+- **The modal links the contact paid and the equipment. It does not link a task.** A task is
+  linked only by `Mark done`, and the modal shows that link and keeps it. An expense moved to
+  another building leaves its task behind, because a task names its building.
+- **An expense is deleted, not voided**, from the modal's footer. One entered twice or against the
+  wrong building is a typo, and nothing freezes a year until #44.

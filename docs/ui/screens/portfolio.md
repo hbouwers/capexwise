@@ -76,6 +76,11 @@ both sides.
 
 Calling the v0 figure "cash flow" would put a number labelled net on a page that only knows gross.
 
+**As built with #142, the tile is Cash flow**: rent received less recorded spend for the month, as a
+signed figure, with `{Month} · {year} to date {signed YTD}` beneath. Spend is read like rent, each
+active building's own month in its own zone. The tile links to `/expenses`, whose current month is
+the same figure with both halves shown.
+
 **Viewing the portfolio opens the current month** on every active building, through the rent
 roll's `ensureRentPeriods` ([data-model §4](../../data-model.md)), each in its own zone. Without it a
 building nobody had opened this month would read `No rent expected` and add nothing to the expected

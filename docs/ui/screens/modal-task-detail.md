@@ -122,6 +122,14 @@ a canceled task keeps its history, and the tasks tables leave it out.
   name two characters wide, so both sit under the name and the rate note, and `Assign` is the row's
   one control — `Assigned` and disabled for the contact already chosen. `Add a contact` opens the
   contact book's new contact with the trade ticked.
+- **`Record as an expense` (#142) sits under Mark done's two fields**, on whenever the cost is above
+  zero until somebody ticks or unticks it, and disabled with no cost. Ticked, the completion writes
+  the job's bill in the same transaction. It is dated the day the job was done, on the task's
+  building and scope, and linked to the task, its equipment and its vendor. It is filed by the
+  task's trade: cleaning and maintenance for upkeep trades, professional fees for a CPA, attorney
+  or inspector, and repairs otherwise. The toast says how much was recorded, and its Undo takes the
+  expense back, refusing whole if the expense has been edited since. The one-click checkbox
+  records none.
 - **Mark done's cost starts from what is recorded**, the actual cost if there is one and the estimate
   otherwise, and an emptied cost records none rather than zero. Its toast offers Undo for five
   seconds, as the checkbox's does. A date after today is refused.
