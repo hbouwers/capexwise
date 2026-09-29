@@ -1,8 +1,6 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
-
-import { Button } from "@/components/ui/button";
+import { Step } from "@/components/buildings/month-switcher";
 import { cn } from "@/lib/cn";
 import { addMonths, formatDate } from "@/lib/dates";
 import {
@@ -50,6 +48,7 @@ export function PeriodSwitcher({
     <nav aria-label="Period" className="flex flex-wrap items-center gap-2">
       <div className="flex items-center gap-1">
         <Step
+          prefetch
           href={
             year || month > range.earliest
               ? hrefFor({
@@ -82,6 +81,7 @@ export function PeriodSwitcher({
           )}
         </p>
         <Step
+          prefetch
           href={
             !year && month < range.current
               ? hrefFor({ kind: "month", month: next })
@@ -106,37 +106,5 @@ export function PeriodSwitcher({
         This year
       </Link>
     </nav>
-  );
-}
-
-function Step({
-  href,
-  label,
-  children,
-}: {
-  href: string | null;
-  label: string;
-  children: ReactNode;
-}) {
-  if (href === null) {
-    return (
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        disabled
-        aria-label={label}
-        className="max-md:size-11"
-      >
-        {children}
-      </Button>
-    );
-  }
-
-  return (
-    <Button variant="ghost" size="icon-sm" asChild className="max-md:size-11">
-      <Link href={href} aria-label={label} scroll={false}>
-        {children}
-      </Link>
-    </Button>
   );
 }
