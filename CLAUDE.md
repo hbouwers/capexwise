@@ -43,7 +43,9 @@ on the server — #36, [ADR-0013](docs/adr/0013-observability.md). Expenses are 
 The dashboard's fifth tile is Cash flow, and a job marked done can record its own bill — #142.
 Capital work can be planned: `planned_work` holds a chosen year and a repair-or-improvement call, the
 forecast takes a planned year over the projection, and `What if?` saves a deferral as a plan — #96.
-The tax planner's arithmetic is written and tested in `src/lib/tax/`: the Schedule E statement, straight-line depreciation by recovery class and convention, the de minimis safe harbor, the liability and the timing levers (#144). Its page, and the rest of what the product is *for*, are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
+The tax planner's arithmetic is written and tested in `src/lib/tax/`: the Schedule E statement, straight-line depreciation by recovery class and convention, the de minimis safe harbor, the liability and the timing levers (#144). The schema it reads is in
+too: each item type's recovery class, an org's `tax_years` row for the rate and the threshold, and
+a plan's optional month. Its page, and the rest of what the product is *for*, are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
 
