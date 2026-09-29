@@ -6,7 +6,7 @@ import {
 } from "@/components/buildings/building-card";
 import { DateValue } from "@/components/date-value";
 import { EmptyState } from "@/components/empty-state";
-import { Money } from "@/components/money";
+import { DeltaValue } from "@/components/money";
 import { Numeric } from "@/components/numeric";
 import { RunwayList } from "@/components/runway-list";
 import { PageBody, PageHeader } from "@/components/shell/page-header";
@@ -16,7 +16,13 @@ import { TaskNotFound } from "@/components/tasks/task-not-found";
 import { Button } from "@/components/ui/button";
 import { unitCount } from "@/lib/buildings";
 import { cn } from "@/lib/cn";
-import { type CalendarDate, shortFormIn, todayIn, yearOf } from "@/lib/dates";
+import {
+  type CalendarDate,
+  formatDate,
+  shortFormIn,
+  todayIn,
+  yearOf,
+} from "@/lib/dates";
 import {
   buildingFlag,
   capexThroughNextYear,
@@ -35,6 +41,7 @@ import { dueNote, dueNoteText, scheduleGroup, taskHref } from "@/lib/tasks";
 import { getOrgContext } from "@/server/org-context";
 import { listBuildings } from "@/server/queries/buildings";
 import { getForecastInputs } from "@/server/queries/forecast";
+import { getPortfolioSpend } from "@/server/queries/expenses";
 import { getPortfolioRent } from "@/server/queries/rent-periods";
 import { getMaintenanceInputs, getTaskModal } from "@/server/queries/tasks";
 
@@ -69,10 +76,11 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/">) {
     : (query.task ?? null);
 
   const { org } = await getOrgContext();
-  const [buildings, rent, forecastInputs, maintenance, modal] =
+  const [buildings, rent, spend, forecastInputs, maintenance, modal] =
     await Promise.all([
       listBuildings(),
       getPortfolioRent(),
+      getPortfolioSpend(),
       getForecastInputs(),
       getMaintenanceInputs(),
       getTaskModal(taskParam, null),
@@ -126,6 +134,12 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/">) {
     rentTotal.expected += building.expectedCents;
     rentTotal.received += building.receivedCents;
     rentTotal.thisYear += building.receivedThisYearCents;
+  }
+  // Recorded spend, each building's month in its own zone, as its rent is.
+  const spent = { month: 0, thisYear: 0 };
+  for (const building of spend.values()) {
+    spent.month += building.monthCents;
+    spent.thisYear += building.yearCents;
   }
 
   const figuresFor = (buildingId: string): BuildingCardFigures | null => {
@@ -225,11 +239,19 @@ export default async function PortfolioPage({ searchParams }: PageProps<"/">) {
                   // past-due replacement into it.
                   href={forecastHref({ year: thisYear })}
                 />
+                {/* Received less recorded spend (`portfolio.md`). The
+                    expenses page owns the number and shows both halves, so
+                    the tile goes there rather than to the cards. */}
                 <StatTile
-                  label="Rent received"
-                  figure={<Money cents={rentTotal.received} />}
-                  sub={`of ${formatMoney(rentTotal.expected)} expected · ${formatMoney(rentTotal.thisYear)} this year`}
-                  href="#buildings"
+                  label="Cash flow"
+                  figure={
+                    <DeltaValue cents={rentTotal.received - spent.month} />
+                  }
+                  sub={`${formatDate(forecastDay, "month-name")} · ${thisYear} to date ${formatMoney(
+                    rentTotal.thisYear - spent.thisYear,
+                    { signed: true },
+                  )}`}
+                  href="/expenses"
                 />
               </StatTiles>
             ) : null}

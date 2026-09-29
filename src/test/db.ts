@@ -300,6 +300,7 @@ export const appDb = applicationDb;
 export const REFERENCE_TABLES: readonly string[] = [
   "trade_tags",
   "capital_item_types",
+  "schedule_e_categories",
 ];
 
 /**

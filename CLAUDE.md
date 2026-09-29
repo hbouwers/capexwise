@@ -38,8 +38,10 @@ at `/api/cron/demo-reset` — five Indianapolis buildings and eight doors, dated
 `Explore the demo` signs a visitor in anonymously, into the demo alone — #34. The application now
 reports on itself: errors to Sentry with the request stripped off them, one JSON line per event
 carrying the org, `/api/health` for an uptime check, and the four onboarding funnel events measured
-on the server — #36, [ADR-0013](docs/adr/0013-observability.md). The tax planner and the rest of what the
-product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
+on the server — #36, [ADR-0013](docs/adr/0013-observability.md). Expenses are stored and kept at
+`/expenses`, a ledger by building and Schedule E category with the expense modal at `?expense=`.
+The dashboard's fifth tile is Cash flow, and a job marked done can record its own bill — #142. The
+tax planner and the rest of what the product is *for* are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
 

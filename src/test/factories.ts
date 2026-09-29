@@ -34,6 +34,7 @@ import {
   organizations,
   rentPeriods,
   tasks,
+  transactions,
   units,
   users,
 } from "@/db/schema";
@@ -80,6 +81,8 @@ type CapitalItemInput = typeof capitalItems.$inferInsert;
 type CapitalItemAllocation = typeof capitalItemAllocations.$inferSelect;
 type Task = typeof tasks.$inferSelect;
 type TaskInput = typeof tasks.$inferInsert;
+type Transaction = typeof transactions.$inferSelect;
+type TransactionInput = typeof transactions.$inferInsert;
 
 /**
  * Distinguishes rows within a test. Not a random value: a slug of `test-org-2`
@@ -483,4 +486,35 @@ export async function createTask(
     .returning();
 
   return firstRow(rows, "tasks");
+}
+
+/**
+ * A $180 repair on September 1, money out, the building's own — unless a
+ * `unitId` is given. Takes the building as well as the org, both required,
+ * for `createUnit`'s reason.
+ *
+ * Written straight to the table, not through an action, so a test says
+ * exactly what the row holds — the sign included, which is the column's one
+ * way to be wrong.
+ */
+export async function createTransaction(
+  orgId: string,
+  buildingId: string,
+  overrides: Partial<TransactionInput> = {},
+): Promise<Transaction> {
+  const rows = await testDb()
+    .insert(transactions)
+    .values({
+      orgId,
+      buildingId,
+      occurredOn: "2026-09-01",
+      amountCents: -18_000,
+      description: "Replaced the kitchen faucet",
+      scheduleECategory: "repairs",
+      classification: "unclassified",
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "transactions");
 }

@@ -40,7 +40,8 @@ import { moneyField } from "@/lib/building-form";
 import { telHref } from "@/lib/contact-form";
 import { contactsHref } from "@/lib/contacts";
 import { type CalendarDate, formatDate, shortFormIn } from "@/lib/dates";
-import type { FieldErrors } from "@/lib/forms";
+import { amount, type FieldErrors } from "@/lib/forms";
+import { formatMoney } from "@/lib/money";
 import {
   type CompletionFields,
   emptyTaskFields,
@@ -134,6 +135,14 @@ export function TaskDetailModal({
     completedOn: today,
     cost: moneyField(task?.actualCostCents ?? task?.estCostCents ?? null),
   });
+  /**
+   * `Record as an expense` (`modal-task-detail.md`, footer): on whenever the
+   * cost is not zero, until somebody ticks or unticks it themselves.
+   */
+  const [recordChoice, setRecordChoice] = useState<boolean | null>(null);
+  const typedCost = amount(completion.cost);
+  const costAboveZero = typedCost.state === "ok" && typedCost.cents > 0;
+  const recordExpense = costAboveZero && (recordChoice ?? true);
 
   const changed = JSON.stringify(fields) !== JSON.stringify(initial);
 
@@ -256,7 +265,8 @@ export function TaskDetailModal({
   function markDone() {
     if (task === null) return;
 
-    const checked = validateCompletion(completion, today);
+    const sent = { ...completion, recordExpense };
+    const checked = validateCompletion(sent, today);
     if (!checked.ok) {
       setErrors(checked.errors);
       focusFirstError();
@@ -265,7 +275,7 @@ export function TaskDetailModal({
 
     setErrors({});
     startTransition(async () => {
-      const result = await completeTask(task.id, completion).catch(() => null);
+      const result = await completeTask(task.id, sent).catch(() => null);
 
       if (!result?.ok) {
         setErrors(
@@ -279,7 +289,11 @@ export function TaskDetailModal({
 
       const { title } = task;
       const undo = () => {
-        void undoCompleteTask(task.id, result.previousActualCostCents).then(
+        void undoCompleteTask(
+          task.id,
+          result.previousActualCostCents,
+          result.expense?.id ?? null,
+        ).then(
           (undone) => {
             if (!undone.ok) {
               toast.error(
@@ -294,10 +308,13 @@ export function TaskDetailModal({
         );
       };
 
+      const recorded = result.expense
+        ? ` ${formatMoney(-result.expense.amountCents, { form: "cents" })} recorded as an expense.`
+        : "";
       toast(
         result.next
-          ? `${title}: done. Next due ${formatDate(result.next.dueDate)}.`
-          : `${title}: done.`,
+          ? `${title}: done. Next due ${formatDate(result.next.dueDate)}.${recorded}`
+          : `${title}: done.${recorded}`,
         { duration: 5000, action: { label: "Undo", onClick: undo } },
       );
       leave();
@@ -423,6 +440,20 @@ export function TaskDetailModal({
             {pending ? "Saving…" : "Mark done"}
           </Button>
         </div>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <Checkbox
+          id="completion-record-expense"
+          checked={recordExpense}
+          disabled={!costAboveZero}
+          onCheckedChange={(checked) => setRecordChoice(checked === true)}
+        />
+        <Label
+          htmlFor="completion-record-expense"
+          className="text-sm leading-tight font-normal text-text-primary"
+        >
+          Record as an expense
+        </Label>
       </div>
       {changed ? (
         <p className="text-xs leading-snug text-text-muted">{UNSAVED}</p>

@@ -12,3 +12,4 @@ export * from "./building-facts";
 export * from "./rent-periods";
 export * from "./capital-items";
 export * from "./tasks";
+export * from "./transactions";

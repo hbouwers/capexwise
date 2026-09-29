@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** v1 — the schema to build against
-**Last updated:** 2026-09-15
+**Last updated:** 2026-09-29
 **Supersedes:** the sketch in [PRD](PRD.md) section 10
 
 This is the contract the migrations implement. **Section 2 is built**: `organizations` came with
@@ -11,7 +11,8 @@ security has covered it since #28. **So is section 3**: `buildings` and `units` 
 `building_facts`, `building_utilities` and `building_access_codes` with #107. **So are
 `trade_tags`, `contacts` and `contact_tags`** from section 6, with #106, **and section 4's
 `rent_periods`**, with #108, **and section 5** — the catalogue, capital items and their
-allocations — with #109. Everything else from section 6 on is still prose.
+allocations — with #109 — **and section 6's `tasks`**, with #113, **and `transactions` and
+`schedule_e_categories`**, with #142. Everything else from section 6 on is still prose.
 
 It is written as SQL because SQL is the readable form and because the security model is expressed
 in SQL. **The Drizzle schema is the source of truth once it exists** ([ADR-0001](adr/0001-stack.md));
@@ -1041,36 +1042,84 @@ own it admits exactly the rows `(contact_id, tag)` would. **Its trade is `restri
 `cascade` this section first had: §7's rule for reference data is that it is not deleted, and a
 cascade would make deleting a trade silently untag everybody who had it.
 
-### Transactions — scheduled for v1
+### Transactions (#142)
 
-PRD open question 5 is answered: **v1 has expense entry**, so this migration ships with the
-feature rather than being held. The shape below was settled before the scope decision, which is
-why answering it cost no schema design.
+PRD open question 5 is answered: **v1 has expense entry**, and this is the table it writes —
+[expenses.md](ui/screens/expenses.md) is its screen. The shape was settled before the scope
+decision, which is why answering it cost no schema design; building it changed three things, each
+below the SQL.
 
 ```sql
+create type transaction_classification as enum ('repair', 'improvement', 'unclassified');
+
+create table schedule_e_categories (
+  slug       text primary key,              -- 'repairs', 'mortgage-interest'
+  label      text not null,
+  line       integer not null unique,       -- the line on Schedule E, and the order shown
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint schedule_e_categories_slug_format check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+  constraint schedule_e_categories_line_is_an_expense check (line between 5 and 19 and line <> 18)
+);
+
 create table transactions (
   id                  uuid primary key default uuidv7(),
   org_id              uuid not null references organizations (id) on delete cascade,
-  building_id         uuid not null references buildings (id) on delete restrict,
-  unit_id             uuid references units (id) on delete restrict,
-  capital_item_id     uuid references capital_items (id) on delete set null,
-  task_id             uuid references tasks (id) on delete set null,
-  contact_id          uuid references contacts (id) on delete set null,
+  building_id         uuid not null,
+  unit_id             uuid,
+  capital_item_id     uuid,
+  task_id             uuid,
+  contact_id          uuid,
 
   occurred_on         date not null,
   amount_cents        bigint not null,         -- signed: negative is money out
   description         text,
-  schedule_e_category text not null,           -- reference table when this ships
-  classification      text check (classification in ('repair', 'improvement', 'unclassified')),
+  schedule_e_category text not null references schedule_e_categories (slug) on delete restrict,
+  classification      transaction_classification,
 
   created_at          timestamptz not null default now(),
-  updated_at          timestamptz not null default now()
+  updated_at          timestamptz not null default now(),
+
+  constraint transactions_amount_not_zero check (amount_cents <> 0),
+  constraint transactions_building
+    foreign key (org_id, building_id) references buildings (org_id, id) on delete restrict,
+  constraint transactions_unit
+    foreign key (org_id, building_id, unit_id) references units (org_id, building_id, id) on delete restrict,
+  constraint transactions_capital_item
+    foreign key (org_id, building_id, capital_item_id)
+    references capital_items (org_id, building_id, id) on delete restrict,
+  constraint transactions_task
+    foreign key (org_id, building_id, task_id) references tasks (org_id, building_id, id)
+    on delete set null (task_id),
+  constraint transactions_contact
+    foreign key (org_id, contact_id) references contacts (org_id, id)
+    on delete set null (contact_id)
 );
 ```
 
 `amount_cents` is signed here and unsigned everywhere else in the schema, which is a deliberate
 inconsistency: a ledger row's direction is part of the fact, whereas a replacement cost is a
-magnitude. The `Money` formatter has to render a negative correctly, and that is worth a test.
+magnitude. The `Money` formatter renders a negative correctly, and `money.test.ts` holds it. Zero
+is refused: it is neither an expense nor a refund, but a row somebody meant to fill in.
+
+**The categories are reference data**, seeded by `0027` the way `trade_tags` is, for this section's
+reasons below. They are Schedule E's expense lines 5 through 19, **less line 18**: depreciation is
+computed by the tax planner from a basis, never paid, so nothing records against it. A capital
+improvement is not a line either — it is filed under whatever the spend was, usually repairs, and
+`classification` says it is capital.
+
+**The capital item is `restrict`, not the `set null` this section first had.** §7 already said so
+— money spent on an item is part of its record, and `set null` would lose which furnace the $4,800
+went on — and the two sections now agree. The task and the contact are `set null` of their one
+column, written by hand in `0026` for `tasks`' reason: a composite key's plain `set null` would null
+`org_id` too. Every reference names the org, and the item and the task name the building as well,
+so spend cannot land on another building's equipment or job.
+
+**`classification` is stored where it is asked and nowhere else**: the repairs category, and spend
+on a capital item, which is capital work whatever line it was filed under. Elsewhere it is null,
+which the tax planner reads as "never asked" — unlike `unclassified`, which is somebody declining
+to decide. The rule is the application's (`asksClassification`); a check here would name a slug
+from reference data in the schema.
 
 ### Tables that do not exist yet, and the issues that own them
 
@@ -1098,12 +1147,13 @@ references that are informational.** A `set null` that would lose a fact is a `r
 | **Membership (revoked)** | Hard delete of the row. Nothing is orphaned: a task assigned to the member goes back to unassigned (`set null` of `tasks.assignee_user_id`, #94) and keeps its history. Blocked if it would leave the org with no owner |
 | **Building** | `restrict` from units, capital items, tasks, rent periods, transactions. A building with no children can be hard-deleted — the typo case. Otherwise it is `sold` (#43) or `archived`, both of which keep history and drop out of the forecast |
 | **Unit** | `restrict` from rent periods, capital items and their explicit shares, tasks, and transactions. A unit with rent history is **never** deleted; it becomes `retired`. Building-shared rows (`unit_id is null`) are unaffected by definition |
-| **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete, and the row that replaced it is held by `restrict` while the old one points at it. The one delete is the add-equipment modal's Undo (#110): the scoped role's `delete` on `capital_items` comes with a restrictive policy, `capital_items_delete_as_added`, that admits only a row still as the checklist left it — `estimated`, `active`, no actual cost. Nothing deletes a share on its own, so there is no grant on `capital_item_allocations`; an item's shares go with it (`cascade`) |
+| **Capital item** | `restrict` if a transaction or a filed depreciation schedule references it; `set null` from tasks, which keeps the task and loses only the link. Replacement is `status = 'replaced'` plus `replaced_by_id`, never a delete, and the row that replaced it is held by `restrict` while the old one points at it. The one delete is the add-equipment modal's Undo (#110): the scoped role's `delete` on `capital_items` comes with a restrictive policy, `capital_items_delete_as_added`, that admits only a row still as the checklist left it — `estimated`, `active`, no actual cost. Undo also leaves an item that spend has been recorded against (#142), which the `restrict` above would refuse anyway, so it counts as kept rather than failing. Nothing deletes a share on its own, so there is no grant on `capital_item_allocations`; an item's shares go with it (`cascade`) |
 | **Task** | `status = 'canceled'`, not a delete: a task that will not happen keeps its history, and the task tables leave it out. The one delete is Undo on a completion (#113), which removes the next occurrence the completion wrote — the scoped role's `delete` on `tasks` comes with a restrictive policy, `tasks_delete_as_materialised`, that admits only a row with a `recurrence_parent_id` nobody has touched since it was written. A deleted parent leaves its occurrences in place and unlinked (`set null` of `recurrence_parent_id`) |
 | **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it — `building_utilities_contact` is `restrict`, which enforces that (§3) — and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
+| **Transaction** | Hard delete, from the expense modal: a row entered twice or against the wrong building is a typo, not history. Nothing yet freezes a year; #44's filed years will, with a restrictive policy of their own. `set null` of `task_id` when its task goes (Undo on a completion) and of `contact_id` when its contact does, so an expense is never lost with either; `restrict` from its building, unit and capital item |
 | **Rent period** | Not deleted. A month opened for a unit that stood empty is marked `vacant` (§4), which records it, where a deleted row would be reopened by the next view — so the scoped role holds no `delete` on `rent_periods` until something needs one. Once money is recorded it is edited, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
-| **Reference data** (`capital_item_types`, `trade_tags`) | Not deleted. `restrict` from every referencing row, so an entry in use cannot be removed. Retiring one means keeping the row and hiding it from new choices, which needs a column neither table has; it is added with the first entry that has to go |
+| **Reference data** (`capital_item_types`, `trade_tags`, `schedule_e_categories`) | Not deleted. `restrict` from every referencing row, so an entry in use cannot be removed. Retiring one means keeping the row and hiding it from new choices, which needs a column neither table has; it is added with the first entry that has to go |
 
 **Soft delete is used in exactly two places** — `organizations.deleted_at` and
 `contacts.archived_at` — and nowhere else. Everything else that looks like a soft delete is a
@@ -1172,9 +1222,11 @@ create index contacts_org_name  on contacts (org_id, name) where archived_at is 
 create index contact_tags_org_tag on contact_tags (org_id, tag);
 -- A contact's own tags are `contact_tags_pkey` in §6, led by (org_id, contact_id).
 
--- Transactions (with the feature, per §6)
+-- Transactions (#142)
 create index transactions_org_building_date on transactions (org_id, building_id, occurred_on);
 create index transactions_org_date_category on transactions (org_id, occurred_on, schedule_e_category);
+-- The expense `Mark done` wrote for a task, and what the task's delete has to null.
+create index transactions_org_task on transactions (org_id, task_id) where task_id is not null;
 ```
 
 ### On `(org_id, building_id, unit_id)` versus a partial index
@@ -1258,7 +1310,7 @@ create policy buildings_backup_read on buildings
 | Table | Reason |
 |---|---|
 | `users`, `sessions`, `accounts`, `verifications`, `rate_limits` | Above the tenancy boundary; read during sign-in, before an org context exists (§2). No row-level security, and no grant to the scoped role — so a scoped handle cannot read them at all, which is why a members list needs a policy on `users` of its own before it can show a name (#30) |
-| `capital_item_types`, `trade_tags` | Reference data. Readable by all orgs, writable only by migrations (§6). Row level security enabled and not forced, `select` and nothing else for the scoped role, and a deliberate `for select ... using (true)` policy for it beside the reader's. `trade_tags` has had it since #106 and `capital_item_types` since #109, and the isolation test holds every table on `REFERENCE_TABLES` to it |
+| `capital_item_types`, `trade_tags`, `schedule_e_categories` | Reference data. Readable by all orgs, writable only by migrations (§6). Row level security enabled and not forced, `select` and nothing else for the scoped role, and a deliberate `for select ... using (true)` policy for it beside the reader's. `trade_tags` has had it since #106, `capital_item_types` since #109 and `schedule_e_categories` since #142, and the isolation test holds every table on `REFERENCE_TABLES` to it |
 | `organizations` | Has a policy, but keyed on `id = current_org_id()`, not `org_id` |
 
 **The identity path reads three tables without an org, and that is the whole of the bypass.**

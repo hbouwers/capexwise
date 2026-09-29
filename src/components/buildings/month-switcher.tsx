@@ -74,14 +74,21 @@ export function hrefFor(
   return month === range.current ? base : `${base}?month=${monthParam(month)}`;
 }
 
-function Step({
+/**
+ * One end of a month switcher: a link, or a disabled button at the end of
+ * the range. The expenses page's period switcher uses it too.
+ */
+export function Step({
   href,
   label,
   children,
+  prefetch = false,
 }: {
   href: string | null;
   label: string;
   children: ReactNode;
+  /** The rent roll's are never prefetched; its component comment says why. */
+  prefetch?: boolean;
 }) {
   if (href === null) {
     return (
@@ -99,7 +106,7 @@ function Step({
 
   return (
     <Button variant="ghost" size="icon-sm" asChild className="max-md:size-11">
-      <Link href={href} aria-label={label} prefetch={false} scroll={false}>
+      <Link href={href} aria-label={label} prefetch={prefetch} scroll={false}>
         {children}
       </Link>
     </Button>

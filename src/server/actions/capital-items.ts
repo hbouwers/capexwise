@@ -14,7 +14,7 @@
  * refuse it the same way they refuse one that is not there.
  */
 
-import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, notExists } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -22,6 +22,7 @@ import {
   capitalItemAllocations,
   capitalItems,
   capitalItemTypes,
+  transactions,
   units,
 } from "@/db/schema";
 import {
@@ -232,9 +233,11 @@ const undoShape = z.array(z.uuid()).min(1).max(2000);
 /**
  * The add toast's Undo (`modal-add-equipment.md`, footer): **removes exactly
  * the rows that add made**, by the ids it returned — and of those, only the
- * ones still as the checklist left them: estimated, active, and with no actual
- * cost. An item confirmed in the seconds since is a fact somebody read off a
- * label, and stays.
+ * ones still as the checklist left them: estimated, active, with no actual
+ * cost, and with no spend recorded against it. An item confirmed in the
+ * seconds since is a fact somebody read off a label, and one an expense names
+ * is a fact about money — `transactions_capital_item` is `restrict` (§7) —
+ * so both stay.
  *
  * The same rule is `capital_items_delete_as_added` in `0021`, a restrictive
  * policy, so a delete that forgot the filter below still could not take an
@@ -282,6 +285,17 @@ export async function undoAddCapitalItems(
             eq(capitalItems.confidence, "estimated"),
             eq(capitalItems.status, "active"),
             isNull(capitalItems.actualCostCents),
+            notExists(
+              tx
+                .select({ id: transactions.id })
+                .from(transactions)
+                .where(
+                  and(
+                    eq(transactions.orgId, db.orgId),
+                    eq(transactions.capitalItemId, capitalItems.id),
+                  ),
+                ),
+            ),
           ),
         )
         .returning({ id: capitalItems.id });

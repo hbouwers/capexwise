@@ -315,8 +315,24 @@ describe("validateCompletion", () => {
       validateCompletion({ completedOn: "2026-09-16", cost: "180" }, TODAY),
     ).toEqual({
       ok: true,
-      values: { completedOn: "2026-09-16", actualCostCents: 18_000 },
+      values: {
+        completedOn: "2026-09-16",
+        actualCostCents: 18_000,
+        recordExpense: false,
+      },
     });
+  });
+
+  it("records an expense only when asked, and only for a cost above zero", () => {
+    const ticked = (cost: string) =>
+      validateCompletion(
+        { completedOn: "2026-09-16", cost, recordExpense: true },
+        TODAY,
+      );
+
+    expect(ticked("180")).toMatchObject({ values: { recordExpense: true } });
+    expect(ticked("0")).toMatchObject({ values: { recordExpense: false } });
+    expect(ticked("")).toMatchObject({ values: { recordExpense: false } });
   });
 
   it("takes no cost as none recorded, not as free", () => {

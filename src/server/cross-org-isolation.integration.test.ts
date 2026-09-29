@@ -86,6 +86,7 @@ import {
 import { buildingFields } from "@/lib/building-form";
 import { contactFields } from "@/lib/contact-form";
 import { addMonths, firstOfMonth, todayIn } from "@/lib/dates";
+import { emptyExpenseFields, type ExpenseFields } from "@/lib/expense-form";
 import { emptyTaskFields, type TaskFields } from "@/lib/task-form";
 import { applicationDatabaseUrl, REFERENCE_TABLES, testDb } from "@/test/db";
 import {
@@ -99,6 +100,7 @@ import {
   createOrganization,
   createRentPeriod,
   createTask,
+  createTransaction,
   createUnit,
   createUser,
   createUtility,
@@ -191,6 +193,10 @@ const {
 } = await import("@/server/actions/tasks");
 const { getMaintenanceInputs, getRecurringTasks, getTaskModal } =
   await import("@/server/queries/tasks");
+const { createExpense, deleteExpense, updateExpense } =
+  await import("@/server/actions/expenses");
+const { getExpenseModal, getExpensesPage, getPortfolioSpend } =
+  await import("@/server/queries/expenses");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -215,6 +221,7 @@ const ORG_OWNED = {
   capital_items: "org_id",
   capital_item_allocations: "org_id",
   tasks: "org_id",
+  transactions: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -229,6 +236,8 @@ const ORG_OWNED = {
 const OUTSIDE_THE_BOUNDARY: Record<string, string> = {
   trade_tags:
     "Reference data: one trade list every org reads and only a migration writes (data-model §6).",
+  schedule_e_categories:
+    "Reference data: the Schedule E lines every org files expenses under, written only by a migration (data-model §6).",
   capital_item_types:
     "Reference data: one catalogue every org reads and only a migration writes. An item copies its defaults when it is added, so nothing reads across orgs through it (data-model §5).",
   users:
@@ -441,6 +450,22 @@ async function seedTwoOrgs() {
       assigneeUserId: owner.id,
     });
 
+    // Both scopes and every link: the plumber's bill for the gutters on the
+    // shared furnace, and a refund in unit A. The same two on both sides, by
+    // date, amount and category.
+    const sharedExpense = await createTransaction(org.id, building.id, {
+      capitalItemId: sharedItem.id,
+      taskId: sharedTask.id,
+      contactId: contact.id,
+    });
+    const unitExpense = await createTransaction(org.id, building.id, {
+      unitId: unit.id,
+      amountCents: 4_000,
+      description: "Returned a faucet",
+      scheduleECategory: "supplies",
+      classification: null,
+    });
+
     return {
       org,
       owner,
@@ -459,6 +484,8 @@ async function seedTwoOrgs() {
       unitItem,
       sharedTask,
       unitTask,
+      sharedExpense,
+      unitExpense,
     };
   }
 
@@ -500,6 +527,8 @@ function identifiersOf(side: Side): string[] {
     side.unitItem.id,
     side.sharedTask.id,
     side.unitTask.id,
+    side.sharedExpense.id,
+    side.unitExpense.id,
   ];
 }
 
@@ -1935,17 +1964,18 @@ describe("the capital item paths", () => {
     });
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
 
-    // The control: A's own items, as the checklist left them, do go — the
-    // shared one's share with it.
+    // The control: A's own items, as the checklist left them, do go — apart
+    // from the shared furnace, which the plumber's bill is recorded against:
+    // spend on an item is a fact about it, as a confirmation is, and stays.
     expect(
       await undoAddCapitalItems(a.building.id, [
         a.sharedItem.id,
         a.unitItem.id,
       ]),
-    ).toEqual({ ok: true, removed: 2 });
+    ).toEqual({ ok: true, removed: 1 });
     const owned = await rowsOwnedBy(a.org.id);
-    expect(owned.capital_items ?? []).toHaveLength(0);
-    expect(owned.capital_item_allocations ?? []).toHaveLength(0);
+    expect(owned.capital_items ?? []).toHaveLength(1);
+    expect(owned.capital_item_allocations ?? []).toHaveLength(1);
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });
@@ -2092,6 +2122,124 @@ describe("the task paths", () => {
   });
 });
 
+describe("the expense paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  const receipt = (
+    buildingId: string,
+    overrides: Partial<ExpenseFields> = {},
+  ): ExpenseFields => ({
+    ...emptyExpenseFields({ today: "2026-09-01" }),
+    amount: "180",
+    buildingId,
+    category: "repairs",
+    ...overrides,
+  });
+
+  it("reads the caller's expenses, and none of the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    // September 2026 is always in reach: the switcher goes back as far as
+    // the oldest expense recorded.
+    const page = await getExpensesPage("2026-09");
+    expect(page.expenses.map((expense) => expense.id).sort()).toEqual(
+      [a.sharedExpense.id, a.unitExpense.id].sort(),
+    );
+    expect(mentionsB(page, b)).toEqual([]);
+
+    const spend = await getPortfolioSpend();
+    expect([...spend.keys()]).toEqual([a.building.id]);
+  });
+
+  it("opens the caller's expense in the modal, and not the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    for (const expense of [b.sharedExpense, b.unitExpense]) {
+      expect(await getExpenseModal(expense.id, null)).toEqual({
+        kind: "not-found",
+      });
+    }
+    const opened = await getExpenseModal(a.sharedExpense.id, b.building.id);
+    expect(opened).toMatchObject({ kind: "edit" });
+    expect(mentionsB(opened, b)).toEqual([]);
+    const offered = await getExpenseModal("new", b.building.id);
+    expect(offered).toMatchObject({ kind: "new", buildingId: null });
+    expect(mentionsB(offered, b)).toEqual([]);
+  });
+
+  it("adds to the caller's building, and refuses the other org's building and anything it names", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const input of [
+      receipt(b.building.id),
+      receipt(a.building.id, { scope: b.unit.id }),
+      receipt(a.building.id, { equipment: b.sharedItem.id }),
+      receipt(a.building.id, { contact: b.contact.id }),
+    ]) {
+      const refused = await createExpense(input);
+      expect(refused.ok).toBe(false);
+      expect(mentionsB(refused, b)).toEqual([]);
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    const added = await createExpense(
+      receipt(a.building.id, {
+        scope: a.unit.id,
+        equipment: a.unitItem.id,
+        contact: a.contact.id,
+      }),
+    );
+    expect(added).toMatchObject({ ok: true });
+    expect((await rowsOwnedBy(a.org.id)).transactions).toHaveLength(3);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("saves and deletes the caller's expense, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const expense of [b.sharedExpense, b.unitExpense]) {
+      expect((await updateExpense(expense.id, receipt(a.building.id))).ok).toBe(
+        false,
+      );
+      expect(await deleteExpense(expense.id)).toEqual({ ok: false });
+    }
+    for (const overrides of [
+      { contact: b.contact.id },
+      { equipment: b.sharedItem.id },
+      { scope: b.unit.id },
+    ]) {
+      const refused = await updateExpense(
+        a.unitExpense.id,
+        receipt(a.building.id, overrides),
+      );
+      expect(refused.ok).toBe(false);
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: A's own, saved and deleted.
+    expect(
+      await updateExpense(a.unitExpense.id, receipt(a.building.id)),
+    ).toMatchObject({ ok: true });
+    expect(await deleteExpense(a.unitExpense.id)).toEqual({ ok: true });
+    expect((await rowsOwnedBy(a.org.id)).transactions).toHaveLength(1);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
 /**
  * A scoped handle for the owner of `side`'s org, reached the way every domain
  * query will reach one: a signed session, then `getOrgContext()`. Not
@@ -2176,8 +2324,9 @@ describe.each(Object.entries(ORG_OWNED))(
       // month is marked rather than deleted, and a share goes with its item —
       // so they are refused before any row is considered. `capital_items` may
       // be deleted only as the add-equipment checklist left it, for its Undo
-      // (`0021`), which every seeded item is, and `tasks` only as an
-      // occurrence a completion wrote (`0023`), which no seeded task is. `buildings` is refused by its units' `restrict`, because
+      // (`0021`), which every seeded item is — and the shared furnace is held
+      // by the expense recorded against it (`restrict`, §7) — and `tasks` only
+      // as an occurrence a completion wrote (`0023`), which no seeded task is. `buildings` is refused by its units' `restrict`, because
       // every seeded building has one (§7: archived, not deleted), and
       // `units` by the electric account, the month of rent and the equipment
       // on each. The others may delete, and must delete only A's. A refusal rolls the transaction back, and the snapshot below is
@@ -2456,6 +2605,36 @@ describe("a reference from one org's row to another's", () => {
         sql`update tasks set recurrence_parent_id = ${b.sharedTask.id}
             where id = ${a.unitTask.id}`,
     ],
+    [
+      "an expense on another org's building",
+      (a: Side, b: Side) =>
+        sql`insert into transactions (org_id, building_id, occurred_on, amount_cents, schedule_e_category)
+            values (${a.org.id}, ${b.building.id}, '2026-09-01', -18000, 'repairs')`,
+    ],
+    [
+      "an expense in another org's unit",
+      (a: Side, b: Side) =>
+        sql`update transactions set unit_id = ${b.unit.id}
+            where id = ${a.unitExpense.id}`,
+    ],
+    [
+      "an expense on another org's equipment",
+      (a: Side, b: Side) =>
+        sql`update transactions set capital_item_id = ${b.sharedItem.id}
+            where id = ${a.unitExpense.id}`,
+    ],
+    [
+      "an expense for another org's task",
+      (a: Side, b: Side) =>
+        sql`update transactions set task_id = ${b.sharedTask.id}
+            where id = ${a.unitExpense.id}`,
+    ],
+    [
+      "an expense paid to another org's contact",
+      (a: Side, b: Side) =>
+        sql`update transactions set contact_id = ${b.contact.id}
+            where id = ${a.unitExpense.id}`,
+    ],
   ])("refuses %s", async (_, statement) => {
     const { a, b } = await seedTwoOrgs();
     const db = await scopedHandleFor(a);
@@ -2532,5 +2711,21 @@ describe("a reference from one org's row to another's", () => {
     );
 
     expect((await rowsOwnedBy(a.org.id)).tasks).toHaveLength(3);
+  });
+
+  // The control for the five expense cases: a new expense on A's own building
+  // and unit, on A's refrigerator, for A's unit job, paid to A's plumber.
+  it("lets an expense onto the scoped org's own rows", async () => {
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run((tx) =>
+      tx.execute(
+        sql`insert into transactions (org_id, building_id, unit_id, capital_item_id, task_id, contact_id, occurred_on, amount_cents, schedule_e_category)
+            values (${a.org.id}, ${a.building.id}, ${a.unit.id}, ${a.unitItem.id}, ${a.unitTask.id}, ${a.contact.id}, '2026-09-01', -18000, 'repairs')`,
+      ),
+    );
+
+    expect((await rowsOwnedBy(a.org.id)).transactions).toHaveLength(3);
   });
 });
