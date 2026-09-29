@@ -26,8 +26,9 @@ const CHOICES = [
   { years: "3", label: "Defer 3 years" },
 ] as const;
 
-/** Every refusal is a page drawn before the item changed. */
-const REFUSED = "Couldn’t save the plan. Reload the page and try again.";
+// Every refusal is a page drawn before the item or its plan changed.
+const NOT_SAVED = "Couldn’t save the plan. Reload the page and try again.";
+const NOT_CLEARED = "Couldn’t clear the plan. Reload the page and try again.";
 
 /**
  * `What if?` (`docs/ui/screens/capex-forecast.md`, the selected year): PRD
@@ -87,7 +88,7 @@ export function WhatIfMenu({
     startTransition(async () => {
       const saved = await planReplacement(itemId, year);
       if (!saved.ok) {
-        toast.error(REFUSED);
+        toast.error(NOT_SAVED);
         return;
       }
 
@@ -100,7 +101,7 @@ export function WhatIfMenu({
     startTransition(async () => {
       const dropped = await dropPlan(itemId);
       if (!dropped.ok) {
-        toast.error(REFUSED);
+        toast.error(NOT_CLEARED);
         return;
       }
 

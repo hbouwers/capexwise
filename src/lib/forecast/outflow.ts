@@ -123,7 +123,8 @@ export function scheduledYear(item: ForecastItem): number {
  *
  * - **A replacement already past due lands this year.** Money not yet spent
  *   can only be spent from now on, and folding it here is what makes this
- *   year's replacements the dashboard's End of life tile.
+ *   year's replacements the dashboard's End of life tile, as long as no plan
+ *   has moved one.
  * - **An item recurs.** Once replaced it is new again and is due a life later,
  *   so a five-year smoke detector due this year is due again in five. Counting
  *   it once would understate every year after, and the reserve with them.

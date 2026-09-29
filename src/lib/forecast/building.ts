@@ -29,8 +29,9 @@ export type BuildingFlag =
  *    earliest, and the costliest of that year.
  * 4. Otherwise `Healthy`.
  *
- * "The next three years" are the three after this one. An item due this year
- * or earlier is past life, which the first rule has already said.
+ * "The next three years" are the three after this one. An item projected for
+ * this year or earlier is past life, which the first rule has already said;
+ * one planned for this year is not, and can be named here with this year.
  *
  * **The first two rules read the item's age and ignore a plan** (#96). A
  * furnace planned for 2029 is still past life today, and a plan to live with
@@ -144,8 +145,10 @@ export function capexThroughNextYear(
 /**
  * The End of life tile: active items at or past their expected life, split by
  * whether the install year behind each is audited or estimated — PRD F0's
- * "flagged as estimates rather than mixed in silently". The same set as the
- * forecast's bar for this year, which folds every past-due replacement into
+ * "flagged as estimates rather than mixed in silently". **Age, not plans**
+ * (#96): a roof past its life and planned for next year is still counted here,
+ * though the forecast's bar for this year no longer holds it. Without plans,
+ * it is the same set as that bar, which folds every past-due replacement into
  * it; the tile links there.
  */
 export function endOfLife(

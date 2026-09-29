@@ -158,7 +158,7 @@ describe("an item leaving service", () => {
 
     expect(
       await recordReplacement(item.id, {
-        installedOn: `${THIS_YEAR}-06-01`,
+        installedOn: todayIn(ZONE),
         cost: "",
       }),
     ).toMatchObject({ ok: true });
