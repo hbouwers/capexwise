@@ -112,10 +112,10 @@ Changing a classification saves it and re-renders the statement and the liabilit
 The recomputation is never done in the browser, so the figure on screen is always one the tax module
 produced.
 
-**Which items appear, and where their classification is stored, are both open.** "Planned this
-year" needs a planned replacement year a person has chosen, and nothing stores a classification for
-work that has not happened — `transactions.classification` is for spend already recorded. Both are
-[gaps](README.md#gaps-these-specs-found), and this card cannot be built until they are closed.
+**Which items appear is `planned_work`'s live plans for the year** (#96,
+[data-model §5](../../data-model.md)): an item's next replacement somebody planned, and discretionary
+projects that replace no tracked item. The call is stored on the plan, and copies onto the expense
+when the work is recorded. Building the card is [#144](https://github.com/hbouwers/capexwise/issues/144).
 
 The de minimis safe harbour threshold is a setting ([PRD F4](../../PRD.md)), and an item under it
 says so in its row: `Under the $2,500 de minimis threshold`.

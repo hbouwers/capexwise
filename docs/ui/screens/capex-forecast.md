@@ -135,9 +135,11 @@ whole window is behind us has none.
 **`What if?`** is PRD F3's sensitivity: `Defer 1 year`, `Defer 2 years`, `Defer 3 years`. Choosing
 one adds it to `?defer={itemId}:{years}`, and the chart, the figures and the reserve projection
 recompute on the server with the item moved. A bar above the chart says what is being shown —
-`Showing 1 change: Roof, Sumner St → 2030` — with `Clear`. Nothing is saved: this answers "what if",
-and deciding to defer is a different act with nowhere to be stored yet — a
-[gap](README.md#gaps-these-specs-found), and the one the tax planner's timing levers need too.
+`Showing 1 change: Roof, Sumner St → 2030` — with `Clear`. A deferral answers "what if", and is not
+saved until somebody decides: **`Save as plan for {year}`** makes it the item's plan (#96), and
+**`Clear plan`** gives a plan up. A planned item's next replacement lands in its planned year, and
+its note leads with both years — `planned for 2028 · projected 2026 · 30 yr life · …` — so the
+decision is shown beside the arithmetic it overrode.
 
 ### Reserve projection
 
@@ -190,6 +192,21 @@ than inventing a share:
   `with {n} more items`.
 - **The year's table folds on its own width, 36rem**, not at `md`: beside the rail at 1024px the
   column is 347px, narrower than a phone.
+
+#96 added plans, and settled:
+
+- **`Save as plan` saves the year the chart is showing**, deferral and all, and takes the deferral
+  out of the URL, since the saved forecast now shows the same thing. It is offered only while a
+  deferral is applied. **`Clear plan`** is offered on a planned item with no deferral applied, and
+  the radio group's first choice reads `As planned` there. A deferral on a planned item moves it
+  from the planned year.
+- **A planned year has no estimate window.** The year is a decision, not a guess. The item's
+  confidence still decides which half of the bar its cost stacks in, because that rests on the
+  install year.
+- **A plan for a year already gone folds into this year as Overdue**, measured from the planned
+  year: it was not kept.
+- **The `Planned` tag is unchanged.** It still means "not due, overdue or big ticket". A plan shows
+  in the note, and the chart has no separate mark for one yet.
 
 ---
 
