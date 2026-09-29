@@ -14,6 +14,7 @@ import {
   levelFundingPerMonthCents,
   outflowByYear,
   replacements,
+  scheduledYear,
   tenYearTotalCents,
 } from "@/lib/forecast/outflow";
 
@@ -32,6 +33,7 @@ function item(overrides: Partial<ForecastItem> = {}): ForecastItem {
     replacementCostCents: 100_000,
     confidence: "audited",
     status: "active",
+    plannedYear: null,
     ...overrides,
   };
 }
@@ -267,6 +269,88 @@ describe("replacements", () => {
       }
     });
   });
+
+  // #96. A plan is a decision somebody made, so it outranks the arithmetic —
+  // and the arithmetic stays on the row, because the forecast shows both.
+  describe("a plan", () => {
+    it("moves the next replacement to its year, and keeps the projection", () => {
+      // Projected 2026, planned three years later.
+      const furnace = item({ plannedYear: 2029 });
+      const [next] = replacements([furnace], THIS_YEAR);
+
+      expect(next).toMatchObject({
+        year: 2029,
+        naturalYear: 2026,
+        plannedYear: 2029,
+        deferredBy: 0,
+      });
+    });
+
+    it("can bring a replacement forward of its projection", () => {
+      const roof = item({ installYear: 2014, expectedLifeYears: 15 }); // 2029
+
+      expect(
+        replacements([{ ...roof, plannedYear: 2027 }], THIS_YEAR)[0]?.year,
+      ).toBe(2027);
+    });
+
+    it("counts the recurrences on from the planned year", () => {
+      const detector = item({
+        installYear: 2021,
+        expectedLifeYears: 5,
+        plannedYear: 2028,
+      });
+      const found = replacements([detector], THIS_YEAR);
+
+      // Projected 2026, 2031; planned 2028, so 2028 and 2033.
+      expect(yearsOf(found)).toEqual([2028, 2033]);
+      expect(found.find((r) => r.year === 2033)?.plannedYear).toBeNull();
+    });
+
+    it("folds a plan for a year already gone into this year, Overdue", () => {
+      // Projected 2030, planned 2024 and not done.
+      const late = item({ installYear: 2010, plannedYear: 2024 });
+
+      expect(replacements([late], THIS_YEAR)[0]).toMatchObject({
+        year: THIS_YEAR,
+        tag: "overdue",
+      });
+    });
+
+    it("is Due, not Overdue, when planned for this year out of a past projection", () => {
+      const late = item({ installYear: 1990, plannedYear: THIS_YEAR });
+
+      expect(replacements([late], THIS_YEAR)[0]?.tag).toBe("due");
+    });
+
+    it("drops an estimate's window, since its year is no longer a guess", () => {
+      const roof = item({
+        installYear: 2014,
+        expectedLifeYears: 15,
+        confidence: "estimated",
+        plannedYear: 2030,
+      });
+      const found = replacements([roof], THIS_YEAR);
+
+      expect(found[0]?.range).toBeNull();
+      // Its confidence is the install year's, and stays on the bar's split.
+      expect(outflowByYear(found, THIS_YEAR)[4]?.estimatedCents).toBe(100_000);
+    });
+
+    it("is deferred from the planned year", () => {
+      const furnace = item({ plannedYear: 2028 });
+
+      expect(
+        replacements([furnace], THIS_YEAR, new Map([[furnace.id, 2]]))[0],
+      ).toMatchObject({ year: 2030, plannedYear: 2028, deferredBy: 2 });
+    });
+
+    it("can put a replacement past the ten years", () => {
+      expect(replacements([item({ plannedYear: 2040 })], THIS_YEAR)).toEqual(
+        [],
+      );
+    });
+  });
 });
 
 describe("estimateSpreadYears", () => {
@@ -383,5 +467,14 @@ describe("level funding", () => {
 
   it("is zero with nothing due", () => {
     expect(fundingFor(0).monthly).toBe(0);
+  });
+});
+
+describe("scheduledYear", () => {
+  it("is the plan's year when there is one, and the projection's when not", () => {
+    expect(scheduledYear(item({ installYear: 2010 }))).toBe(2030);
+    expect(scheduledYear(item({ installYear: 2010, plannedYear: 2024 }))).toBe(
+      2024,
+    );
   });
 });

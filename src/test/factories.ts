@@ -32,6 +32,7 @@ import {
   invitations,
   memberships,
   organizations,
+  plannedWork,
   rentPeriods,
   tasks,
   transactions,
@@ -54,6 +55,8 @@ export const TEST_ACCESS_CODE_KEYS =
 const testKeyring = parseKeyring(TEST_ACCESS_CODE_KEYS);
 
 type Organization = typeof organizations.$inferSelect;
+type PlannedWork = typeof plannedWork.$inferSelect;
+type PlannedWorkInput = typeof plannedWork.$inferInsert;
 type OrganizationInput = typeof organizations.$inferInsert;
 type User = typeof users.$inferSelect;
 type UserInput = typeof users.$inferInsert;
@@ -517,4 +520,29 @@ export async function createTransaction(
     .returning();
 
   return firstRow(rows, "transactions");
+}
+
+/**
+ * A live plan for an item's next replacement in 2029, unclassified — unless
+ * the overrides make it something else. With no `capitalItemId`, pass a
+ * `title` and an `estCostCents` for a discretionary project, which the table
+ * insists on. Takes the building as well as the org, both required, for
+ * `createUnit`'s reason.
+ */
+export async function createPlannedWork(
+  orgId: string,
+  buildingId: string,
+  overrides: Partial<PlannedWorkInput> = {},
+): Promise<PlannedWork> {
+  const rows = await testDb()
+    .insert(plannedWork)
+    .values({
+      orgId,
+      buildingId,
+      plannedYear: 2029,
+      ...overrides,
+    })
+    .returning();
+
+  return firstRow(rows, "planned_work");
 }

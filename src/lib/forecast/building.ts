@@ -6,11 +6,12 @@
  * forecast, so the card cannot say `Healthy` over a table with a row past
  * life.
  */
-import { ageInYears, lifeStatus, replacementYear } from "@/lib/forecast/life";
+import { ageInYears, lifeStatus } from "@/lib/forecast/life";
 import {
   BIG_TICKET_CENTS,
   type ForecastItem,
   replacements,
+  scheduledYear,
 } from "@/lib/forecast/outflow";
 
 export type BuildingFlag =
@@ -30,6 +31,11 @@ export type BuildingFlag =
  *
  * "The next three years" are the three after this one. An item due this year
  * or earlier is past life, which the first rule has already said.
+ *
+ * **The first two rules read the item's age and ignore a plan** (#96). A
+ * furnace planned for 2029 is still past life today, and a plan to live with
+ * that does not make it healthy. The third reads the forecast, so it takes
+ * the planned year, as the chart does.
  */
 export function buildingFlag(
   items: readonly ForecastItem[],
@@ -111,8 +117,10 @@ export function systemsLifeUsedPercent(
 
 /**
  * **CapEx through {next year}**: the replacement cost of active items whose
- * own replacement year is next year or earlier — past-due ones included, and
- * not their recurrences, which the ten-year figures count. A replacement year
+ * next replacement is meant for next year or earlier — past-due ones
+ * included, and not their recurrences, which the ten-year figures count.
+ * "Meant for" is the planned year when there is one (#96), so this tile and
+ * the forecast's bars move together when a plan moves a roof. A replacement year
  * is a year, so "the next twelve months" is not a set the data can name; the
  * label states the boundary this sum uses (`portfolio.md`). The building
  * page's tile and the portfolio's card are both this.
@@ -122,7 +130,7 @@ export function capexThroughNextYear(
   thisYear: number,
 ): { cents: number; items: number; pastLife: number } {
   const due = items.filter(
-    (item) => item.status === "active" && replacementYear(item) <= thisYear + 1,
+    (item) => item.status === "active" && scheduledYear(item) <= thisYear + 1,
   );
 
   return {

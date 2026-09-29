@@ -7,7 +7,13 @@ import "server-only";
 
 import { and, asc, eq, sql } from "drizzle-orm";
 
-import { buildings, capitalItems, organizations, units } from "@/db/schema";
+import {
+  buildings,
+  capitalItems,
+  organizations,
+  plannedWork,
+  units,
+} from "@/db/schema";
 import { buildingName } from "@/lib/buildings";
 import type { CalendarDate } from "@/lib/dates";
 import type { ForecastItem } from "@/lib/forecast/outflow";
@@ -45,6 +51,13 @@ export type ForecastInputs = {
   /** Active items on those buildings, in no order — the forecast sorts. */
   items: ForecastRow[];
 };
+
+/** An item's live plan, as a join condition. */
+export const livePlanOf = and(
+  eq(plannedWork.orgId, capitalItems.orgId),
+  eq(plannedWork.capitalItemId, capitalItems.id),
+  eq(plannedWork.status, "planned"),
+);
 
 /**
  * **Only what the portfolio's figures count**: active buildings, and the
@@ -99,6 +112,7 @@ export async function getForecastInputs(): Promise<ForecastInputs> {
         replacementCostCents: capitalItems.replacementCostCents,
         confidence: capitalItems.confidence,
         status: capitalItems.status,
+        plannedYear: plannedWork.plannedYear,
       })
       .from(capitalItems)
       .innerJoin(
@@ -115,6 +129,9 @@ export async function getForecastInputs(): Promise<ForecastInputs> {
           eq(units.id, capitalItems.unitId),
         ),
       )
+      // Its live plan (#96). `planned_work_one_live_plan` makes this one row
+      // at most, so the join never counts an item twice.
+      .leftJoin(plannedWork, livePlanOf)
       .where(
         and(
           eq(capitalItems.orgId, db.orgId),

@@ -8,10 +8,11 @@ import "server-only";
 
 import { and, asc, eq, max } from "drizzle-orm";
 
-import { capitalItems, capitalItemTypes } from "@/db/schema";
+import { capitalItems, capitalItemTypes, plannedWork } from "@/db/schema";
 import type { CalendarDate } from "@/lib/dates";
 import type { Cents } from "@/lib/money";
 import { getOrgContext } from "@/server/org-context";
+import { livePlanOf } from "@/server/queries/forecast";
 
 /**
  * One row of the equipment table: an item, the group of its type, and what the
@@ -36,6 +37,8 @@ export type EquipmentItem = {
   actualCostCents: Cents | null;
   status: (typeof capitalItems.$inferSelect)["status"];
   notes: string | null;
+  /** The year its live plan chose for its next replacement (#96), if any. */
+  plannedYear: number | null;
 };
 
 /**
@@ -69,12 +72,14 @@ export async function listEquipment(
         actualCostCents: capitalItems.actualCostCents,
         status: capitalItems.status,
         notes: capitalItems.notes,
+        plannedYear: plannedWork.plannedYear,
       })
       .from(capitalItems)
       .leftJoin(
         capitalItemTypes,
         eq(capitalItemTypes.slug, capitalItems.typeSlug),
       )
+      .leftJoin(plannedWork, livePlanOf)
       .where(
         and(
           eq(capitalItems.orgId, db.orgId),

@@ -10,6 +10,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -174,5 +175,8 @@ export const transactions = pgTable(
     // Zero is not an expense or a refund; it is a row somebody meant to fill
     // in. The modal refuses it, and so does the table.
     check("transactions_amount_not_zero", sql`${table.amountCents} <> 0`),
+    // What a reference names when it names the org too (§9, fifth item): the
+    // plan an expense carried out (#96).
+    unique("transactions_org_and_id").on(table.orgId, table.id),
   ],
 );

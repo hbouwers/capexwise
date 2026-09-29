@@ -16,6 +16,7 @@ const roof: ForecastItem = {
   replacementCostCents: 2_000_000,
   confidence: "audited",
   status: "active",
+  plannedYear: null,
 };
 
 const heater: ForecastItem = {
@@ -26,6 +27,7 @@ const heater: ForecastItem = {
   replacementCostCents: 300_000,
   confidence: "estimated",
   status: "active",
+  plannedYear: null,
 };
 
 const reserve = { balanceCents: 1_000_000, monthlyContributionCents: 50_000 };

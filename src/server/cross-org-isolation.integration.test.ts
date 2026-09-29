@@ -100,6 +100,7 @@ import {
   createOrganization,
   createRentPeriod,
   createTask,
+  createPlannedWork,
   createTransaction,
   createUnit,
   createUser,
@@ -197,6 +198,9 @@ const { createExpense, deleteExpense, updateExpense } =
   await import("@/server/actions/expenses");
 const { getExpenseModal, getExpensesPage, getPortfolioSpend } =
   await import("@/server/queries/expenses");
+const { dropPlan, planReplacement } =
+  await import("@/server/actions/planned-work");
+const { getForecastInputs } = await import("@/server/queries/forecast");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -222,6 +226,7 @@ const ORG_OWNED = {
   capital_item_allocations: "org_id",
   tasks: "org_id",
   transactions: "org_id",
+  planned_work: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -466,6 +471,26 @@ async function seedTwoOrgs() {
       classification: null,
     });
 
+    // Every kind of plan and every link (#96): the refrigerator's live
+    // replacement, the furnace's carried out by the plumber's bill, and a unit
+    // A remodel that replaces nothing. The same three on both sides, by year.
+    const itemPlan = await createPlannedWork(org.id, building.id, {
+      capitalItemId: unitItem.id,
+    });
+    const donePlan = await createPlannedWork(org.id, building.id, {
+      capitalItemId: sharedItem.id,
+      plannedYear: 2026,
+      status: "done",
+      transactionId: sharedExpense.id,
+    });
+    const projectPlan = await createPlannedWork(org.id, building.id, {
+      unitId: unit.id,
+      title: "Retile the bathroom",
+      estCostCents: 650_000,
+      plannedYear: 2027,
+      classification: "improvement",
+    });
+
     return {
       org,
       owner,
@@ -486,6 +511,9 @@ async function seedTwoOrgs() {
       unitTask,
       sharedExpense,
       unitExpense,
+      itemPlan,
+      donePlan,
+      projectPlan,
     };
   }
 
@@ -529,6 +557,9 @@ function identifiersOf(side: Side): string[] {
     side.unitTask.id,
     side.sharedExpense.id,
     side.unitExpense.id,
+    side.itemPlan.id,
+    side.donePlan.id,
+    side.projectPlan.id,
   ];
 }
 
@@ -2240,6 +2271,53 @@ describe("the expense paths", () => {
   });
 });
 
+describe("the planned work paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result);
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  it("reads the caller's plans into the forecast, and none of the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    const inputs = await getForecastInputs();
+    expect(
+      inputs.items.map((item) => [item.id, item.plannedYear]).sort(),
+    ).toEqual(
+      [
+        [a.sharedItem.id, null],
+        [a.unitItem.id, 2029],
+      ].sort(),
+    );
+    expect(mentionsB(inputs, b)).toEqual([]);
+  });
+
+  it("plans and drops the caller's replacement, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const item of [b.unitItem, b.sharedItem]) {
+      expect(await planReplacement(item.id, 2031)).toEqual({ ok: false });
+      expect(await dropPlan(item.id)).toEqual({ ok: false });
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: A's own, moved, dropped and planned afresh.
+    expect(await planReplacement(a.unitItem.id, 2031)).toEqual({ ok: true });
+    expect(await dropPlan(a.unitItem.id)).toEqual({ ok: true });
+    expect(await planReplacement(a.sharedItem.id, 2030)).toEqual({ ok: true });
+    expect((await rowsOwnedBy(a.org.id)).planned_work).toHaveLength(4);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
 /**
  * A scoped handle for the owner of `side`'s org, reached the way every domain
  * query will reach one: a signed session, then `getOrgContext()`. Not
@@ -2317,12 +2395,13 @@ describe.each(Object.entries(ORG_OWNED))(
 
       // Three acceptable outcomes, and which one a table gets is the
       // migration's decision rather than this test's: `organizations`,
-      // `contacts`, `building_facts`, `rent_periods` and
-      // `capital_item_allocations` have no DELETE grant for the scoped role —
-      // an org is soft-deleted and the purge is not a request, a contact is
-      // archived, a building's facts are cleared rather than removed, a vacant
-      // month is marked rather than deleted, and a share goes with its item —
-      // so they are refused before any row is considered. `capital_items` may
+      // `contacts`, `building_facts`, `rent_periods`,
+      // `capital_item_allocations` and `planned_work` have no DELETE grant for
+      // the scoped role — an org is soft-deleted and the purge is not a
+      // request, a contact is archived, a building's facts are cleared rather
+      // than removed, a vacant month is marked rather than deleted, a share
+      // goes with its item, and a plan is dropped and kept — so they are
+      // refused before any row is considered. `capital_items` may
       // be deleted only as the add-equipment checklist left it, for its Undo
       // (`0021`), which every seeded item is — and the shared furnace is held
       // by the expense recorded against it (`restrict`, §7) — and `tasks` only
@@ -2635,6 +2714,30 @@ describe("a reference from one org's row to another's", () => {
         sql`update transactions set contact_id = ${b.contact.id}
             where id = ${a.unitExpense.id}`,
     ],
+    [
+      "a plan on another org's building",
+      (a: Side, b: Side) =>
+        sql`insert into planned_work (org_id, building_id, title, est_cost_cents, planned_year)
+            values (${a.org.id}, ${b.building.id}, 'Retile the bathroom', 650000, 2027)`,
+    ],
+    [
+      "a plan in another org's unit",
+      (a: Side, b: Side) =>
+        sql`update planned_work set unit_id = ${b.unit.id}
+            where id = ${a.projectPlan.id}`,
+    ],
+    [
+      "a plan for another org's equipment",
+      (a: Side, b: Side) =>
+        sql`update planned_work set capital_item_id = ${b.unitItem.id}
+            where id = ${a.itemPlan.id}`,
+    ],
+    [
+      "a plan carried out by another org's expense",
+      (a: Side, b: Side) =>
+        sql`update planned_work set transaction_id = ${b.sharedExpense.id}
+            where id = ${a.donePlan.id}`,
+    ],
   ])("refuses %s", async (_, statement) => {
     const { a, b } = await seedTwoOrgs();
     const db = await scopedHandleFor(a);
@@ -2727,5 +2830,25 @@ describe("a reference from one org's row to another's", () => {
     );
 
     expect((await rowsOwnedBy(a.org.id)).transactions).toHaveLength(3);
+  });
+
+  // The control for the four plan cases: a project in A's own unit, and A's
+  // furnace plan pointed at A's other expense instead.
+  it("lets a plan onto the scoped org's own rows", async () => {
+    const { a } = await seedTwoOrgs();
+    const db = await scopedHandleFor(a);
+
+    await db.run(async (tx) => {
+      await tx.execute(
+        sql`insert into planned_work (org_id, building_id, unit_id, title, est_cost_cents, planned_year)
+            values (${a.org.id}, ${a.building.id}, ${a.unit.id}, 'Refinish the floors', 420000, 2028)`,
+      );
+      await tx.execute(
+        sql`update planned_work set transaction_id = ${a.unitExpense.id}
+            where id = ${a.donePlan.id}`,
+      );
+    });
+
+    expect((await rowsOwnedBy(a.org.id)).planned_work).toHaveLength(4);
   });
 });

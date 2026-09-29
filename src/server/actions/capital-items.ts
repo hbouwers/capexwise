@@ -22,6 +22,7 @@ import {
   capitalItemAllocations,
   capitalItems,
   capitalItemTypes,
+  plannedWork,
   transactions,
   units,
 } from "@/db/schema";
@@ -35,7 +36,7 @@ import { todayIn, yearOf } from "@/lib/dates";
 import { type FieldErrors, UNREADABLE_FORM } from "@/lib/forms";
 import { withoutParameters } from "@/lib/query-errors";
 import { track } from "@/server/analytics";
-import { getOrgContext } from "@/server/org-context";
+import { getOrgContext, type OrgScopedTx } from "@/server/org-context";
 
 export type AddCapitalItemsResult =
   { ok: true; itemIds: string[] } | { ok: false; errors: FieldErrors };
@@ -479,6 +480,10 @@ export async function recordReplacement(
           and(eq(capitalItems.orgId, db.orgId), eq(capitalItems.id, old.id)),
         );
 
+      // The replacement a plan was for has happened, whenever it was planned
+      // (#96). The successor starts with no plan: its projection is new.
+      await closePlan(tx, db.orgId, old.id, "done");
+
       return { ok: true, itemId: successor.id };
     });
   } catch (error) {
@@ -653,9 +658,35 @@ export async function removeCapitalItem(
           and(eq(capitalItems.orgId, db.orgId), eq(capitalItems.id, item.id)),
         );
 
+      // Nothing is left to replace, so its plan is given up on (#96).
+      await closePlan(tx, db.orgId, item.id, "dropped");
+
       return { ok: true };
     });
   } catch (error) {
     throw withoutParameters(error, "Removing an item");
   }
+}
+
+/**
+ * Closes an item's live plan, if it has one, when the item leaves service:
+ * `done` for a replacement and `dropped` for a removal. Every plan is kept,
+ * so this is an update and never a delete.
+ */
+async function closePlan(
+  tx: OrgScopedTx,
+  orgId: string,
+  itemId: string,
+  status: "done" | "dropped",
+): Promise<void> {
+  await tx
+    .update(plannedWork)
+    .set({ status })
+    .where(
+      and(
+        eq(plannedWork.orgId, orgId),
+        eq(plannedWork.capitalItemId, itemId),
+        eq(plannedWork.status, "planned"),
+      ),
+    );
 }
