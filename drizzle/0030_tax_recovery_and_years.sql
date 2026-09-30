@@ -19,11 +19,12 @@ CREATE TABLE "tax_years" (
 -- state, which is all the drift check compares.
 --
 -- **Which types are five-year property** (#144, decision 1): appliances and
--- carpet, IRS Publication 527's Table 1-1 examples of property used in a
--- rental activity. Everything else is a structural component of the building
--- and recovers with it over 27.5 years: the kitchen cabinets, the heating and
--- cooling, the water heater, the flooring that is glued or nailed down, the
--- wiring, the detectors. The disposal and the over-the-range microwave are
+-- carpet, as IRS Publication 527's Table 2-1, "MACRS Recovery Periods for
+-- Property Used in Rental Activities", lists them. Everything else is what
+-- that table calls a structural component, "such as furnaces, waterpipes,
+-- venting", and recovers with the building over 27.5 years: the kitchen
+-- cabinets, the heating and cooling, the water heater, the flooring that is
+-- glued or nailed down, the wiring, the detectors. The disposal and the over-the-range microwave are
 -- appliances; the range hood that shares their row is taken with them.
 ALTER TABLE "capital_item_types" ADD COLUMN "recovery_class" text;--> statement-breakpoint
 UPDATE "capital_item_types" SET "recovery_class" = CASE
