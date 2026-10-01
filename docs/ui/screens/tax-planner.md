@@ -23,10 +23,11 @@ reference — the tax module and its tests are, and this page renders what they 
 | --- | --- |
 | Title | `Tax planner` |
 | Subtitle | `{year} estimate · Schedule E` |
-| Actions | A building `Select` (`All buildings`, then each) in `?building=`, and a tax year `Select` in `?year=` |
+| Actions | A building `Select` (`All buildings`, then each) in `?building=`, and, from #44, a tax year `Select` in `?year=` |
 
-The year list is the current year until [#44](https://github.com/hbouwers/capexwise/issues/44)
-freezes filed years; after that, a filed year opens read-only from its snapshot, and says so.
+The year is the current one until [#44](https://github.com/hbouwers/capexwise/issues/44) freezes
+filed years, and until then there is no year `Select`: a list of one is not a choice. After that, a
+filed year opens read-only from its snapshot, and says so.
 
 ---
 
@@ -175,7 +176,8 @@ planned-year record as the decisions card.
 
 The moves are across the turn of the year: this year's classified plans into January next year,
 and next year's into December this year. The effect is on this year's liability, biggest saving
-first. An undecided plan has no lever, since it counts for nothing either way.
+first. An undecided plan has no lever, since it counts for nothing either way. A lever says what a move
+would do and does not make it; setting a plan's month from one is still to build.
 
 ### Advisor
 
@@ -212,8 +214,10 @@ line, `The advisor is part of Premium.`, and nothing else is computed for it. An
 - **Below `lg` the liability card comes first**, straight after the disclaimer, then the statement,
   then the decisions, levers and advisor. On a phone the headline figure is what someone came for,
   and the statement beneath is how they check it.
-- **Below `sm`** a decision row stacks: name and cost, then the segmented control full width, then
-  its effect.
+- **A decision row lays out by its card's width, not the viewport's**, because the card shares the
+  screen with the rail. On a wide card it is one line. Otherwise the name and cost come first, then
+  the segmented control and its effect, and on a phone the control is full width with its effect
+  beneath.
 - `--text-3xl` holds at 320px: a six-figure liability is about 200px of mono at 42px, inside the
   card's 240px.
 
