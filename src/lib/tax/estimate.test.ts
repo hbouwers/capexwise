@@ -140,6 +140,78 @@ describe("the liability card", () => {
   });
 });
 
+describe("decisions", () => {
+  it("states each of this year's calls against leaving that plan undecided", () => {
+    const repair = plan({ classification: "repair", costCents: 1_000_000 });
+    const roof = plan({ plannedMonth: 12 });
+    const undecided = plan({ classification: "unclassified" });
+    const e = run({
+      plans: [repair, roof, undecided, plan({ plannedYear: YEAR + 1 })],
+    });
+    const december = depreciationIn(
+      1_850_000,
+      "residential",
+      { year: YEAR, month: 12 },
+      YEAR,
+    );
+
+    expect(e.decisions).toEqual([
+      {
+        plan: repair,
+        taxableEffectCents: -1_000_000,
+        liabilityEffectCents: -290_000,
+        underDeMinimis: false,
+      },
+      {
+        plan: roof,
+        taxableEffectCents: -december,
+        liabilityEffectCents:
+          liabilityFor(2_000_000 - december, 2_900) -
+          liabilityFor(2_000_000, 2_900),
+        underDeMinimis: false,
+      },
+      {
+        plan: undecided,
+        taxableEffectCents: 0,
+        liabilityEffectCents: 0,
+        underDeMinimis: false,
+      },
+    ]);
+  });
+
+  it("says when a plan is under the year's de minimis threshold, and not when the year has none", () => {
+    const small = plan({ costCents: 250_000 });
+
+    expect(run({ plans: [small] }).decisions[0]).toMatchObject({
+      taxableEffectCents: -250_000,
+      underDeMinimis: true,
+    });
+    expect(
+      run({ plans: [small], deMinimis: new Map([[YEAR, null]]) }).decisions[0]
+        ?.underDeMinimis,
+    ).toBe(false);
+  });
+
+  it("returns the year's threshold for the card to name", () => {
+    expect(run().deMinimisCents).toBe(250_000);
+    expect(run({ deMinimis: new Map([[YEAR, 100_000]]) }).deMinimisCents).toBe(
+      100_000,
+    );
+  });
+
+  it("still states the income a call moves before a rate is entered", () => {
+    const e = run({
+      rateBps: null,
+      plans: [plan({ classification: "repair", costCents: 400_000 })],
+    });
+
+    expect(e.decisions[0]).toMatchObject({
+      taxableEffectCents: -400_000,
+      liabilityEffectCents: null,
+    });
+  });
+});
+
 describe("timing levers", () => {
   it("moving an improvement from December into January takes its depreciation out of the year", () => {
     const roof = plan({ plannedMonth: 12 });
