@@ -19,10 +19,12 @@ import { type Cents } from "@/lib/money";
 
 import { ASSUMED_MONTH, divideRounded } from "@/lib/tax/depreciation";
 import {
+  deMinimisFor,
   type Statement,
   statement,
   type StatementInput,
   type TaxPlan,
+  underDeMinimis,
 } from "@/lib/tax/statement";
 
 export type TaxEstimateInput = StatementInput & {
@@ -56,9 +58,33 @@ export type TimingLever = {
   liabilityEffectCents: Cents | null;
 };
 
+/**
+ * One of this year's plans, as the `Repair or improvement?` card shows it: what
+ * its current call does to this year, against leaving it undecided.
+ */
+export type PlanDecision = {
+  plan: TaxPlan;
+  /**
+   * The change in this year's taxable rental income from the call made. Zero
+   * for an undecided plan, which counts for nothing either way.
+   */
+  taxableEffectCents: Cents;
+  /** The change in this year's liability. Null until a rate is entered. */
+  liabilityEffectCents: Cents | null;
+  /**
+   * At or under the year's de minimis threshold, so an improvement is
+   * deducted in full this year as a repair is.
+   */
+  underDeMinimis: boolean;
+};
+
 export type TaxEstimate = {
   statement: Statement;
   liability: Liability | null;
+  /** This year's plans, in the order they were given. */
+  decisions: PlanDecision[];
+  /** The year's de minimis threshold, or null where it is not elected. */
+  deMinimisCents: Cents | null;
   levers: TimingLever[];
 };
 
@@ -95,6 +121,37 @@ export function estimate(input: TaxEstimateInput): TaxEstimate {
           : null,
     };
   }
+
+  const deMinimisCents = deMinimisFor(input.deMinimis, input.year);
+
+  // Each call against the same statement with only that plan undecided, so a
+  // row's effect is its own and the rows need not sum to the card's total: a
+  // loss floors the liability once, not per plan.
+  const decisions: PlanDecision[] = input.plans
+    .filter((plan) => plan.plannedYear === input.year)
+    .map((plan) => {
+      const without =
+        plan.classification === "unclassified"
+          ? current
+          : statement({
+              ...input,
+              plans: input.plans.map((p) =>
+                p.id === plan.id
+                  ? { ...p, classification: "unclassified" as const }
+                  : p,
+              ),
+            });
+      const before = liabilityOf(without);
+      const after = liabilityOf(current);
+
+      return {
+        plan,
+        taxableEffectCents: current.taxableCents - without.taxableCents,
+        liabilityEffectCents:
+          before === null || after === null ? null : after - before,
+        underDeMinimis: underDeMinimis(plan.costCents, deMinimisCents),
+      };
+    });
 
   const levers: TimingLever[] = [];
   for (const plan of input.plans) {
@@ -144,7 +201,7 @@ export function estimate(input: TaxEstimateInput): TaxEstimate {
       (a.plan.id < b.plan.id ? -1 : a.plan.id > b.plan.id ? 1 : 0),
   );
 
-  return { statement: current, liability, levers };
+  return { statement: current, liability, decisions, deMinimisCents, levers };
 }
 
 /**

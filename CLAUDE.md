@@ -45,7 +45,11 @@ Capital work can be planned: `planned_work` holds a chosen year and a repair-or-
 forecast takes a planned year over the projection, and `What if?` saves a deferral as a plan — #96.
 The tax planner's arithmetic is written and tested in `src/lib/tax/`: the Schedule E statement, straight-line depreciation by recovery class and convention, the de minimis safe harbor, the liability and the timing levers (#144). The schema it reads is in
 too: each item type's recovery class, an org's `tax_years` row for the rate and the threshold, and
-a plan's optional month. Its page, and the rest of what the product is *for*, are still unwritten. Rules below that describe runtime behaviour describe what the code *will*
+a plan's optional month. The page is at `/tax`: the statement with every line opening to its inputs,
+a repair-or-improvement call per plan this year saved on the server, the liability with its rate
+entered on the card, and the timing levers. Copying a plan's call onto its expense, a plan in the
+equipment table, and the allocation disclosure are still to come. So is the rest of what the
+product is *for*. Rules below that describe runtime behaviour describe what the code *will*
 do — they are the contract to build against, not a description of something already working.
 Anything already true is marked as such.
 
