@@ -202,6 +202,8 @@ const { getExpenseModal, getExpensesPage, getPortfolioSpend } =
 const { dropPlan, planReplacement } =
   await import("@/server/actions/planned-work");
 const { getForecastInputs } = await import("@/server/queries/forecast");
+const { classifyPlan, setTaxRate } = await import("@/server/actions/tax");
+const { getTaxInputs } = await import("@/server/queries/tax");
 
 /**
  * Every table that holds an org's data, and the column that says which org a
@@ -2326,6 +2328,65 @@ describe("the planned work paths", () => {
     expect(await dropPlan(a.unitItem.id)).toEqual({ ok: true });
     expect(await planReplacement(a.sharedItem.id, 2030)).toEqual({ ok: true });
     expect((await rowsOwnedBy(a.org.id)).planned_work).toHaveLength(4);
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+});
+
+describe("the tax planner paths", () => {
+  async function signedInAs(side: Side) {
+    const caller = await signIn(side.owner.id);
+    request.headers = new Headers({ cookie: caller.cookie, origin: APP_URL });
+  }
+
+  function mentionsB(result: unknown, b: Side): string[] {
+    const text = JSON.stringify(result, (_key, value: unknown) =>
+      value instanceof Map ? [...value] : value,
+    );
+    return identifiersOf(b).filter((id) => text.includes(id));
+  }
+
+  it("reads the caller's ledger, items and plans, and none of the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+
+    // The real day, so the year is this one and next year's project is a
+    // lever's: the same row on both sides.
+    const inputs = await getTaxInputs();
+    expect(inputs.buildings.map((building) => building.id)).toEqual([
+      a.building.id,
+    ]);
+    expect(inputs.expenses.map((expense) => expense.id).sort()).toEqual(
+      [a.sharedExpense.id, a.unitExpense.id].sort(),
+    );
+    expect(inputs.items.map((item) => item.id).sort()).toEqual(
+      [a.sharedItem.id, a.unitItem.id].sort(),
+    );
+    expect(mentionsB(inputs, b)).toEqual([]);
+  });
+
+  it("classifies the caller's plan, and refuses the other org's", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    for (const plan of [b.itemPlan, b.projectPlan]) {
+      expect(await classifyPlan(plan.id, "repair")).toEqual({ ok: false });
+    }
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+
+    // The control: A's own.
+    expect(await classifyPlan(a.projectPlan.id, "repair")).toEqual({
+      ok: true,
+    });
+    expect(await rowsOwnedBy(b.org.id)).toEqual(before);
+  });
+
+  it("sets the caller's rate, and leaves the other org's year alone", async () => {
+    const { a, b } = await seedTwoOrgs();
+    await signedInAs(a);
+    const before = await rowsOwnedBy(b.org.id);
+
+    expect(await setTaxRate({ rate: "31" })).toEqual({ ok: true });
     expect(await rowsOwnedBy(b.org.id)).toEqual(before);
   });
 });
