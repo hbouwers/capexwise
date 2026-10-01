@@ -1798,8 +1798,17 @@ describe("the rent roll paths", () => {
   }
 
   /** The month before the current one where the seeded buildings are. */
-  function lastMonth() {
-    return addMonths(firstOfMonth(todayIn("America/Indiana/Indianapolis")), -1);
+  /**
+   * A past month nobody has opened: last month, unless that is the month the
+   * seed already opened (`createRentPeriod`'s September 2026), in which case
+   * the one before. Last month alone failed every October 2026.
+   */
+  function unopenedMonth(seeded: string) {
+    const last = addMonths(
+      firstOfMonth(todayIn("America/Indiana/Indianapolis")),
+      -1,
+    );
+    return last === seeded ? addMonths(last, -1) : last;
   }
 
   const paid = {
@@ -1866,7 +1875,7 @@ describe("the rent roll paths", () => {
     const { a, b } = await seedTwoOrgs();
     await signedInAs(a);
     const before = await rowsOwnedBy(b.org.id);
-    const month = lastMonth();
+    const month = unopenedMonth(a.rentPeriod.periodMonth);
     const input = { ...paid, receivedOn: month };
 
     const theirs = await openRentPeriod(b.unit.id, month, input);
