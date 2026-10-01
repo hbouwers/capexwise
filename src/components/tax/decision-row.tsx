@@ -81,7 +81,10 @@ export function DecisionRow({
         return;
       }
 
-      router.refresh();
+      // Inside the transition again: after an `await` an update is not part
+      // of it, and `pending` would clear before the refreshed figures land,
+      // snapping the row back to the old call in between.
+      startTransition(() => router.refresh());
     });
   }
 
