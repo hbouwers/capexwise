@@ -101,6 +101,7 @@ import {
   createRentPeriod,
   createTask,
   createPlannedWork,
+  createTaxYear,
   createTransaction,
   createUnit,
   createUser,
@@ -227,6 +228,7 @@ const ORG_OWNED = {
   tasks: "org_id",
   transactions: "org_id",
   planned_work: "org_id",
+  tax_years: "org_id",
 } as const satisfies Record<string, string>;
 
 /**
@@ -491,6 +493,14 @@ async function seedTwoOrgs() {
       classification: "improvement",
     });
 
+    // A year with a rate entered and the safe harbor turned off (#144). The
+    // same year and figures on both sides, so a lookup by year finds one in
+    // each org.
+    const taxYear = await createTaxYear(org.id, {
+      blendedRateBps: 2_900,
+      deMinimisElected: false,
+    });
+
     return {
       org,
       owner,
@@ -514,6 +524,7 @@ async function seedTwoOrgs() {
       itemPlan,
       donePlan,
       projectPlan,
+      taxYear,
     };
   }
 
@@ -560,6 +571,7 @@ function identifiersOf(side: Side): string[] {
     side.itemPlan.id,
     side.donePlan.id,
     side.projectPlan.id,
+    side.taxYear.id,
   ];
 }
 
@@ -2396,11 +2408,12 @@ describe.each(Object.entries(ORG_OWNED))(
       // Three acceptable outcomes, and which one a table gets is the
       // migration's decision rather than this test's: `organizations`,
       // `contacts`, `building_facts`, `rent_periods`,
-      // `capital_item_allocations` and `planned_work` have no DELETE grant for
-      // the scoped role — an org is soft-deleted and the purge is not a
-      // request, a contact is archived, a building's facts are cleared rather
-      // than removed, a vacant month is marked rather than deleted, a share
-      // goes with its item, and a plan is dropped and kept — so they are
+      // `capital_item_allocations`, `planned_work` and `tax_years` have no
+      // DELETE grant for the scoped role — an org is soft-deleted and the
+      // purge is not a request, a contact is archived, a building's facts are
+      // cleared rather than removed, a vacant month is marked rather than
+      // deleted, a share goes with its item, a plan is dropped and kept, and a
+      // year's settings are set back rather than removed — so they are
       // refused before any row is considered. `capital_items` may
       // be deleted only as the add-equipment checklist left it, for its Undo
       // (`0021`), which every seeded item is — and the shared furnace is held

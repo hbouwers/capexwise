@@ -638,6 +638,7 @@ create table capital_item_types (
   default_life_years  integer not null check (default_life_years > 0),
   default_cost_cents  bigint not null check (default_cost_cents >= 0),
   defaults_updated_at date not null,             -- PRD §11: visible "last updated"
+  recovery_class      text not null check (recovery_class in ('residential', 'five_year')),
   sort_order          integer not null default 0,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
@@ -657,6 +658,14 @@ copied onto the `capital_items` row at add time**, and the user edits them there
 `defaults_updated_at` is what the UI surfaces as the staleness signal. Refreshing the catalogue
 therefore does not silently move anyone's existing numbers, which is the correct behaviour for a
 figure a forecast is built on.
+
+**`recovery_class` is the exception: it is read through the type, not copied** (#144). It is the
+depreciation schedule the tax planner uses, `residential` for 27.5 years mid-month and `five_year`
+for 5 years half-year. It is a classification the law makes rather than an estimate somebody
+corrects, so a migration that fixes one should move every item of the type. `0030` gives appliances
+and carpet `five_year` and everything else `residential`, and has no default, so a new type has to
+say which it is. An item with no type recovers as `residential`, the slower schedule, which never
+overstates a year's deduction.
 
 ### The catalogue's figures
 
@@ -845,6 +854,7 @@ create table planned_work (
   title            text,                         -- a project's name
   est_cost_cents   bigint,                       -- a project's cost
   planned_year     integer not null,
+  planned_month    integer,                      -- null = known only by its year
   classification   transaction_classification not null default 'unclassified',
   status           planned_work_status not null default 'planned',
   transaction_id   uuid,                         -- the expense that carried it out
@@ -864,6 +874,7 @@ create table planned_work (
   constraint planned_work_item_or_project check (
     (capital_item_id is not null and title is null and est_cost_cents is null and unit_id is null)
     or (capital_item_id is null and title is not null and est_cost_cents is not null)),
+  constraint planned_work_month_valid check (planned_month between 1 and 12),
   constraint planned_work_cost_not_negative check (est_cost_cents >= 0),
   constraint planned_work_transaction_when_done
     check (status = 'done' or transaction_id is null)
@@ -901,6 +912,11 @@ the plan becomes `done` and points at the transaction. After that the ledger row
 snapshot rule rent periods follow (§4), and a later change to the plan never rewrites classified
 spend. Nothing writes `transaction_id` until #144; the reference is in place so it does not need a
 migration then.
+
+**`planned_month` is the tax planner's**, and optional (#144). Depreciation starts in the month
+work goes into service, so the month moves this year's figure, and a timing lever sets it. A plan
+known only by its year goes into service in July, and the planner says so. The forecast reads years
+and ignores it.
 
 `transaction_id` names the org and not the building, because an expense can be moved to another
 building after the fact. A deleted expense leaves its plan `done` with nothing pointing at the
@@ -1202,6 +1218,41 @@ which the tax planner reads as "never asked" — unlike `unclassified`, which is
 to decide. The rule is the application's (`asksClassification`); a check here would name a slug
 from reference data in the schema.
 
+### Tax years (#144)
+
+An org's settings for one tax year: the blended rate the liability is multiplied by, and the de
+minimis safe harbor. The first slice of #44, whose freeze of a filed year will land on this row.
+
+```sql
+create table tax_years (
+  id                         uuid primary key default uuidv7(),
+  org_id                     uuid not null references organizations (id) on delete cascade,
+  year                       integer not null,
+  blended_rate_bps           integer,             -- 29% is 2900; null until entered
+  de_minimis_elected         boolean not null default true,
+  de_minimis_threshold_cents bigint not null default 250000,
+  created_at                 timestamptz not null default now(),
+  updated_at                 timestamptz not null default now(),
+
+  constraint tax_years_org_year unique (org_id, year),
+  constraint tax_years_year_plausible check (year between 2000 and 2200),
+  constraint tax_years_rate_valid check (blended_rate_bps between 0 and 10000),
+  constraint tax_years_threshold_not_negative check (de_minimis_threshold_cents >= 0)
+);
+```
+
+- **A year with no row is a year with the defaults**: the threshold at $2,500, elected, and no
+  rate. Nothing writes a row until somebody changes a setting.
+- **The rate has no default.** A liability multiplied by a rate nobody chose is not traceable, so
+  until one is entered the liability card asks for it.
+- **The election and the threshold are two columns**, so turning the safe harbor off for a year and
+  on again keeps the figure. $2,500 is the limit for a taxpayer without an applicable financial
+  statement, which is every small landlord. The schema does not hold anyone to it.
+- **No `delete` for the scoped role.** Setting the defaults back does everything a delete would,
+  and a filed year (#44) will be this row.
+
+`tax_years_org_year` is the index the planner reads a year by, and it leads with `org_id`.
+
 ### Tables that do not exist yet, and the issues that own them
 
 Named here so the gaps are visible rather than discovered:
@@ -1211,7 +1262,7 @@ Named here so the gaps are visible rather than discovered:
 | `documents` | #40 | Receipts, warranties, manuals, photos. Blob storage is S3-compatible per ADR-0002; the row holds the key, never the bytes |
 | `audit_log` | #42 | Access-code reveals (#31), role changes, filed tax years. Append-only, and the one table whose RLS policy needs a `WITH CHECK` that forbids `UPDATE` and `DELETE` outright |
 | `notification_preferences` | #41 | Per membership, not per user — a person may want reminders for one org and not another |
-| `tax_years`, `depreciation_schedules` | #44 | Frozen per-year snapshots, in-service dates, accumulated depreciation, the per-year de minimis threshold and blended rate. The freeze that makes §5's derived allocation safe |
+| `depreciation_schedules`, and the freeze of a filed `tax_years` row | #44 | Frozen per-year snapshots, in-service dates, accumulated depreciation. The freeze that makes §5's derived allocation safe. `tax_years` itself holds the per-year de minimis threshold and blended rate since #144 |
 | `building_dispositions` | #43 | Sale date, sale price, selling costs, recapture inputs |
 
 ---
@@ -1233,6 +1284,7 @@ references that are informational.** A `set null` that would lose a fact is a `r
 | **Contact** | `archived_at`, not a delete. Tasks and utilities keep pointing at it. A true delete is available only when nothing references it — `building_utilities_contact` is `restrict`, which enforces that (§3) — and `set null` on `tasks.assignee_contact_id` is the fallback so a task is never lost with its vendor. Nothing in v0 offers one, so the scoped role holds no `delete` on `contacts` until something does; its tags go with it when it is deleted (`cascade`) |
 | **Transaction** | Hard delete, from the expense modal: a row entered twice or against the wrong building is a typo, not history. Nothing yet freezes a year; #44's filed years will, with a restrictive policy of their own. `set null` of `task_id` when its task goes (Undo on a completion) and of `contact_id` when its contact does, so an expense is never lost with either; `restrict` from its building, unit and capital item |
 | **Planned work** | Not deleted. A plan given up on is `dropped` and one carried out is `done`, and both keep their row, so the scoped role holds no `delete` on `planned_work`. The one delete is the `cascade` from an item the add-equipment Undo takes back. `set null` of `transaction_id` when its expense goes; `restrict` from its building and unit |
+| **Tax year** | Not deleted. A year with no row reads as the defaults, so setting them back does what a delete would, and the scoped role holds no `delete` on `tax_years` |
 | **Rent period** | Not deleted. A month opened for a unit that stood empty is marked `vacant` (§4), which records it, where a deleted row would be reopened by the next view — so the scoped role holds no `delete` on `rent_periods` until something needs one. Once money is recorded it is edited, and once its year is filed (#44) it is immutable |
 | **Access code** | Hard delete, immediately. There is no value in retaining ciphertext for a lock that has been rekeyed, and #42 records that a code existed and was removed |
 | **Reference data** (`capital_item_types`, `trade_tags`, `schedule_e_categories`) | Not deleted. `restrict` from every referencing row, so an entry in use cannot be removed. Retiring one means keeping the row and hiding it from new choices, which needs a column neither table has; it is added with the first entry that has to go |
@@ -1316,6 +1368,8 @@ create index planned_work_org_building_year on planned_work (org_id, building_id
 -- The plan an expense carried out, which the expense's delete has to null.
 create index planned_work_org_transaction on planned_work (org_id, transaction_id)
   where transaction_id is not null;
+
+-- Tax years (#144): `tax_years_org_year`, the unique key in §6, is the one index.
 ```
 
 ### On `(org_id, building_id, unit_id)` versus a partial index

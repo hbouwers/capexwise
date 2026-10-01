@@ -19,7 +19,7 @@ const BUILDING = 27_500_000;
 
 function schedule(
   basis: number,
-  recovery: "residential" | "five-year",
+  recovery: "residential" | "five_year",
   placed: { year: number; month: number },
 ): number[] {
   const years: number[] = [];
@@ -99,7 +99,7 @@ describe("five-year, half-year convention", () => {
   it("takes 10%, then 20% four times, then 10% (Table A-8, straight line)", () => {
     const dryer = 90_000;
 
-    expect(schedule(dryer, "five-year", { year: 2026, month: 3 })).toEqual([
+    expect(schedule(dryer, "five_year", { year: 2026, month: 3 })).toEqual([
       9_000, 18_000, 18_000, 18_000, 18_000, 9_000,
     ]);
   });
@@ -107,25 +107,25 @@ describe("five-year, half-year convention", () => {
   it("gives the same first year whichever month it went in", () => {
     const january = depreciationIn(
       90_000,
-      "five-year",
+      "five_year",
       { year: 2026, month: 1 },
       2026,
     );
     const december = depreciationIn(
       90_000,
-      "five-year",
+      "five_year",
       { year: 2026, month: 12 },
       2026,
     );
 
     expect(january).toBe(december);
     expect(
-      halfMonthsInServiceThrough("five-year", { year: 2026, month: 12 }, 2026),
+      halfMonthsInServiceThrough("five_year", { year: 2026, month: 12 }, 2026),
     ).toBe(12);
   });
 
   it("sums to its basis exactly", () => {
-    const years = schedule(123_457, "five-year", { year: 2026, month: 5 });
+    const years = schedule(123_457, "five_year", { year: 2026, month: 5 });
 
     expect(years.reduce((a, b) => a + b, 0)).toBe(123_457);
   });

@@ -319,7 +319,7 @@ describe("this year's plans", () => {
   it("recovers an appliance over five years, not 27.5", () => {
     const s = run({
       plans: [
-        plan({ label: "Range", costCents: 300_000, recovery: "five-year" }),
+        plan({ label: "Range", costCents: 300_000, recovery: "five_year" }),
       ],
     });
 
@@ -567,7 +567,7 @@ describe("improvements from the record", () => {
           installYear: 2020,
           installDate: "2020-06-01",
           actualCostCents: 300_000,
-          recovery: "five-year",
+          recovery: "five_year",
         }),
       ],
     });

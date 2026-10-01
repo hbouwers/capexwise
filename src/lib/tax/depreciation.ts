@@ -23,7 +23,7 @@
 import { type Cents } from "@/lib/money";
 
 /** Which of the two schedules an asset is recovered over. */
-export type RecoveryClass = "residential" | "five-year";
+export type RecoveryClass = "residential" | "five_year";
 
 /**
  * How a class recovers: over how many months, and by which convention the
@@ -43,7 +43,7 @@ export type Recovery = {
 
 export const RECOVERY: Readonly<Record<RecoveryClass, Recovery>> = {
   residential: { months: 330, convention: "mid-month" },
-  "five-year": { months: 60, convention: "half-year" },
+  five_year: { months: 60, convention: "half-year" },
 };
 
 /**

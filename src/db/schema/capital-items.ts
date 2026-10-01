@@ -50,6 +50,14 @@ export const CAPITAL_ITEM_GROUPS = [
 export const CAPITAL_ITEM_SCOPES = ["building", "unit"] as const;
 
 /**
+ * Which depreciation schedule an item recovers over (#144): `residential` is
+ * 27.5 years mid-month, a building's structural components; `five_year` is
+ * appliances and carpet, 5 years half-year. `RecoveryClass` in
+ * `src/lib/tax/depreciation.ts` spells the same two values.
+ */
+export const RECOVERY_CLASSES = ["residential", "five_year"] as const;
+
+/**
  * The catalogue, as reference data: one list every org reads and only a
  * migration writes, like `trade_tags` (§6). No `org_id`, and the isolation
  * test names it as reference data.
@@ -84,6 +92,14 @@ export const capitalItemTypes = pgTable(
     // date, not a timestamp, because it is a claim about the figures and not
     // about the row.
     defaultsUpdatedAt: date("defaults_updated_at").notNull(),
+    // The tax planner's schedule for the type. **Read from here, not copied
+    // onto the item** as the defaults are: it is a classification the law
+    // makes, not an estimate somebody corrects, so a migration that fixes one
+    // should move every item of the type. No default, so a new type has to
+    // say which it is.
+    recoveryClass: text("recovery_class", {
+      enum: RECOVERY_CLASSES,
+    }).notNull(),
     // The catalogue's order, across groups, in steps of ten so a type added
     // later can land between two.
     sortOrder: integer("sort_order").notNull().default(0),
@@ -107,6 +123,10 @@ export const capitalItemTypes = pgTable(
     check(
       "capital_item_types_scope_known",
       sql`${table.defaultScope} IN ('building', 'unit')`,
+    ),
+    check(
+      "capital_item_types_recovery_class_known",
+      sql`${table.recoveryClass} IN ('residential', 'five_year')`,
     ),
     check(
       "capital_item_types_life_positive",

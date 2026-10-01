@@ -35,6 +35,7 @@ import {
   plannedWork,
   rentPeriods,
   tasks,
+  taxYears,
   transactions,
   units,
   users,
@@ -57,6 +58,8 @@ const testKeyring = parseKeyring(TEST_ACCESS_CODE_KEYS);
 type Organization = typeof organizations.$inferSelect;
 type PlannedWork = typeof plannedWork.$inferSelect;
 type PlannedWorkInput = typeof plannedWork.$inferInsert;
+type TaxYear = typeof taxYears.$inferSelect;
+type TaxYearInput = typeof taxYears.$inferInsert;
 type OrganizationInput = typeof organizations.$inferInsert;
 type User = typeof users.$inferSelect;
 type UserInput = typeof users.$inferInsert;
@@ -545,4 +548,20 @@ export async function createPlannedWork(
     .returning();
 
   return firstRow(rows, "planned_work");
+}
+
+/**
+ * An org's settings for 2026, as the table defaults them: the threshold at
+ * $2,500, elected, and no rate. Pass `blendedRateBps` for a year with one.
+ */
+export async function createTaxYear(
+  orgId: string,
+  overrides: Partial<TaxYearInput> = {},
+): Promise<TaxYear> {
+  const rows = await testDb()
+    .insert(taxYears)
+    .values({ orgId, year: 2026, ...overrides })
+    .returning();
+
+  return firstRow(rows, "tax_years");
 }
